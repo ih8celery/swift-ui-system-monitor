@@ -4,7 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 action="${1:-install}"
-label="com.adamu.systembar"
+label="com.ih8celery.systembar"
+# Labels this app shipped under previously; cleaned up on install/uninstall so a
+# rename never leaves a second copy loaded in launchd.
+legacy_labels=("com.adamu.systembar")
 app_dir="${HOME}/Applications"
 app_path="${app_dir}/SystemBar.app"
 executable_path="${app_path}/Contents/MacOS/SystemBar"
@@ -15,12 +18,28 @@ usage() {
   echo "Usage: ./install.sh [install|uninstall|status]"
 }
 
+bootout_label() {
+  launchctl bootout "gui/$(id -u)" "${plist_dir}/${1}.plist" >/dev/null 2>&1 || true
+}
+
 bootout_agent() {
-  launchctl bootout "gui/$(id -u)" "${plist_path}" >/dev/null 2>&1 || true
+  bootout_label "${label}"
+}
+
+remove_legacy_agents() {
+  for legacy in "${legacy_labels[@]}"; do
+    [[ "${legacy}" == "${label}" ]] && continue
+    [[ -f "${plist_dir}/${legacy}.plist" ]] || continue
+
+    bootout_label "${legacy}"
+    rm -f "${plist_dir}/${legacy}.plist"
+    echo "Removed legacy login service: ${legacy}"
+  done
 }
 
 uninstall() {
   bootout_agent
+  remove_legacy_agents
   pkill -x SystemBar >/dev/null 2>&1 || true
   rm -f "${plist_path}"
   rm -rf "${app_path}"
@@ -53,6 +72,7 @@ install() {
 
   mkdir -p "${app_dir}" "${plist_dir}"
   bootout_agent
+  remove_legacy_agents
   pkill -x SystemBar >/dev/null 2>&1 || true
   rm -rf "${app_path}"
   cp -R "./SystemBar.app" "${app_path}"
