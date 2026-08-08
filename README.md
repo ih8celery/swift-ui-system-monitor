@@ -6,6 +6,17 @@ A single menu bar icon for Memory, CPU, Disk, Network, and Power — instead of 
 
 SystemBar replaces a cluttered row of individual menu bar monitors with one icon and a tabbed popover. Tap between tabs to see memory pressure, per-process CPU share, disk usage hogs, network throughput, and battery/power state, all sampled live from macOS kernel APIs.
 
+## The tabs
+
+| Tab | What it shows |
+|---|---|
+| **CPU** | Total load, process count, a 90-second history graph, and the top processes by CPU with their memory |
+| **Memory** | Pressure and its history, the wired/active/inactive/compressed/free breakdown, swap, GPU usage, and top processes by memory |
+| **Disk** | Capacity, free and purgeable space per volume, Time Machine local snapshots, and reclaimable space — caches, DerivedData, Downloads — with a hint on what each is safe to do about |
+| **Network** | Live up/down bandwidth, which processes are talking and where to, latency, and an on-demand speed test |
+| **Power** | Battery and power source, and the sleep assertions keeping your Mac awake with their likely causes |
+| **Dev** | Local dev servers and their listening ports, plus detected toolchains and integrations |
+
 ## Requirements
 
 - **macOS 13 (Ventura) or later** — the menu bar UI is built on SwiftUI's `MenuBarExtra`, which is 13+ only
