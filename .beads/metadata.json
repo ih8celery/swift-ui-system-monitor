@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "swift_ui_system_monitor",
+  "project_id": "b0aadf03-58aa-4d53-b717-7c48a9bea2fd"
+}

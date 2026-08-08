@@ -1,0 +1,14 @@
+# Local Swift build products
+SystemBar
+SystemBar.app/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+
+# macOS
+.DS_Store
+
+# Beads / Dolt files (added by bd init)
+.beads/proxieddb/
