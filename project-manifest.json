@@ -1,0 +1,18 @@
+{
+  "$schema": "../project-manifest.schema.json",
+  "schema_version": 1,
+  "name": "swift-ui-system-monitor",
+  "readme_path": "README.md",
+  "issue_tracking_config": {
+    "type": "beads",
+    "path": ".beads"
+  },
+  "skill_context_path": null,
+  "remote_config": {
+    "type": "github",
+    "organization": "ih8celery",
+    "repo": "swift-ui-system-monitor"
+  },
+  "components": [],
+  "owner": "personal"
+}
