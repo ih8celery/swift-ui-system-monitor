@@ -26,16 +26,27 @@ extension UnifiedMonitor {
             self.diskSnapshot = snapshot
         }
 
-        if sampleDate.timeIntervalSince(lastDiskHogScan) >= MonitorSamplingPlan.diskHogRefreshInterval {
-            scanDiskHogs()
-        }
+        scanDiskHogs()
     }
 
-    /// Measures the candidate paths with a single `du`. Slow enough to deserve its own queue and a manual trigger.
-    func scanDiskHogs() {
-        diskQueue.async { [weak self] in
+    static func isDiskHogScanDue(force: Bool, lastScan: Date, now: Date, interval: TimeInterval) -> Bool {
+        force || now.timeIntervalSince(lastScan) >= interval
+    }
+
+    /// Walks the candidate trees with `du`. Every capacity read calls this; the interval check
+    /// happens on diskHogQueue so the scan's own bookkeeping is never read from another queue.
+    /// The Disk tab's rescan button passes `force: true`.
+    func scanDiskHogs(force: Bool = false) {
+        diskHogQueue.async { [weak self] in
             guard let self else { return }
             guard !self.isScanningDiskHogs else { return }
+            guard Self.isDiskHogScanDue(
+                force: force,
+                lastScan: self.lastDiskHogScan,
+                now: Date(),
+                interval: MonitorSamplingPlan.diskHogRefreshInterval
+            ) else { return }
+
             self.isScanningDiskHogs = true
             self.lastDiskHogScan = Date()
 

@@ -25,6 +25,7 @@ struct SystemBarPerformanceTests {
         testLocalSnapshotParsing()
         testReclaimableTotalIgnoresNestedPaths()
         testDiskHogCandidatePaths()
+        testDiskHogScanDueRule()
         testDiskHogScanKeepsPathsThatFinished()
         testDiskHogScanMeasuresBiggestCandidatesFirst()
         testDiskHogScanStopsAtItsBudget()
@@ -153,6 +154,28 @@ struct SystemBarPerformanceTests {
         DiskHogCandidate(name: "Simulators", path: "Library/Developer/CoreSimulator", hint: ""),
         DiskHogCandidate(name: "Downloads", path: "Downloads", hint: "")
     ]
+
+    /// Every capacity read asks whether a hog scan is due, so the rule that answers has to
+    /// live where the answer can be given without racing the queue that owns the scan.
+    private static func testDiskHogScanDueRule() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        expect(
+            UnifiedMonitor.isDiskHogScanDue(force: false, lastScan: .distantPast, now: now, interval: 600),
+            "a scan that has never run is due"
+        )
+        expect(
+            !UnifiedMonitor.isDiskHogScanDue(force: false, lastScan: now.addingTimeInterval(-599), now: now, interval: 600),
+            "a scan finished seconds ago must not be repeated by the next capacity read"
+        )
+        expect(
+            UnifiedMonitor.isDiskHogScanDue(force: false, lastScan: now.addingTimeInterval(-600), now: now, interval: 600),
+            "a scan is due once the full interval has elapsed"
+        )
+        expect(
+            UnifiedMonitor.isDiskHogScanDue(force: true, lastScan: now, now: now, interval: 600),
+            "the rescan button must override the interval"
+        )
+    }
 
     /// The regression: one `du` covering every candidate tree took longer than its timeout,
     /// and because its stdout was a pipe (so block-buffered), SIGTERM destroyed every

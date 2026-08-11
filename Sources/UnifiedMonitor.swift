@@ -35,6 +35,10 @@ final class UnifiedMonitor: ObservableObject {
     private var diskTimer: DispatchSourceTimer?
     private var fastTimer: DispatchSourceTimer?
     let diskQueue = DispatchQueue(label: "systembar.monitor.disk", qos: .utility)
+    /// The hog scan gets its own queue: it can run for minutes, and sharing diskQueue would
+    /// stall the 30s capacity read behind it — freezing the rest of the Disk tab. It also
+    /// owns `isScanningDiskHogs` and `lastDiskHogScan`, which are touched from nowhere else.
+    let diskHogQueue = DispatchQueue(label: "systembar.monitor.diskhogs", qos: .utility)
     var isCollectingMemory = false
     var isCollectingProcesses = false
     var isCollectingNetwork = false

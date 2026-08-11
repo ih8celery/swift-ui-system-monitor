@@ -59,7 +59,7 @@ struct DiskPanel: View {
                     SectionTitle("Reclaimable Space")
                     Spacer()
                     Button {
-                        monitor.scanDiskHogs()
+                        monitor.scanDiskHogs(force: true)
                     } label: {
                         if monitor.disk.isScanningHogs {
                             ProgressView().controlSize(.small)
