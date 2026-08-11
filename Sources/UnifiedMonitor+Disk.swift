@@ -131,40 +131,91 @@ extension UnifiedMonitor {
     }
 
     static func collectDiskHogs() -> (hogs: [DiskHog], status: String) {
-        let home = NSHomeDirectory()
-        let candidates = DiskHogCandidate.all
-        let byPath = Dictionary(
-            candidates.map { ($0.resolvedPath(homeDirectory: home), $0) },
-            uniquingKeysWith: { first, _ in first }
+        let start = Date()
+        return measureDiskHogs(
+            candidates: DiskHogCandidate.all,
+            homeDirectory: NSHomeDirectory(),
+            budget: MonitorSamplingPlan.diskHogScanBudget,
+            pathExists: { FileManager.default.fileExists(atPath: $0) },
+            elapsed: { Date().timeIntervalSince(start) },
+            measure: { path in
+                // -x keeps du on one filesystem; -k normalises to KiB across macOS versions.
+                runProcess(
+                    path: "/usr/bin/du",
+                    arguments: ["-s", "-k", "-x", path],
+                    timeout: MonitorSamplingPlan.diskHogPathTimeout
+                )
+            }
         )
+    }
 
-        let existing = byPath.keys.filter { FileManager.default.fileExists(atPath: $0) }.sorted()
-        guard !existing.isEmpty else {
+    /// One `du` per tree, in candidate order, until the budget runs out.
+    ///
+    /// A single `du` over every tree was the wrong shape: on a developer's Mac the walk
+    /// outruns any sane timeout, and since `du` writes to a pipe its stdio is block-buffered,
+    /// so terminating it destroys every per-path total it had already computed — the list came
+    /// back empty. Per-path processes flush on exit, so a tree that is too slow or unreadable
+    /// costs only its own row. Candidate order matters because the budget truncates the tail.
+    static func measureDiskHogs(
+        candidates: [DiskHogCandidate],
+        homeDirectory: String,
+        budget: TimeInterval,
+        pathExists: (String) -> Bool,
+        elapsed: () -> TimeInterval,
+        measure: (String) -> CommandOutput
+    ) -> (hogs: [DiskHog], status: String) {
+        var seenPaths = Set<String>()
+        let targets = candidates.compactMap { candidate -> (candidate: DiskHogCandidate, path: String)? in
+            let path = candidate.resolvedPath(homeDirectory: homeDirectory)
+            guard seenPaths.insert(path).inserted, pathExists(path) else { return nil }
+            return (candidate, path)
+        }
+
+        guard !targets.isEmpty else {
             return ([], "No candidate paths present on this Mac")
         }
 
-        // -x keeps du on one filesystem; -k normalises to KiB across macOS versions.
-        let result = runProcess(path: "/usr/bin/du", arguments: ["-s", "-k", "-x"] + existing)
-        guard !result.output.isEmpty else {
-            return ([], result.status == 0 ? "du returned no sizes" : "du failed: needs Full Disk Access?")
-        }
+        var hogs: [DiskHog] = []
+        var timedOut = 0
+        var unreadable = 0
+        var unmeasured = 0
 
-        var hogs: [DiskHog] = parseDiskUsage(result.output).compactMap { measurement in
-            guard let candidate = byPath[measurement.path] else { return nil }
-            return DiskHog(
-                name: candidate.name,
-                path: measurement.path,
-                size: measurement.bytes,
-                hint: candidate.hint
+        for target in targets {
+            guard elapsed() < budget else {
+                unmeasured += 1
+                continue
+            }
+
+            let result = measure(target.path)
+            // `du -s` prints one "<kilobytes>\t<path>" line once the walk finishes; anything
+            // else means this tree has no answer, which says nothing about the other trees.
+            guard let bytes = parseDiskUsage(result.output).first?.bytes else {
+                if result.didTimeout { timedOut += 1 } else { unreadable += 1 }
+                continue
+            }
+
+            hogs.append(
+                DiskHog(name: target.candidate.name, path: target.path, size: bytes, hint: target.candidate.hint)
             )
         }
 
-        hogs.sort { $0.size > $1.size }
-        let skipped = existing.count - hogs.count
-        let status = skipped > 0
-            ? "Measured \(hogs.count) paths, \(skipped) unreadable"
-            : "Measured \(hogs.count) paths"
-        return (hogs, status)
+        let status = diskHogStatus(
+            measured: hogs.count,
+            timedOut: timedOut,
+            unreadable: unreadable,
+            unmeasured: unmeasured
+        )
+        return (hogs.sorted { $0.size > $1.size }, status)
+    }
+
+    /// Names each way a path can be missing from the list, so a partial scan never reads as a
+    /// complete one and a slow tree is never mistaken for a permission problem.
+    static func diskHogStatus(measured: Int, timedOut: Int, unreadable: Int, unmeasured: Int) -> String {
+        var parts = ["Measured \(measured) path\(measured == 1 ? "" : "s")"]
+        if timedOut > 0 { parts.append("\(timedOut) too slow to finish") }
+        if unreadable > 0 { parts.append("\(unreadable) unreadable (needs Full Disk Access?)") }
+        if unmeasured > 0 { parts.append("\(unmeasured) not measured, scan budget spent") }
+        return parts.joined(separator: ", ")
     }
 
     // Reading stdout to EOF and then stderr to EOF deadlocks if the child

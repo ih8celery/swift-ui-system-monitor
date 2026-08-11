@@ -371,6 +371,11 @@ struct MonitorSamplingPlan {
     static let diskRefreshInterval: TimeInterval = 30
     /// `du` walks real directory trees, so it runs far less often than the capacity read it ships with.
     static let diskHogRefreshInterval: TimeInterval = 600
+    /// Per-tree ceiling. Generous, because a cold DerivedData or CoreSimulator walk is slow,
+    /// but bounded so one pathological tree cannot hold the whole scan open.
+    static let diskHogPathTimeout: TimeInterval = 45
+    /// Whole-scan ceiling, kept well under the refresh interval so scans never overlap.
+    static let diskHogScanBudget: TimeInterval = 240
 
     static func jobs(isVisible: Bool, mode: MonitorMode) -> Set<MonitorJob> {
         guard isVisible else { return [] }

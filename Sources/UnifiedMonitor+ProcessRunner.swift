@@ -27,7 +27,7 @@ extension UnifiedMonitor {
         } catch {
             outputPipe.fileHandleForReading.readabilityHandler = nil
             errorPipe.fileHandleForReading.readabilityHandler = nil
-            return CommandOutput(output: "", error: error.localizedDescription, status: -1)
+            return CommandOutput(output: "", error: error.localizedDescription, status: -1, didTimeout: false)
         }
 
         let finishedInTime = exited.wait(timeout: .now() + timeout) == .success
@@ -43,7 +43,8 @@ extension UnifiedMonitor {
         return CommandOutput(
             output: String(data: outputBuffer.snapshot(), encoding: .utf8) ?? "",
             error: String(data: errorBuffer.snapshot(), encoding: .utf8) ?? "",
-            status: status
+            status: status,
+            didTimeout: !finishedInTime
         )
     }
 
@@ -63,6 +64,10 @@ struct CommandOutput {
     let output: String
     let error: String
     let status: Int32
+    /// True only when the wall-clock timeout killed the child. A killed child's stdio
+    /// buffer dies with it, so callers must read an empty `output` as "no answer yet",
+    /// not as "the command answered nothing".
+    let didTimeout: Bool
 }
 
 /// Accumulates bytes delivered from a `FileHandle.readabilityHandler`; macOS

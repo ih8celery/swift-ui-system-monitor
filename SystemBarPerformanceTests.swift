@@ -25,6 +25,10 @@ struct SystemBarPerformanceTests {
         testLocalSnapshotParsing()
         testReclaimableTotalIgnoresNestedPaths()
         testDiskHogCandidatePaths()
+        testDiskHogScanKeepsPathsThatFinished()
+        testDiskHogScanMeasuresBiggestCandidatesFirst()
+        testDiskHogScanStopsAtItsBudget()
+        testDiskHogScanReportsPermissionTroubleSeparately()
         testRunProcessDrainsLargeStderrConcurrently()
         testRunProcessTimesOutHungCommand()
         testCollectorsDoNotLeakHostPortRights()
@@ -63,6 +67,14 @@ struct SystemBarPerformanceTests {
         expect(
             MonitorSamplingPlan.diskHogRefreshInterval > MonitorSamplingPlan.diskRefreshInterval,
             "hog scan should be rarer than the cheap capacity read"
+        )
+        expect(
+            MonitorSamplingPlan.diskHogScanBudget < MonitorSamplingPlan.diskHogRefreshInterval,
+            "a scan must be over before the next one is due, so scans never pile up"
+        )
+        expect(
+            MonitorSamplingPlan.diskHogPathTimeout < MonitorSamplingPlan.diskHogScanBudget,
+            "one slow tree must not be able to spend the whole scan budget"
         )
     }
 
@@ -127,6 +139,126 @@ struct SystemBarPerformanceTests {
 
         let paths = Set(DiskHogCandidate.all.map(\.path))
         expect(paths.count == DiskHogCandidate.all.count, "candidate paths must be unique")
+    }
+
+    /// A `du` that walked a tree to completion prints "<kilobytes>\t<path>".
+    private static func duFinished(_ path: String, kilobytes: UInt64) -> CommandOutput {
+        CommandOutput(output: "\(kilobytes)\t\(path)\n", error: "", status: 0, didTimeout: false)
+    }
+
+    private static let hogHome = "/Users/adam"
+
+    private static let hogCandidates = [
+        DiskHogCandidate(name: "DerivedData", path: "Library/Developer/Xcode/DerivedData", hint: ""),
+        DiskHogCandidate(name: "Simulators", path: "Library/Developer/CoreSimulator", hint: ""),
+        DiskHogCandidate(name: "Downloads", path: "Downloads", hint: "")
+    ]
+
+    /// The regression: one `du` covering every candidate tree took longer than its timeout,
+    /// and because its stdout was a pipe (so block-buffered), SIGTERM destroyed every
+    /// per-path total it had already computed. The whole list came back empty.
+    private static func testDiskHogScanKeepsPathsThatFinished() {
+        let slowPath = "\(hogHome)/Library/Developer/CoreSimulator"
+
+        let result = UnifiedMonitor.measureDiskHogs(
+            candidates: hogCandidates,
+            homeDirectory: hogHome,
+            budget: 100,
+            pathExists: { _ in true },
+            elapsed: { 0 },
+            measure: { path in
+                if path == slowPath {
+                    return CommandOutput(output: "", error: "", status: -1, didTimeout: true)
+                }
+                return duFinished(path, kilobytes: path.hasSuffix("DerivedData") ? 2048 : 1024)
+            }
+        )
+
+        expect(
+            result.hogs.map(\.name) == ["DerivedData", "Downloads"],
+            "a du killed on one tree must not discard the trees that finished, got \(result.hogs.map(\.name))"
+        )
+        expect(result.hogs.first?.size == 2048 * 1024, "du -k reports kilobytes and must scale to bytes")
+        expect(
+            result.status.contains("1 too slow"),
+            "the status should count the path that timed out rather than blaming permissions: \(result.status)"
+        )
+    }
+
+    private static func testDiskHogScanMeasuresBiggestCandidatesFirst() {
+        var measured: [String] = []
+        _ = UnifiedMonitor.measureDiskHogs(
+            candidates: DiskHogCandidate.all,
+            homeDirectory: hogHome,
+            budget: 100,
+            pathExists: { _ in true },
+            elapsed: { 0 },
+            measure: { path in
+                measured.append(path)
+                return duFinished(path, kilobytes: 1)
+            }
+        )
+
+        expect(
+            measured == DiskHogCandidate.all.map { $0.resolvedPath(homeDirectory: hogHome) },
+            "paths must be walked in candidate order so a scan cut short still covers the biggest hogs"
+        )
+    }
+
+    private static func testDiskHogScanStopsAtItsBudget() {
+        var started = 0
+        let result = UnifiedMonitor.measureDiskHogs(
+            candidates: hogCandidates,
+            homeDirectory: hogHome,
+            budget: 10,
+            pathExists: { _ in true },
+            elapsed: { Double(started) * 6 },
+            measure: { path in
+                started += 1
+                return duFinished(path, kilobytes: 1)
+            }
+        )
+
+        expect(started == 2, "no new path should be started once the scan budget is spent, started \(started)")
+        expect(result.hogs.count == 2, "paths measured before the budget ran out must still be reported")
+        expect(
+            result.status.contains("1 not measured"),
+            "a scan cut short should say what it never reached: \(result.status)"
+        )
+    }
+
+    private static func testDiskHogScanReportsPermissionTroubleSeparately() {
+        let denied = UnifiedMonitor.measureDiskHogs(
+            candidates: hogCandidates,
+            homeDirectory: hogHome,
+            budget: 100,
+            pathExists: { _ in true },
+            elapsed: { 0 },
+            measure: { path in
+                CommandOutput(output: "", error: "du: \(path): Operation not permitted", status: 1, didTimeout: false)
+            }
+        )
+        expect(denied.hogs.isEmpty, "a path du cannot read produces no row")
+        expect(
+            denied.status.contains("Full Disk Access"),
+            "an unreadable path should point at the permission that would fix it: \(denied.status)"
+        )
+
+        let nothingInstalled = UnifiedMonitor.measureDiskHogs(
+            candidates: hogCandidates,
+            homeDirectory: hogHome,
+            budget: 100,
+            pathExists: { _ in false },
+            elapsed: { 0 },
+            measure: { _ in
+                expect(false, "a path that does not exist must never be handed to du")
+                return duFinished("/nope", kilobytes: 0)
+            }
+        )
+        expect(
+            nothingInstalled.status == "No candidate paths present on this Mac",
+            "a Mac with none of the candidate directories should say so plainly"
+        )
     }
 
     private static func testBoundedHistory() {
@@ -305,6 +437,10 @@ struct SystemBarPerformanceTests {
         let elapsed = Date().timeIntervalSince(start)
         expect(elapsed < 5, "a hung command should be terminated near the timeout, not run to completion")
         expect(result.status != 0, "a timed-out command should not report a clean exit status")
+        expect(result.didTimeout, "a terminated command should be distinguishable from one that failed on its own")
+
+        let clean = UnifiedMonitor.runProcess(path: "/bin/echo", arguments: ["hi"], timeout: 5)
+        expect(!clean.didTimeout, "a command that exits on its own must not be reported as timed out")
     }
 
     private static func testCollectorsDoNotLeakHostPortRights() {
