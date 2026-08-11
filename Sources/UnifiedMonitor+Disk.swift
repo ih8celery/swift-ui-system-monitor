@@ -55,7 +55,11 @@ extension UnifiedMonitor {
                 self.diskSnapshot.hogStatus = "Measuring reclaimable paths"
             }
 
-            let result = Self.collectDiskHogs()
+            // A full scan can run for minutes, so each tree lands in the list as it finishes
+            // rather than leaving the panel empty until the last one is done.
+            let result = Self.collectDiskHogs { measuredSoFar in
+                DispatchQueue.main.async { self.diskSnapshot.hogs = measuredSoFar }
+            }
             self.isScanningDiskHogs = false
 
             DispatchQueue.main.async {
@@ -141,7 +145,7 @@ extension UnifiedMonitor {
         }
     }
 
-    static func collectDiskHogs() -> (hogs: [DiskHog], status: String) {
+    static func collectDiskHogs(onProgress: ([DiskHog]) -> Void = { _ in }) -> (hogs: [DiskHog], status: String) {
         let start = Date()
         return measureDiskHogs(
             candidates: DiskHogCandidate.all,
@@ -156,7 +160,8 @@ extension UnifiedMonitor {
                     arguments: ["-s", "-k", "-x", path],
                     timeout: MonitorSamplingPlan.diskHogPathTimeout
                 )
-            }
+            },
+            onProgress: onProgress
         )
     }
 
@@ -173,7 +178,8 @@ extension UnifiedMonitor {
         budget: TimeInterval,
         pathExists: (String) -> Bool,
         elapsed: () -> TimeInterval,
-        measure: (String) -> CommandOutput
+        measure: (String) -> CommandOutput,
+        onProgress: ([DiskHog]) -> Void = { _ in }
     ) -> (hogs: [DiskHog], status: String) {
         var seenPaths = Set<String>()
         let targets = candidates.compactMap { candidate -> (candidate: DiskHogCandidate, path: String)? in
@@ -208,6 +214,8 @@ extension UnifiedMonitor {
             hogs.append(
                 DiskHog(name: target.candidate.name, path: target.path, size: bytes, hint: target.candidate.hint)
             )
+            hogs.sort { $0.size > $1.size }
+            onProgress(hogs)
         }
 
         let status = diskHogStatus(
@@ -216,7 +224,7 @@ extension UnifiedMonitor {
             unreadable: unreadable,
             unmeasured: unmeasured
         )
-        return (hogs.sorted { $0.size > $1.size }, status)
+        return (hogs, status)
     }
 
     /// Names each way a path can be missing from the list, so a partial scan never reads as a

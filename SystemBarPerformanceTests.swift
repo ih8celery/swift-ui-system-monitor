@@ -28,6 +28,7 @@ struct SystemBarPerformanceTests {
         testDiskHogScanDueRule()
         testDiskHogScanKeepsPathsThatFinished()
         testDiskHogScanMeasuresBiggestCandidatesFirst()
+        testDiskHogScanPublishesRowsAsTheyFinish()
         testDiskHogScanStopsAtItsBudget()
         testDiskHogScanReportsPermissionTroubleSeparately()
         testRunProcessDrainsLargeStderrConcurrently()
@@ -225,6 +226,36 @@ struct SystemBarPerformanceTests {
         expect(
             measured == DiskHogCandidate.all.map { $0.resolvedPath(homeDirectory: hogHome) },
             "paths must be walked in candidate order so a scan cut short still covers the biggest hogs"
+        )
+    }
+
+    /// A full scan can take minutes, and an empty panel for minutes is the same complaint as
+    /// an empty panel forever. Each tree that finishes goes to the list right away.
+    private static func testDiskHogScanPublishesRowsAsTheyFinish() {
+        var updates: [[String]] = []
+
+        let result = UnifiedMonitor.measureDiskHogs(
+            candidates: hogCandidates,
+            homeDirectory: hogHome,
+            budget: 100,
+            pathExists: { _ in true },
+            elapsed: { 0 },
+            measure: { path in
+                if path.hasSuffix("CoreSimulator") {
+                    return CommandOutput(output: "", error: "", status: -1, didTimeout: true)
+                }
+                return duFinished(path, kilobytes: path.hasSuffix("DerivedData") ? 1 : 2)
+            },
+            onProgress: { updates.append($0.map(\.name)) }
+        )
+
+        expect(
+            updates == [["DerivedData"], ["Downloads", "DerivedData"]],
+            "every finished tree should reach the list mid-scan, always biggest first: \(updates)"
+        )
+        expect(
+            result.hogs.map(\.name) == ["Downloads", "DerivedData"],
+            "reporting progress must not change what the finished scan returns"
         )
     }
 
