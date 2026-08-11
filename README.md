@@ -72,12 +72,12 @@ Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU
 | `/usr/bin/nettop` | Per-process network throughput | Every 30s |
 | `/usr/sbin/lsof` | Active TCP connections; listening ports for the Dev tab | Every 30–60s |
 | `/usr/bin/tmutil` | Count of Time Machine local snapshots | Every 30s |
-| `/usr/bin/du` | Sizes of known cache/junk directories for the Disk tab | Every 10 min, or on demand |
+| `/usr/bin/du` | Sizes of known cache/junk directories for the Disk tab | One `du` per directory, every 10 min or on demand |
 | `/usr/bin/networkQuality` | Speed test | **Only when you press the button** |
 
 Two things worth calling out:
 
-- **The disk scan reads directory sizes only.** It measures a fixed list of well-known space hogs (Xcode DerivedData, `~/Library/Caches`, `~/Downloads`, `~/.Trash`, npm/Cargo/Gradle/Maven/Go caches, and similar). It reads sizes, never file contents, and it never deletes anything — the hints in the UI are suggestions for you to act on yourself. Because `~/Downloads` is on the list, macOS may ask for Files and Folders permission the first time.
+- **The disk scan reads directory sizes only.** It measures a fixed list of well-known space hogs (Xcode DerivedData, `~/Library/Caches`, `~/Downloads`, `~/.Trash`, npm/Cargo/Gradle/Maven/Go caches, and similar). It reads sizes, never file contents, and it never deletes anything — the hints in the UI are suggestions for you to act on yourself. Because `~/Downloads` is on the list, macOS may ask for Files and Folders permission the first time. Each directory is measured by its own `du`, capped at 45s, with the whole scan capped at 4 minutes — so one huge or unreadable tree costs only its own row, and rows appear in the list as they finish. The status line under the list says how many were measured and what happened to the rest.
 - **The speed test is the only thing that leaves your machine.** Pressing it runs Apple's built-in `networkQuality`, which measures throughput against Apple's servers (`mensura.cdn-apple.com`). Nothing else here sends data anywhere; every other reading is computed locally and stays on your Mac. There is no telemetry, analytics, or crash reporting.
 
 SystemBar runs entirely as your user. It never asks for `sudo` or elevated privileges, and it launches every subprocess with an explicit executable path and argument array — never through a shell.
