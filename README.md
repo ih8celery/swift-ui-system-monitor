@@ -15,7 +15,7 @@ SystemBar replaces a cluttered row of individual menu bar monitors with one icon
 | **Disk** | Capacity, free and purgeable space per volume, Time Machine local snapshots, and reclaimable space — caches, DerivedData, Downloads — with a hint on what each is safe to do about |
 | **Network** | Live up/down bandwidth, which processes are talking and where to, latency, and an on-demand speed test |
 | **Power** | Battery and power source, and the sleep assertions keeping your Mac awake with their likely causes |
-| **Dev** | Local dev servers and their listening ports, plus detected toolchains and integrations |
+| **Dev** | How much capacity the machine has left, and which projects are using it: one row per project with the kind of expensive work it is running (builds, simulators, test runs, bundlers, automation) and its measured CPU, memory and disk I/O, plus listening ports grouped by the project serving them |
 
 ## Requirements
 
@@ -65,17 +65,19 @@ Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU
 
 | Command | Used for | How often |
 |---|---|---|
-| `/bin/ps` | Process list, per-process CPU and memory | Every 10s |
+| `/bin/ps` | Process list, per-process CPU and memory | Every 10s; also every 60s for the Dev tab, with arguments, to work out which project each process belongs to |
 | `/usr/bin/memory_pressure` | Memory pressure level | Every 30s |
 | `/usr/sbin/ioreg` | GPU (`AGXAccelerator`) info | Every 30s |
-| `/usr/bin/pmset` | Battery state and sleep assertions | Every 60s |
+| `/usr/bin/pmset` | Battery state and sleep assertions; thermal and performance warnings | Every 60s |
 | `/usr/bin/nettop` | Per-process network throughput | Every 30s |
 | `/usr/sbin/lsof` | Active TCP connections; listening ports for the Dev tab | Every 30–60s |
 | `/usr/bin/tmutil` | Count of Time Machine local snapshots | Every 30s |
 | `/usr/bin/du` | Sizes of known cache/junk directories for the Disk tab | One `du` per directory, every 10 min or on demand |
 | `/usr/bin/networkQuality` | Speed test | **Only when you press the button** |
 
-Two things worth calling out:
+Three things worth calling out:
+
+- **The Dev tab guesses which project a process belongs to, and says so when it cannot.** It reads absolute paths out of a process's command line and walks up to the nearest enclosing `.git` directory, treating that repository as the project. Only paths inside your home directory count, and repositories in hidden directories are ignored, so a tool that installs itself into Git — Homebrew does — cannot pose as a project of yours. Per-project CPU, memory and disk I/O come from two `proc_pid_rusage` reads a second apart across only the processes that matched a category. Anything that cannot be measured that way says "not measurable" rather than showing a zero. Xcode compile jobs in particular cannot be measured at all: their processes are replaced between reads and a finished process's CPU time is gone with it, so a build shows as work without figures.
 
 - **The disk scan reads directory sizes only.** It measures a fixed list of well-known space hogs (Xcode DerivedData, `~/Library/Caches`, `~/Downloads`, `~/.Trash`, npm/Cargo/Gradle/Maven/Go caches, and similar). It reads sizes, never file contents, and it never deletes anything — the hints in the UI are suggestions for you to act on yourself. Because `~/Downloads` is on the list, macOS may ask for Files and Folders permission the first time. Each directory is measured by its own `du`, capped at 45s, with the whole scan capped at 4 minutes — so one huge or unreadable tree costs only its own row, and rows appear in the list as they finish. The status line under the list says how many were measured and what happened to the rest.
 - **The speed test is the only thing that leaves your machine.** Pressing it runs Apple's built-in `networkQuality`, which measures throughput against Apple's servers (`mensura.cdn-apple.com`). Nothing else here sends data anywhere; every other reading is computed locally and stays on your Mac. There is no telemetry, analytics, or crash reporting.

@@ -121,6 +121,35 @@ The capacity headline grades on whole-machine CPU, thermal state and counts of
 heat-heavy work, so it stays trustworthy in every case above — including when
 attribution fails completely.
 
+## What Probing Against the Real Machine Changed
+
+The design above was checked against this Mac before the panel was trusted. Three
+decisions changed as a result, and they are recorded here rather than quietly
+absorbed.
+
+- **Attribution is restricted to the home directory, and ignores hidden
+  directories.** Homebrew installs itself into a Git repository, so walking up
+  from `/opt/homebrew/bin/dolt` produced a project called "homebrew". Tools that
+  keep themselves in Git must not be able to pose as work. This does mean a
+  repository on an external volume cannot be inferred; it can still appear by
+  publishing itself under 17o.7.
+- **The busy gate is a measured delta, not `ps` pcpu.** The capacity script gates
+  on 1% pcpu. pcpu is an average over a process's whole life, so a compile job
+  spawned two seconds ago reads near zero while burning a core — the gate would
+  have hidden precisely the work this panel exists to show.
+- **Unmeasurable work still counts as load.** `swift-frontend` PIDs are replaced
+  entirely between one read and the next, and a reaped process's CPU time is gone
+  with it, so Xcode compile jobs cannot be measured at all — at any sample window;
+  250ms was tried and failed too. Grading that work as idle understated stress
+  during a build. It now raises the machine's stress and earns a named row without
+  figures.
+
+It also promoted 17o.6 from a maybe to a requirement: real Swift builds pass
+**relative** source paths, so there is no absolute path to walk up from and the
+most important category cannot be attributed from arguments at all. The build's
+working directory is the repository, so the `lsof` cwd fallback is what makes
+builds nameable.
+
 ## Expected Outcomes
 
 - One row per project, naming the categories of expensive work it is running
