@@ -1,12 +1,5 @@
 import Foundation
 
-private func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
-    if !condition() {
-        fputs("FAIL: \(message)\n", stderr)
-        exit(1)
-    }
-}
-
 @main
 struct SystemBarPerformanceTests {
     static func main() {
@@ -50,6 +43,7 @@ struct SystemBarPerformanceTests {
         testSampleHealthFromIsOK()
         testBuildDeveloperSnapshotCarriesHealth()
         testDeveloperProcessGroupingPicksDominantRow()
+        SystemBarCapacityTests.runAll()
         print("SystemBarPerformanceTests passed")
     }
 

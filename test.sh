@@ -10,6 +10,8 @@ swiftc \
   -framework AppKit \
   -o /tmp/SystemBarPerformanceTests \
   $(find Sources -name '*.swift' | sort) \
+  TestSupport.swift \
+  SystemBarCapacityTests.swift \
   SystemBarPerformanceTests.swift
 
 /tmp/SystemBarPerformanceTests
