@@ -261,7 +261,9 @@ struct ProcessDetailRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("PID \(detail.pid)")
+                // String(pid) rather than the Int32: SwiftUI Text groups integers by locale, which
+                // renders pid 3390 as "3,390".
+                Text("PID \(String(detail.pid))")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 Spacer()
                 Text(percentString(detail.cpuPercent) + " CPU")

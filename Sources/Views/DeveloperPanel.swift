@@ -207,7 +207,9 @@ struct DeveloperPortRow: View {
                 Text(port.port)
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
             }
-            Text("\(port.localAddress) - pid \(port.pid)")
+            // String(pid) rather than interpolating the Int: SwiftUI Text applies locale grouping to
+            // integers, which turns pid 3390 into "3,390".
+            Text("\(port.localAddress) - pid \(String(port.pid))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
