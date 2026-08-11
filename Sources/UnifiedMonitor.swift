@@ -8,7 +8,7 @@ final class UnifiedMonitor: ObservableObject {
     @Published var processSummary = ProcessSummary()
     @Published var networkSummary = NetworkSummary()
     @Published var powerSnapshot = PowerSnapshot()
-    @Published var developerSnapshot = DeveloperSnapshot()
+    @Published var capacitySnapshot = CapacitySnapshot()
     @Published var diskSnapshot = DiskSnapshot()
     @Published var isSpeedTestRunning = false
     @Published var speedTestStatus = "Ready"
@@ -43,7 +43,7 @@ final class UnifiedMonitor: ObservableObject {
     var isCollectingProcesses = false
     var isCollectingNetwork = false
     var isCollectingPower = false
-    var isCollectingDeveloper = false
+    var isCollectingCapacity = false
     var isCollectingDisk = false
     var isScanningDiskHogs = false
     var lastDiskHogScan = Date.distantPast
@@ -82,7 +82,7 @@ final class UnifiedMonitor: ObservableObject {
     var networkStatus: String { networkSummary.status }
     var networkHealth: SampleHealth { networkSummary.health }
     var power: PowerSnapshot { powerSnapshot }
-    var developer: DeveloperSnapshot { developerSnapshot }
+    var capacity: CapacitySnapshot { capacitySnapshot }
     var disk: DiskSnapshot { diskSnapshot }
 
     init() {
@@ -154,12 +154,12 @@ final class UnifiedMonitor: ObservableObject {
 
         let developerTimer = DispatchSource.makeTimerSource(queue: slowQueue)
         developerTimer.schedule(
-            deadline: .now() + MonitorSamplingPlan.developerRefreshInterval,
-            repeating: MonitorSamplingPlan.developerRefreshInterval,
+            deadline: .now() + MonitorSamplingPlan.capacityRefreshInterval,
+            repeating: MonitorSamplingPlan.capacityRefreshInterval,
             leeway: .seconds(10)
         )
         developerTimer.setEventHandler { [weak self] in
-            self?.collectDeveloperIfVisible()
+            self?.collectCapacityIfVisible()
         }
         developerTimer.resume()
         self.developerTimer = developerTimer
@@ -225,8 +225,8 @@ final class UnifiedMonitor: ObservableObject {
         if jobs.contains(.power) {
             powerQueue.async { [weak self] in self?.collectPower() }
         }
-        if jobs.contains(.developer) {
-            developerQueue.async { [weak self] in self?.collectDeveloper() }
+        if jobs.contains(.capacity) {
+            developerQueue.async { [weak self] in self?.collectCapacity() }
         }
         if jobs.contains(.disk) {
             diskQueue.async { [weak self] in self?.collectDisk() }
@@ -253,9 +253,9 @@ final class UnifiedMonitor: ObservableObject {
         powerQueue.async { [weak self] in self?.collectPower() }
     }
 
-    private func collectDeveloperIfVisible() {
-        guard visibleJobs.contains(.developer) else { return }
-        developerQueue.async { [weak self] in self?.collectDeveloper() }
+    private func collectCapacityIfVisible() {
+        guard visibleJobs.contains(.capacity) else { return }
+        developerQueue.async { [weak self] in self?.collectCapacity() }
     }
 
     private func collectDiskIfVisible() {

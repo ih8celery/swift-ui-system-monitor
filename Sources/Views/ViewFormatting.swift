@@ -51,6 +51,15 @@ func swapStatText(used: UInt64, total: UInt64) -> String {
     "\(byteString(used)) / \(byteString(total))"
 }
 
+/// Compact "how long ago" for status lines: seconds, then minutes, then hours.
+func relativeTimeString(_ date: Date, now: Date = Date()) -> String {
+    let seconds = max(0, Int(now.timeIntervalSince(date)))
+    if seconds < 60 { return "\(seconds)s" }
+    let minutes = seconds / 60
+    if minutes < 60 { return "\(minutes)m" }
+    return "\(minutes / 60)h"
+}
+
 func updatedAgoText(lastUpdated: Date?, now: Date) -> String {
     guard let lastUpdated else { return "Waiting for sample" }
     return "Updated \(max(0, Int(now.timeIntervalSince(lastUpdated))))s ago"

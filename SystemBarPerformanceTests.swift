@@ -41,8 +41,6 @@ struct SystemBarPerformanceTests {
         testParseNetworkQualitySummary()
         testParseSleepAssertions()
         testSampleHealthFromIsOK()
-        testBuildDeveloperSnapshotCarriesHealth()
-        testDeveloperProcessGroupingPicksDominantRow()
         SystemBarCapacityTests.runAll()
         print("SystemBarPerformanceTests passed")
     }
@@ -51,14 +49,18 @@ struct SystemBarPerformanceTests {
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .network).isEmpty, "hidden window should not run heavy samplers")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .network) == [.network], "network mode should only run network heavy sampler")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .power) == [.power, .processes], "power mode should refresh power and process evidence")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .developer) == [.developer, .processes, .network], "developer mode should connect ports to process and network evidence")
+        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .developer) == [.capacity], "the Dev tab runs only the capacity sampler, which does its own ps and lsof")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .memory) == [.memory, .processes], "memory mode should refresh memory and processes")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .cpu) == [.processes], "cpu mode should refresh processes only")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .disk) == [.disk], "disk mode should only run the disk sampler")
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .disk).isEmpty, "hidden window should not scan disks")
         expect(MonitorSamplingPlan.networkRefreshInterval >= 30, "network refresh interval should protect idle CPU")
         expect(MonitorSamplingPlan.powerRefreshInterval >= 60, "power collector should be conservative")
-        expect(MonitorSamplingPlan.developerRefreshInterval >= 60, "developer collector should be conservative")
+        expect(MonitorSamplingPlan.capacityRefreshInterval >= 60, "capacity collector should be conservative")
+        expect(
+            MonitorSamplingPlan.capacitySampleWindow < MonitorSamplingPlan.capacityRefreshInterval,
+            "the rusage sample window must fit inside the refresh interval so ticks never overlap"
+        )
         expect(MonitorSamplingPlan.diskHogRefreshInterval >= 300, "du walks real trees and must stay rare")
         expect(
             MonitorSamplingPlan.diskHogRefreshInterval > MonitorSamplingPlan.diskRefreshInterval,
@@ -732,48 +734,5 @@ struct SystemBarPerformanceTests {
     private static func testSampleHealthFromIsOK() {
         expect(SampleHealth(isOK: true) == .ok, "a healthy sample should map to .ok")
         expect(SampleHealth(isOK: false) == .degraded, "an unhealthy sample should map to .degraded")
-    }
-
-    private static func testBuildDeveloperSnapshotCarriesHealth() {
-        let healthySnapshot = UnifiedMonitor.buildDeveloperSnapshot(
-            ports: [],
-            processSummary: ProcessSummary(),
-            networkSummary: NetworkSummary(),
-            status: "Developer sample OK",
-            health: .ok,
-            now: Date()
-        )
-        expect(healthySnapshot.health == .ok, "a snapshot built with .ok health should report .ok, not re-derive it from the status string")
-
-        let degradedSnapshot = UnifiedMonitor.buildDeveloperSnapshot(
-            ports: [],
-            processSummary: ProcessSummary(),
-            networkSummary: NetworkSummary(),
-            status: "lsof listen unavailable",
-            health: .degraded,
-            now: Date()
-        )
-        expect(degradedSnapshot.health == .degraded, "a snapshot built with .degraded health should report .degraded, not re-derive it from the status string")
-    }
-
-    /// Characterization test locking in buildDeveloperSnapshot's existing same-name grouping
-    /// behavior (dominant row on either cpu or physical wins) before its force-unwrap is
-    /// rewritten as an if-let — it should pass unchanged before and after that refactor.
-    private static func testDeveloperProcessGroupingPicksDominantRow() {
-        let lowCPUHighMemory = ProcessSnapshot(name: "node", count: 1, physical: 100, virtualSize: 0, cpu: 5)
-        let highCPULowMemory = ProcessSnapshot(name: "node", count: 1, physical: 50, virtualSize: 0, cpu: 20)
-        let summary = ProcessSummary(rows: [lowCPUHighMemory, highCPULowMemory], memoryLimit: 10, cpuLimit: 10)
-
-        let snapshot = UnifiedMonitor.buildDeveloperSnapshot(
-            ports: [],
-            processSummary: summary,
-            networkSummary: NetworkSummary(),
-            status: "Developer sample OK",
-            health: .ok,
-            now: Date()
-        )
-
-        expect(snapshot.processes.count == 1, "same-named developer rows should be grouped into a single entry")
-        expect(snapshot.processes.first?.cpu == 20, "the row that dominates on cpu or physical should win the group, with no crash when no prior entry exists")
     }
 }

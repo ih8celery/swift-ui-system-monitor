@@ -47,8 +47,76 @@ struct ProjectWorkRow: Identifiable {
     var displayName: String { project?.displayName ?? "Unattributed" }
 }
 
+/// What two rusage reads established about the expensive work on the machine.
+///
+/// The split matters because Xcode compile jobs cannot be measured at all: `swift-frontend` PIDs are
+/// replaced entirely between one second and the next, and a reaped process's CPU time is gone with
+/// it. That work is real and heat-heavy even though no number can be attached to it, so it counts
+/// toward the machine's grade and shows as a named row without figures — it just never appears as a
+/// fabricated zero.
+struct WorkEvidence {
+    /// Measured, and consuming enough CPU to be worth showing.
+    let busy: [CategorizedProcess]
+    /// Could not be sampled twice: ended mid-read, or rusage refused.
+    let unmeasured: [CategorizedProcess]
+
+    /// Everything believed to be working, measurable or not. This is what the capacity grade counts,
+    /// so a running build raises machine stress even though its CPU share is unknowable.
+    var heatHeavyCount: Int { busy.count + unmeasured.count }
+
+    /// Unmeasured work with no project would produce a row asserting that something expensive is
+    /// happening while carrying no evidence of it, so only named work earns a row.
+    var ledgerProcesses: [CategorizedProcess] {
+        busy + unmeasured.filter { $0.project != nil }
+    }
+
+    /// Counted so the status line can admit what was left out.
+    var unnamedUnmeasuredCount: Int {
+        unmeasured.filter { $0.project == nil }.count
+    }
+}
+
 /// Turns two rusage samples taken a known interval apart into one row per project.
 enum ProjectLoadRollup {
+    /// How much CPU a process must actually have consumed over the interval to count as expensive
+    /// work: one hundredth of a core, the measured equivalent of the capacity script's 1% gate.
+    static let minimumBusyCoreShare: Double = 0.01
+
+    /// Which categorized processes are genuinely working right now.
+    ///
+    /// This cannot use `ps` pcpu the way the capacity script does. pcpu is an average over a
+    /// process's whole life, so a compile job spawned two seconds ago reads near zero while burning
+    /// a full core — exactly the work this panel exists to show. A measured delta has no such blind
+    /// spot.
+    ///
+    /// What the two reads managed to establish about each categorized process.
+    static func evidence(
+        processes: [CategorizedProcess],
+        first: [Int32: RusageSample],
+        second: [Int32: RusageSample],
+        elapsed: TimeInterval
+    ) -> WorkEvidence {
+        guard elapsed > 0 else { return WorkEvidence(busy: [], unmeasured: processes) }
+
+        var busy: [CategorizedProcess] = []
+        var unmeasured: [CategorizedProcess] = []
+
+        for process in processes {
+            guard let before = first[process.pid],
+                  let after = second[process.pid],
+                  after.cpuTimeSeconds >= before.cpuTimeSeconds else {
+                unmeasured.append(process)
+                continue
+            }
+            if (after.cpuTimeSeconds - before.cpuTimeSeconds) / elapsed >= minimumBusyCoreShare {
+                busy.append(process)
+            }
+            // Measured and idle: real evidence that it is costing nothing, so it is simply out.
+        }
+
+        return WorkEvidence(busy: busy, unmeasured: unmeasured)
+    }
+
     static func rows(
         processes: [CategorizedProcess],
         first: [Int32: RusageSample],

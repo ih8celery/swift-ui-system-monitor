@@ -16,6 +16,152 @@ struct SystemBarCapacityTests {
         testProjectRowsReportUnavailableRatherThanZero()
         testProjectRowsOrderHeaviestFirstWithUnattributedLast()
         testCapacityGradeBands()
+        testCategorizedProcessesFromTheProcessTable()
+        testBusyFilterUsesMeasuredCPUNotLifetimeAverage()
+        testUnmeasurableWorkStillCountsAsLoad()
+        testRepositoryWalkUpIgnoresToolInstallations()
+        testRepositoryWalkUpIgnoresHiddenDirectories()
+        testListeningPortsCarryTheirProject()
+        testThermalWarningParsing()
+    }
+
+    /// A booted simulator runs a hundred idle daemons that all match the simulator pattern, and none
+    /// of them is costing anything — but the capacity script's `ps` pcpu gate cannot be reused here,
+    /// because pcpu is a lifetime average: a compile job spawned two seconds ago reads near zero
+    /// while burning a whole core. So the gate is the measured delta instead.
+    private static func testBusyFilterUsesMeasuredCPUNotLifetimeAverage() {
+        let idleDaemon = CategorizedProcess(pid: 500, project: nil, category: .simulator)
+        let freshBuildJob = CategorizedProcess(pid: 501, project: app, category: .nativeBuild)
+        let first = byPID([sample(500, cpu: 400.0), sample(501, cpu: 0.0)])
+        let second = byPID([sample(500, cpu: 400.0), sample(501, cpu: 0.9)])
+
+        let measured = ProjectLoadRollup.evidence(
+            processes: [idleDaemon, freshBuildJob],
+            first: first,
+            second: second,
+            elapsed: 1
+        )
+
+        expect(measured.busy.count == 1, "only processes that actually consumed cpu over the interval are busy")
+        expect(
+            measured.busy.first?.pid == 501,
+            "a just-started compile job burning most of a core must count, however low its lifetime average reads"
+        )
+        expect(measured.unmeasured.isEmpty, "both processes were sampled twice, so nothing is unmeasured")
+        expect(measured.heatHeavyCount == 1, "a measured idle daemon is evidence of no load and must not raise stress")
+    }
+
+    /// Xcode compile jobs are replaced entirely between reads, so their CPU is unknowable. That work
+    /// still exists: it must raise machine stress and show as a named row without figures.
+    private static func testUnmeasurableWorkStillCountsAsLoad() {
+        let buildJob = CategorizedProcess(pid: 501, project: app, category: .nativeBuild)
+        let anonymousDaemon = CategorizedProcess(pid: 500, project: nil, category: .simulator)
+
+        let evidence = ProjectLoadRollup.evidence(
+            processes: [buildJob, anonymousDaemon],
+            first: byPID([sample(500, cpu: 1.0), sample(501, cpu: 1.0)]),
+            second: [:],
+            elapsed: 1
+        )
+
+        expect(evidence.busy.isEmpty, "nothing could be measured, so nothing is busy")
+        expect(
+            evidence.heatHeavyCount == 2,
+            "work that cannot be measured is still work, and must count toward the machine's grade"
+        )
+        expect(
+            evidence.ledgerProcesses.map(\.pid) == [501],
+            "only the named unmeasured process earns a row; an anonymous one would claim work on no evidence"
+        )
+        expect(evidence.unnamedUnmeasuredCount == 1, "what was left out must still be counted so it can be admitted")
+    }
+
+    /// Homebrew, rustup and friends install into Git repositories of their own. A tool the machine
+    /// happens to keep in Git is not a project the user is working on.
+    private static func testRepositoryWalkUpIgnoresToolInstallations() {
+        let found = resolver(repositories: ["/opt/homebrew"])
+            .repositoryRoot(forPath: "/opt/homebrew/bin/dolt")
+        expect(found == nil, "a repository outside the home directory must not become a project")
+    }
+
+    private static func testRepositoryWalkUpIgnoresHiddenDirectories() {
+        let subject = resolver(repositories: ["/Users/tester/.oh-my-zsh", "/Users/tester/code/app"])
+        expect(
+            subject.repositoryRoot(forPath: "/Users/tester/.oh-my-zsh/tools/thing.sh") == nil,
+            "a repository inside a hidden directory is tooling, not a project"
+        )
+        expect(
+            subject.repositoryRoot(forPath: "/Users/tester/code/app/node_modules/.bin/metro") == "/Users/tester/code/app",
+            "a hidden directory below the repository root is fine — only the root's own path matters"
+        )
+    }
+
+    // MARK: - Collector wiring
+
+    /// The whole live pipeline as pure functions: a `ps` table in, categorized and attributed work
+    /// out. Everything that touches the machine stays outside this seam.
+    private static func testCategorizedProcessesFromTheProcessTable() {
+        let table = """
+          412     1   82.5   204800 01:12 /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c /Users/tester/code/app/Sources/Thing.swift
+          413   412    4.0    51200 00:44 /usr/local/bin/node /Users/tester/code/app/node_modules/.bin/metro serve
+          414     1    0.1     2048 04:00 -zsh
+          415     1   12.0    32768 00:20 /usr/local/bin/node /Users/tester/elsewhere/serve.js
+        """
+        let records = UnifiedMonitor.parseProcessTable(table)
+        let work = UnifiedMonitor.categorizedProcesses(
+            in: records,
+            resolver: resolver(repositories: ["/Users/tester/code/app"])
+        )
+
+        expect(work.count == 2, "only processes matching a work category belong in the ledger")
+        expect(!work.contains { $0.pid == 414 }, "a plain shell is not expensive work")
+        expect(!work.contains { $0.pid == 415 }, "a node script outside any category is not expensive work")
+
+        let build = work.first { $0.pid == 412 }
+        expect(build?.category == .nativeBuild, "the compile job should be categorized as native build work")
+        expect(build?.project?.displayName == "app", "the compile job should be attributed by the source path in its args")
+
+        let bundler = work.first { $0.pid == 413 }
+        expect(bundler?.category == .bundler, "metro should be categorized as bundler work")
+        expect(bundler?.project?.displayName == "app", "both jobs from one repo should attribute to the same project")
+    }
+
+    private static func testListeningPortsCarryTheirProject() {
+        let table = """
+          413     1    4.0    51200 00:44 /usr/local/bin/node /Users/tester/code/app/node_modules/.bin/metro serve
+          999     1    0.0     1024 00:10 /usr/sbin/cupsd -l
+        """
+        let records = UnifiedMonitor.parseProcessTable(table)
+        let ports = [
+            DeveloperPort(process: "node", pid: 413, port: "8081", localAddress: "127.0.0.1:8081"),
+            DeveloperPort(process: "cupsd", pid: 999, port: "631", localAddress: "*:631"),
+            DeveloperPort(process: "ghost", pid: 4242, port: "9000", localAddress: "*:9000")
+        ]
+
+        let attributed = UnifiedMonitor.attributedPorts(
+            ports,
+            records: records,
+            resolver: resolver(repositories: ["/Users/tester/code/app"])
+        )
+
+        expect(attributed.count == 3, "attribution must not drop ports it cannot place")
+        expect(attributed[0].projectName == "app", "a port served by a project's process should name that project")
+        expect(attributed[1].projectName == nil, "a system daemon's port belongs to no project")
+        expect(attributed[2].projectName == nil, "a port whose process has already exited cannot be attributed")
+    }
+
+    /// Ported from parseThermal in machine-capacity.js: the negated forms must not read as warnings.
+    private static func testThermalWarningParsing() {
+        let quiet = UnifiedMonitor.parseThermalWarnings("No thermal warning level has been recorded\nNo performance warning level has been recorded")
+        expect(!quiet.hasThermalWarning, "a 'no thermal warning' line must not be read as a warning")
+        expect(!quiet.hasPerformanceWarning, "a 'no performance warning' line must not be read as a warning")
+
+        let hot = UnifiedMonitor.parseThermalWarnings("Thermal warning level has changed to 1")
+        expect(hot.hasThermalWarning, "a recorded thermal warning should be detected")
+        expect(!hot.hasPerformanceWarning, "a thermal warning alone should not imply a performance warning")
+
+        let throttled = UnifiedMonitor.parseThermalWarnings("Performance warning level has changed to 2")
+        expect(throttled.hasPerformanceWarning, "a recorded performance warning should be detected")
     }
 
     // MARK: - Work classification

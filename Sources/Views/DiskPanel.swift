@@ -107,7 +107,7 @@ struct DiskPanel: View {
 
     private func hogFooterText(now: Date) -> String {
         guard let lastScan = monitor.disk.lastHogScan else { return monitor.disk.hogStatus }
-        return "\(monitor.disk.hogStatus) - \(UnifiedMonitor.relativeTimeString(lastScan, now: now)) ago"
+        return "\(monitor.disk.hogStatus) - \(relativeTimeString(lastScan, now: now)) ago"
     }
 }
 

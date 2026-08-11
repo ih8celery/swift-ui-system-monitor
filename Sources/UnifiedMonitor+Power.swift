@@ -96,16 +96,6 @@ extension UnifiedMonitor {
             .map { String($0) }
     }
 
-    private static func thermalStateLabel(_ state: ProcessInfo.ThermalState) -> String {
-        switch state {
-        case .nominal: return "Nominal"
-        case .fair: return "Fair"
-        case .serious: return "Serious"
-        case .critical: return "Critical"
-        @unknown default: return "Unknown"
-        }
-    }
-
     // Every displayed row groups by process name; only the groups that land in
     // that display need a per-PID proc_pid_rusage syscall, so both the
     // snapshot pass and ProcessSummary's slice share these limits.

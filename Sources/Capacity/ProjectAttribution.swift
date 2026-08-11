@@ -43,6 +43,11 @@ final class ProjectResolver {
     }
 
     func repositoryRoot(forPath path: String) -> String? {
+        // Only paths inside the home directory can name a project. Tools install themselves into
+        // Git repositories too — /opt/homebrew is one — and a package manager the machine happens to
+        // keep in Git is not a project anybody is working on. A repository living outside home can
+        // still appear in the ledger by publishing itself.
+        guard path.hasPrefix("\(homeDirectory)/") else { return nil }
         if let cached = repositoryRootByDirectory[path] { return cached }
 
         var visited: [String] = []
@@ -59,7 +64,10 @@ final class ProjectResolver {
                 return remember(nil, for: visited)
             }
             if isRepository(directory) {
-                return remember(directory, for: visited + [directory])
+                // ~/.oh-my-zsh, ~/.nvm and friends are repositories in hidden directories. Same
+                // reasoning as above: that is tooling the machine keeps, not work being done.
+                let root = Self.isHidden(directory, below: homeDirectory) ? nil : directory
+                return remember(root, for: visited + [directory])
             }
             visited.append(directory)
             directory = (directory as NSString).deletingLastPathComponent
@@ -74,6 +82,16 @@ final class ProjectResolver {
             repositoryRootByDirectory[directory] = root
         }
         return root
+    }
+
+    /// Whether any path component between the home directory and this one is hidden. Components
+    /// below a repository root are not considered — `node_modules/.bin` inside a real project is
+    /// perfectly ordinary.
+    private static func isHidden(_ directory: String, below homeDirectory: String) -> Bool {
+        directory
+            .dropFirst(homeDirectory.count)
+            .split(separator: "/")
+            .contains { $0.hasPrefix(".") }
     }
 
     /// Absolute paths mentioned anywhere in the command line, including ones attached to a flag as

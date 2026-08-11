@@ -237,25 +237,10 @@ struct DeveloperPort: Identifiable {
     let pid: Int
     let port: String
     let localAddress: String
-}
-
-struct DeveloperProcess: Identifiable {
-    var id: String { name }
-    let name: String
-    let kind: String
-    let count: Int
-    let cpu: Double
-    let memory: UInt64
-    let networkRate: Double
-}
-
-struct DeveloperSnapshot {
-    var ports: [DeveloperPort] = []
-    var processes: [DeveloperProcess] = []
-    var optionalServices: [String] = []
-    var status = "Waiting for developer sample"
-    var health = SampleHealth.degraded
-    var lastUpdated: Date?
+    /// Filled in once the listening process is traced to a repository. Nil for system daemons and
+    /// for processes that exited between the `lsof` and `ps` reads. Attribution builds new ports
+    /// rather than mutating parsed ones; this is `var` only so the memberwise init can default it.
+    var projectName: String? = nil
 }
 
 struct DiskVolume: Identifiable {
@@ -356,7 +341,7 @@ enum MonitorJob: Hashable {
     case processes
     case network
     case power
-    case developer
+    case capacity
     case disk
 }
 
@@ -366,7 +351,11 @@ struct MonitorSamplingPlan {
     static let processRefreshInterval: TimeInterval = 10
     static let networkRefreshInterval: TimeInterval = 30
     static let powerRefreshInterval: TimeInterval = 60
-    static let developerRefreshInterval: TimeInterval = 60
+    static let capacityRefreshInterval: TimeInterval = 60
+    /// How far apart the two rusage reads sit. Per-project CPU and disk figures are deltas, so this
+    /// is the interval they are measured over — long enough to be meaningful, short enough that the
+    /// Dev collector's own queue is the only thing waiting on it.
+    static let capacitySampleWindow: TimeInterval = 1
     static let pressureRefreshInterval: TimeInterval = 30
     static let diskRefreshInterval: TimeInterval = 30
     /// `du` walks real directory trees, so it runs far less often than the capacity read it ships with.
@@ -384,7 +373,9 @@ struct MonitorSamplingPlan {
         case .power:
             return [.power, .processes]
         case .developer:
-            return [.developer, .processes, .network]
+            // The capacity collector runs its own ps and lsof, so the Dev tab no longer needs the
+            // shared process or network samplers to be running alongside it.
+            return [.capacity]
         case .memory:
             return [.memory, .processes]
         case .disk:
