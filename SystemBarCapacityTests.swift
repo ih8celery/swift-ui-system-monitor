@@ -19,10 +19,103 @@ struct SystemBarCapacityTests {
         testCategorizedProcessesFromTheProcessTable()
         testBusyFilterUsesMeasuredCPUNotLifetimeAverage()
         testUnmeasurableWorkStillCountsAsLoad()
+        testBuildsCountByPresenceAndNeverByTheDriversOwnCPU()
         testRepositoryWalkUpIgnoresToolInstallations()
         testRepositoryWalkUpIgnoresHiddenDirectories()
         testListeningPortsCarryTheirProject()
         testThermalWarningParsing()
+        testWorkingDirectoryParsing()
+        testWorkingDirectoryLookupIsBoundedAndOnlyForUnnamedWork()
+        testWorkingDirectoryAttributionNamesBuilds()
+        testEvidenceReattributionPreservesTheSplit()
+    }
+
+    // MARK: - Working directory fallback
+
+    /// `lsof -a -d cwd -Fpn` emits a `p<pid>` line then an `n<path>` line per process. One call
+    /// covers every pid, so this fallback costs one subprocess per tick rather than one per process.
+    private static func testWorkingDirectoryParsing() {
+        let output = """
+        p864
+        fcwd
+        n/Users/tester/code/app
+        p3782
+        fcwd
+        n/Users/tester/code/other
+        p999
+        fcwd
+        """
+        let directories = UnifiedMonitor.parseWorkingDirectories(output)
+
+        expect(directories.count == 2, "a process with no path line contributes nothing")
+        expect(directories[864] == "/Users/tester/code/app", "the path should attach to the pid above it")
+        expect(directories[3782] == "/Users/tester/code/other", "each process set should be read independently")
+        expect(directories[999] == nil, "a pid whose cwd could not be read must be absent, not empty")
+        expect(UnifiedMonitor.parseWorkingDirectories("garbage\nn/no/pid/yet").isEmpty, "a path before any pid is ignored")
+    }
+
+    private static func testWorkingDirectoryLookupIsBoundedAndOnlyForUnnamedWork() {
+        let processes = [
+            CategorizedProcess(pid: 1, project: app, category: .bundler),
+            CategorizedProcess(pid: 2, project: nil, category: .nativeBuild),
+            CategorizedProcess(pid: 3, project: nil, category: .nativeBuild),
+            CategorizedProcess(pid: 4, project: nil, category: .nativeBuild)
+        ]
+
+        expect(
+            UnifiedMonitor.workingDirectoryLookupPIDs(for: processes, limit: 10) == [2, 3, 4],
+            "only work that is not already named needs a lookup"
+        )
+        expect(
+            UnifiedMonitor.workingDirectoryLookupPIDs(for: processes, limit: 2) == [2, 3],
+            "the lookup list is capped so one pathological tick cannot grow unbounded"
+        )
+    }
+
+    /// The case this fallback exists for: real Swift builds pass relative source paths, so there is
+    /// no absolute path in the arguments to walk up from — but the build's working directory is the
+    /// repository itself.
+    private static func testWorkingDirectoryAttributionNamesBuilds() {
+        let compileJob = CategorizedProcess(pid: 2, project: nil, category: .nativeBuild)
+        let alreadyNamed = CategorizedProcess(pid: 1, project: app, category: .bundler)
+        let strayJob = CategorizedProcess(pid: 3, project: nil, category: .testRunner)
+
+        let attributed = UnifiedMonitor.attributed(
+            [alreadyNamed, compileJob, strayJob],
+            workingDirectories: [
+                1: "/Users/tester/somewhere/else",
+                2: "/Users/tester/code/app",
+                3: "/Users/tester/scratch"
+            ],
+            resolver: resolver(repositories: ["/Users/tester/code/app"])
+        )
+
+        expect(attributed.count == 3, "attribution must not drop or reorder work")
+        expect(
+            attributed[0].project == app,
+            "a process already named from its arguments keeps that answer; the cwd is not second-guessed"
+        )
+        expect(attributed[1].project?.displayName == "app", "a compile job should be named by the repository it runs in")
+        expect(attributed[2].project == nil, "a working directory inside no repository still names nothing")
+    }
+
+    private static func testEvidenceReattributionPreservesTheSplit() {
+        let busyJob = CategorizedProcess(pid: 1, project: nil, category: .bundler)
+        let unmeasuredJob = CategorizedProcess(pid: 2, project: nil, category: .nativeBuild)
+        let evidence = WorkEvidence(busy: [busyJob], unmeasured: [unmeasuredJob])
+
+        let renamed = evidence.reattributed { processes in
+            processes.map { CategorizedProcess(pid: $0.pid, project: app, category: $0.category) }
+        }
+
+        expect(renamed.busy.map(\.pid) == [1], "the busy list keeps its membership through reattribution")
+        expect(renamed.unmeasured.map(\.pid) == [2], "the unmeasured list keeps its membership through reattribution")
+        expect(renamed.busy.first?.project == app, "a newly named busy process carries its project")
+        expect(
+            renamed.ledgerProcesses.count == 2,
+            "an unmeasured process that has just been named now earns a row, which is the whole point"
+        )
+        expect(renamed.unnamedUnmeasuredCount == 0, "nothing is left unnamed once the fallback succeeded")
     }
 
     /// A booted simulator runs a hundred idle daemons that all match the simulator pattern, and none
@@ -31,12 +124,12 @@ struct SystemBarCapacityTests {
     /// while burning a whole core. So the gate is the measured delta instead.
     private static func testBusyFilterUsesMeasuredCPUNotLifetimeAverage() {
         let idleDaemon = CategorizedProcess(pid: 500, project: nil, category: .simulator)
-        let freshBuildJob = CategorizedProcess(pid: 501, project: app, category: .nativeBuild)
+        let freshTestRun = CategorizedProcess(pid: 501, project: app, category: .testRunner)
         let first = byPID([sample(500, cpu: 400.0), sample(501, cpu: 0.0)])
         let second = byPID([sample(500, cpu: 400.0), sample(501, cpu: 0.9)])
 
         let measured = ProjectLoadRollup.evidence(
-            processes: [idleDaemon, freshBuildJob],
+            processes: [idleDaemon, freshTestRun],
             first: first,
             second: second,
             elapsed: 1
@@ -45,7 +138,7 @@ struct SystemBarCapacityTests {
         expect(measured.busy.count == 1, "only processes that actually consumed cpu over the interval are busy")
         expect(
             measured.busy.first?.pid == 501,
-            "a just-started compile job burning most of a core must count, however low its lifetime average reads"
+            "a just-started test run burning most of a core must count, however low its lifetime average reads"
         )
         expect(measured.unmeasured.isEmpty, "both processes were sampled twice, so nothing is unmeasured")
         expect(measured.heatHeavyCount == 1, "a measured idle daemon is evidence of no load and must not raise stress")
@@ -74,6 +167,57 @@ struct SystemBarCapacityTests {
             "only the named unmeasured process earns a row; an anonymous one would claim work on no evidence"
         )
         expect(evidence.unnamedUnmeasuredCount == 1, "what was left out must still be counted so it can be admitted")
+    }
+
+    /// The trap the driver creates: `swift-driver` survives a whole build and samples perfectly
+    /// cleanly, but it spends that time waiting on children, so its own CPU is a fraction of a
+    /// percent. Reporting that as the project's load would understate a busy build enormously while
+    /// looking authoritative. A build counts by being there and reports no figures.
+    private static func testBuildsCountByPresenceAndNeverByTheDriversOwnCPU() {
+        let driver = CategorizedProcess(pid: 600, project: app, category: .nativeBuild)
+        let bundler = CategorizedProcess(pid: 601, project: app, category: .bundler)
+        // Both sample cleanly. The driver used 0.4% of a core; the bundler used a quarter of one.
+        let first = byPID([sample(600, cpu: 10.0, memory: 40_000_000), sample(601, cpu: 5.0, memory: 100_000_000)])
+        let second = byPID([sample(600, cpu: 10.004, memory: 40_000_000), sample(601, cpu: 5.25, memory: 100_000_000)])
+
+        let evidence = ProjectLoadRollup.evidence(
+            processes: [driver, bundler],
+            first: first,
+            second: second,
+            elapsed: 1
+        )
+
+        expect(
+            evidence.busy.map(\.pid) == [601],
+            "a build driver must never be treated as measured work, however cleanly it sampled"
+        )
+        expect(evidence.unmeasured.map(\.pid) == [600], "the driver is evidence a build is running")
+        expect(evidence.heatHeavyCount == 2, "a running build raises machine stress even with no figure attached")
+
+        let rows = ProjectLoadRollup.rows(
+            processes: evidence.ledgerProcesses,
+            first: first,
+            second: second,
+            elapsed: 1,
+            coreCount: 8
+        )
+        expect(rows.count == 1, "the build and the bundler are the same project and share a row")
+        guard case .measured(let cpu, let memory, _, _, let sampled, let total) = rows[0].load else {
+            return expect(false, "the bundler is measurable, so the project's row still carries figures")
+        }
+        expect(cpu == 3.125, "only the bundler's cpu counts: the driver's idle time is not the build's cost")
+        expect(memory == 100_000_000, "the driver contributes no memory figure either")
+        expect(
+            sampled == 1 && total == 2,
+            "the row must disclose that it measured one of the project's two pieces of work"
+        )
+        expect(
+            rows[0].categories == [
+                CategoryCount(category: .nativeBuild, count: 1),
+                CategoryCount(category: .bundler, count: 1)
+            ],
+            "the build is still named as work being done, in declaration order"
+        )
     }
 
     /// Homebrew, rustup and friends install into Git repositories of their own. A tool the machine
@@ -220,6 +364,21 @@ struct SystemBarCapacityTests {
             WorkCategory.classify(path: "/usr/bin/clangd", args: "clangd --background-index") == nil,
             "clangd is a language server, not a compile job, and the ported pattern must not widen"
         )
+
+        // The driver is the only part of a swiftc build that lives long enough to be traced to a
+        // project, so it has to be recognised even though the capacity script's list predates it.
+        expect(
+            WorkCategory.classify(
+                path: "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-driver",
+                args: "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-driver --driver-mode=swiftc -o SystemBar Sources/App.swift"
+            ) == .nativeBuild,
+            "a swiftc build driver should classify as native build work"
+        )
+
+        expect(!WorkCategory.nativeBuild.isMeasurable, "a native build's cost cannot honestly be measured")
+        for category in WorkCategory.allCases where category != .nativeBuild {
+            expect(category.isMeasurable, "\(category) runs in long-lived processes and can be measured")
+        }
     }
 
     private static func testWorkCategoryLabelsMatchTheCapacityScript() {
@@ -316,8 +475,8 @@ struct SystemBarCapacityTests {
 
     private static func testProjectRowsMeasureRealDeltas() {
         let processes = [
-            CategorizedProcess(pid: 100, project: app, category: .nativeBuild),
-            CategorizedProcess(pid: 101, project: app, category: .nativeBuild)
+            CategorizedProcess(pid: 100, project: app, category: .bundler),
+            CategorizedProcess(pid: 101, project: app, category: .bundler)
         ]
         let first = byPID([
             sample(100, cpu: 10.0, memory: 900, read: 1_000),
@@ -346,16 +505,16 @@ struct SystemBarCapacityTests {
         expect(read == 4_000, "disk read rate should come from the byte delta over the interval")
         expect(written == 0, "a project doing no writes should report a zero write rate, which is measured, not missing")
         expect(sampled == 2 && total == 2, "a fully sampled project should say so")
-        expect(rows[0].categories == [CategoryCount(category: .nativeBuild, count: 2)], "both jobs should count under one category")
+        expect(rows[0].categories == [CategoryCount(category: .bundler, count: 2)], "both jobs should count under one category")
     }
 
     /// A build churns through short-lived jobs, so partial sampling is normal. The row reports how
     /// much of the project it actually saw rather than presenting a floor as a total.
     private static func testProjectRowsExcludeUnmeasurablePIDs() {
         let processes = [
-            CategorizedProcess(pid: 100, project: app, category: .nativeBuild),
-            CategorizedProcess(pid: 102, project: app, category: .nativeBuild),
-            CategorizedProcess(pid: 103, project: app, category: .nativeBuild)
+            CategorizedProcess(pid: 100, project: app, category: .testRunner),
+            CategorizedProcess(pid: 102, project: app, category: .testRunner),
+            CategorizedProcess(pid: 103, project: app, category: .testRunner)
         ]
         let first = byPID([
             sample(100, cpu: 10.0, memory: 1_000),

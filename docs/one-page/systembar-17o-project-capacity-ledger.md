@@ -144,11 +144,34 @@ absorbed.
   during a build. It now raises the machine's stress and earns a named row without
   figures.
 
-It also promoted 17o.6 from a maybe to a requirement: real Swift builds pass
+### The working directory fallback, and what it revealed
+
+17o.6 was promoted from a maybe to a requirement and then built, because: real Swift builds pass
 **relative** source paths, so there is no absolute path to walk up from and the
 most important category cannot be attributed from arguments at all. The build's
 working directory is the repository, so the `lsof` cwd fallback is what makes
 builds nameable.
+
+Building it turned up two further corrections:
+
+- **One `lsof` call covers every pid.** `lsof -a -d cwd -Fpn -p <csv>` takes a pid
+  list, so the fallback costs one subprocess per tick rather than one per process.
+  It is asked only about work already believed to be running, and capped at 64.
+- **A build must count by presence, never by its driver's CPU.** The cwd of a
+  churning compile job cannot be read either — it is dead before `lsof` arrives.
+  What survives is the driver, so `swiftc` and `swift-driver` were added to the
+  native-build pattern, extending the capacity script's list, which only knew
+  `xcodebuild`. But the driver spends a build waiting on children at well under 1%
+  CPU, so presenting its rusage as the project's load would understate a busy build
+  by a hundredfold while looking authoritative. Native builds are therefore
+  presence-based: they raise machine stress, they earn a named row, and they carry
+  no figures. A project running a build alongside a measurable bundler shows the
+  bundler's real numbers and discloses that they cover one of its two pieces of
+  work.
+
+Verified live: during a real `./build.sh`, the tab names
+`swift-ui-system-monitor - Xcode build x1 - not measurable` across repeated
+samples, attributed purely by working directory.
 
 ## Expected Outcomes
 

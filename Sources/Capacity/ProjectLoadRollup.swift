@@ -74,6 +74,24 @@ struct WorkEvidence {
     var unnamedUnmeasuredCount: Int {
         unmeasured.filter { $0.project == nil }.count
     }
+
+    /// Everything believed to be working, whether or not it could be measured. This is what a second
+    /// attribution pass should be offered, since naming unmeasurable work is what turns a dropped
+    /// process into a visible row.
+    var allWorking: [CategorizedProcess] { busy + unmeasured }
+
+    /// Runs a second attribution pass over all working processes and returns a new evidence value
+    /// with the busy and unmeasured split intact.
+    func reattributed(_ resolve: ([CategorizedProcess]) -> [CategorizedProcess]) -> WorkEvidence {
+        let updated = Dictionary(
+            resolve(allWorking).map { ($0.pid, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return WorkEvidence(
+            busy: busy.map { updated[$0.pid] ?? $0 },
+            unmeasured: unmeasured.map { updated[$0.pid] ?? $0 }
+        )
+    }
 }
 
 /// Turns two rusage samples taken a known interval apart into one row per project.
@@ -102,6 +120,12 @@ enum ProjectLoadRollup {
         var unmeasured: [CategorizedProcess] = []
 
         for process in processes {
+            // Some work cannot be measured however cleanly it samples: see WorkCategory.isMeasurable.
+            // It counts by being there, and never by the driver's own idle CPU.
+            guard process.category.isMeasurable else {
+                unmeasured.append(process)
+                continue
+            }
             guard let before = first[process.pid],
                   let after = second[process.pid],
                   after.cpuTimeSeconds >= before.cpuTimeSeconds else {
@@ -163,6 +187,10 @@ enum ProjectLoadRollup {
         var sampled = 0
 
         for process in group {
+            // Unmeasurable categories are counted in totalProcesses but contribute no figures, so a
+            // project running a build alongside a bundler shows the bundler's real numbers and says
+            // how much of itself that covers.
+            guard process.category.isMeasurable else { continue }
             guard let before = first[process.pid], let after = second[process.pid] else { continue }
             // These counters only ever climb for a given process, so a decrease means the pid was
             // recycled between samples and the two readings describe different programs.

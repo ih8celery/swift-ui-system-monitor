@@ -24,6 +24,18 @@ enum WorkCategory: String, CaseIterable {
         }
     }
 
+    /// Whether a process in this category can honestly have a CPU figure attached to it.
+    ///
+    /// A native build cannot. The work is done by `swift-frontend` and `clang` jobs that are replaced
+    /// entirely between samples, and a finished process's CPU time is reaped with it. What survives
+    /// long enough to be measured is the driver — `swiftc`, `swift-driver`, `xcodebuild` — which
+    /// mostly sits waiting on its children at well under 1% CPU. Publishing that as the project's
+    /// load would understate a busy build by a hundredfold while looking authoritative, so a build
+    /// counts by its presence and reports no figures at all.
+    var isMeasurable: Bool {
+        self != .nativeBuild
+    }
+
     /// First match wins, in the same order the capacity script tries them. Build, test, bundler
     /// and automation are recognised from the full command line; the simulator is recognised from
     /// the executable path, because its processes carry no telling arguments.
@@ -41,8 +53,14 @@ enum WorkCategory: String, CaseIterable {
 
     /// The trailing `(?:\s|$)` is what keeps `clangd` — a language server, not a compile job — from
     /// being counted as build work.
+    ///
+    /// `swiftc` and `swift-driver` are added to the capacity script's list. That script was written
+    /// for a project whose builds run through `xcodebuild`, which it already matches; a Swift package
+    /// built directly by `swiftc` has the same shape, and the driver is the only part of such a build
+    /// that lives long enough to be traced to a project at all. Both implementations should carry
+    /// this addition.
     private static let nativeBuildPattern = compile(
-        #"(?:^|\s|/)(?:xcodebuild|xcbuild|swift-frontend|clang|ld|metal|codesign)(?:\s|$)"#
+        #"(?:^|\s|/)(?:xcodebuild|xcbuild|swiftc|swift-driver|swift-frontend|clang|ld|metal|codesign)(?:\s|$)"#
     )
     private static let simulatorPattern = compile(
         #"(?:coresimulator|/simulator\.app/|/simctl$|/xctest$|/xctrace$)"#

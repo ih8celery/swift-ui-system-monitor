@@ -44,12 +44,27 @@ extension UnifiedMonitor {
         // Busyness is decided from the measurement, not before it: every categorized process is
         // sampled, then the ones that consumed no CPU over the interval drop out. That also keeps
         // idle simulator daemons from inflating the heat-heavy count behind the capacity grade.
-        let evidence = ProjectLoadRollup.evidence(
+        let measured = ProjectLoadRollup.evidence(
             processes: work,
             first: before,
             second: after,
             elapsed: elapsed
         )
+
+        // Second attribution pass, over only the work believed to be running. A build's arguments
+        // carry relative paths and name nothing, but its working directory is the repository — so
+        // this is what turns anonymous load into a named row. Idle processes never get here, which
+        // is what keeps the ask to a handful of pids.
+        let unnamed = Self.workingDirectoryLookupPIDs(for: measured.allWorking)
+        let skipped = measured.allWorking.filter { $0.project == nil }.count - unnamed.count
+        if skipped > 0 {
+            notes.append("\(skipped) more could not be traced to a project this tick")
+        }
+        let directories = Self.workingDirectories(for: unnamed)
+        let evidence = measured.reattributed {
+            Self.attributed($0, workingDirectories: directories, resolver: resolver)
+        }
+
         if evidence.unnamedUnmeasuredCount > 0 {
             let count = evidence.unnamedUnmeasuredCount
             notes.append("\(count) unnamed process\(count == 1 ? "" : "es") could not be measured")
@@ -128,6 +143,80 @@ extension UnifiedMonitor {
                 port: port.port,
                 localAddress: port.localAddress,
                 projectName: project?.displayName
+            )
+        }
+    }
+
+    /// Ceiling on how many processes one tick will ask `lsof` about. Generous, because the ask is a
+    /// single subprocess covering every pid at once, but bounded so a pathological tick cannot build
+    /// an unbounded argument list.
+    static let maximumWorkingDirectoryLookups = 64
+
+    /// Which processes still need a working directory: the ones their arguments could not name.
+    static func workingDirectoryLookupPIDs(
+        for processes: [CategorizedProcess],
+        limit: Int = maximumWorkingDirectoryLookups
+    ) -> [Int32] {
+        processes
+            .filter { $0.project == nil }
+            .prefix(limit)
+            .map(\.pid)
+    }
+
+    /// One `lsof` call for every pid at once. Real Swift builds pass relative source paths, so their
+    /// arguments name no project — but the build's working directory is the repository itself, which
+    /// is the only way a build becomes a named row rather than anonymous load.
+    static func workingDirectories(for pids: [Int32]) -> [Int32: String] {
+        guard !pids.isEmpty else { return [:] }
+
+        let result = runProcess(
+            path: "/usr/sbin/lsof",
+            arguments: ["-a", "-d", "cwd", "-Fpn", "-p", pids.map(String.init).joined(separator: ",")]
+        )
+        // lsof reports a non-zero status when it could not read some of the pids it was given, and
+        // still prints the ones it could, so the output is worth parsing either way.
+        return parseWorkingDirectories(result.output)
+    }
+
+    /// `lsof -Fpn` field output: a `p<pid>` line opens a process, and a later `n<path>` line gives
+    /// that process's working directory. A process with no readable path contributes nothing.
+    static func parseWorkingDirectories(_ output: String) -> [Int32: String] {
+        var directories: [Int32: String] = [:]
+        var currentPID: Int32?
+
+        for rawLine in output.split(whereSeparator: \.isNewline) {
+            let line = String(rawLine)
+            if line.hasPrefix("p") {
+                currentPID = Int32(line.dropFirst())
+                continue
+            }
+            guard line.hasPrefix("n"), let pid = currentPID else { continue }
+            let path = String(line.dropFirst())
+            if !path.isEmpty { directories[pid] = path }
+        }
+
+        return directories
+    }
+
+    /// Fills in a project for work its arguments could not name, from the directory it runs in. Work
+    /// already named from its arguments keeps that answer — the arguments named a path the process
+    /// is actually operating on, which is a stronger signal than where it happens to have been
+    /// launched from.
+    static func attributed(
+        _ processes: [CategorizedProcess],
+        workingDirectories: [Int32: String],
+        resolver: ProjectResolver
+    ) -> [CategorizedProcess] {
+        processes.map { process in
+            guard process.project == nil,
+                  let directory = workingDirectories[process.pid],
+                  let root = resolver.repositoryRoot(forPath: directory) else {
+                return process
+            }
+            return CategorizedProcess(
+                pid: process.pid,
+                project: ProjectIdentity(rootPath: root),
+                category: process.category
             )
         }
     }

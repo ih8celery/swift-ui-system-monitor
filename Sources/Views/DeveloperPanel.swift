@@ -188,7 +188,11 @@ struct ProjectLoadRow: View {
             }
             return "\(byteString(memory)) - \(io)"
         case .unavailable:
-            return "Load not measurable: these processes ended before they could be sampled twice."
+            // Two different reasons, and the reader deserves the right one.
+            guard row.categories.contains(where: { !$0.category.isMeasurable }) else {
+                return "Load not measurable: these processes ended before they could be sampled twice."
+            }
+            return "A build's compile jobs are replaced faster than they can be measured. The CPU figure at the top covers the whole machine."
         }
     }
 }
