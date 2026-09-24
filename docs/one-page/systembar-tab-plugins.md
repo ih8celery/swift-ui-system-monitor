@@ -237,8 +237,10 @@ the path and the reason. Nothing loaded before a failure is undone.
 (`ok <id> <title> <path>` or `error <path>: <reason>`), and exits without
 opening a window. It exists so the boundary can be tested in CI.
 
-The header keeps its Quit button and gains a Relaunch button, which opens the
-app's own bundle URL and then terminates. That is the whole "restart" story.
+The header keeps its Quit button and gains a Relaunch button. Under the
+login-item LaunchAgent, Relaunch asks launchd to restart the app
+(`launchctl kickstart -k`); otherwise it starts a second copy of the
+executable and quits. That is the whole "restart" story.
 
 ## Build Contract
 
@@ -366,3 +368,6 @@ leaving a working, buildable, tested app:
 - 2026-09-23 — D4: chose A — conversion lands before the Power and Dev work
   continues — Adam.
 - 2026-09-23 — D5 to D8 proposed by Claude, accepted with the design — Adam.
+- 2026-09-24 — Stage 1: the popover opens on the first listed tab (Power in a
+  fresh file, where it was Memory before); Relaunch is launchd-aware. —
+  Claude, recorded for Adam

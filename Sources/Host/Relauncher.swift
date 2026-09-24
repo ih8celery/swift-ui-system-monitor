@@ -37,8 +37,12 @@ enum Relauncher {
         let probe = ProcessRunner.run(path: launchctlPath, arguments: launchctlProbeArguments(uid: uid, label: launchAgentLabel), timeout: probeTimeout)
         if probe.status == 0, pid(fromLaunchctlPrint: probe.output) == getpid() {
             let kick = ProcessRunner.run(path: launchctlPath, arguments: launchctlKickstartArguments(uid: uid, label: launchAgentLabel), timeout: probeTimeout)
-            // launchd kills this process as part of a successful kickstart, so getting here means it did not.
-            log("relaunch: launchctl kickstart returned without restarting us (status \(kick.status), timed out \(kick.didTimeout)): \(kick.error)")
+            // launchd kills this process as part of a successful kickstart, so getting here at all means
+            // it did not, unless status 0 arrived a moment before launchd's kill lands; only a nonzero
+            // status or a timeout is actually a failure worth logging.
+            if kick.status != 0 || kick.didTimeout {
+                log("relaunch: launchctl kickstart returned without restarting us (status \(kick.status), timed out \(kick.didTimeout)): \(kick.error)")
+            }
             return
         }
         if ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == launchAgentLabel {

@@ -56,6 +56,8 @@ struct RootView: View {
                 .pickerStyle(.segmented)
                 .labelStyle(.titleAndIcon)
                 .labelsHidden()
+            } else {
+                Spacer()
             }
 
             Button {

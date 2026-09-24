@@ -21,7 +21,7 @@ The tab bar is being converted to plugins (spec: `docs/one-page/systembar-tab-pl
 
 No SPM — built directly via `swiftc` in `build.sh`. Keep it that way unless there's a concrete reason to add package management overhead.
 
-Subprocesses go through `UnifiedMonitor.runProcess`, which launches an explicit executable path with an argument array and never invokes a shell. Keep it that way — this app reads process and network state, so shell interpolation would be a genuine hazard rather than a style nit.
+Subprocesses go through `ProcessRunner.run` in `Sources/Kit/` (plugins reach it as `HostServices.run`; `UnifiedMonitor.runProcess` is a thin forwarder that goes away with the class), which launches an explicit executable path with an argument array and never invokes a shell. Keep it that way — this app reads process and network state, so shell interpolation would be a genuine hazard rather than a style nit.
 
 Sampling intervals live together in `MonitorSamplingPlan` in `Sources/Models.swift`. The README documents them, so changing one means updating both.
 
