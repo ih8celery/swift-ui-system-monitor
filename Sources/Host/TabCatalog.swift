@@ -34,12 +34,12 @@ struct TabLoadError: Error, CustomStringConvertible {
 /// Turns one config entry into a plugin, or throws. Stage 1 has one source, the built-ins;
 /// Stage 2 adds the one that loads bundles.
 protocol TabSource {
-    func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin
+    @MainActor func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin
 }
 
 enum TabCatalog {
     /// Every enabled entry, in order, as a loaded tab or a failure. Nothing here stops on error.
-    static func build(config: PluginConfig, source: TabSource, host: HostServices) -> [LoadedTab] {
+    @MainActor static func build(config: PluginConfig, source: TabSource, host: HostServices) -> [LoadedTab] {
         var tabs: [LoadedTab] = []
         // Identifier to the location of the entry that first claimed it, so a later duplicate
         // can name which earlier entry it clashes with.
@@ -54,7 +54,7 @@ enum TabCatalog {
         return tabs
     }
 
-    private static func makeTab(
+    @MainActor private static func makeTab(
         for entry: PluginEntry,
         source: TabSource,
         host: HostServices,

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A labeled slice of a SegmentedBar/SegmentedLegend pair — e.g. one memory category or one
 /// disk capacity bucket.
-public struct BarSegment: Identifiable, Hashable {
+public struct BarSegment: Identifiable, Hashable, Sendable {
     public let label: String
     public let value: UInt64
     public let color: Color

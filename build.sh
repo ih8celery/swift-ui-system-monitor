@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 
 swiftc \
   -parse-as-library \
+  -package-name SystemBar \
   -framework SwiftUI \
   -framework AppKit \
   -o SystemBar \

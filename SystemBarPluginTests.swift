@@ -4,6 +4,7 @@ import SwiftUI
 
 /// Tests for the plugin model: the contract a tab conforms to and the runner the host gives it.
 /// Later tasks add the config file and the catalog here.
+@MainActor
 struct SystemBarPluginTests {
     static func runAll() {
         testPluginIsConstructedThroughItsMetatype()
@@ -52,7 +53,7 @@ struct SystemBarPluginTests {
         testRelauncherBuildsLaunchctlArguments()
         testRelauncherReadsThePidFromLaunchctlPrint()
         testFeedHoldsTheLatestValueAndPublishesTheNext()
-        testHostServicesCanBeBuiltByAnyoneAndCarriesTheProcessesFeed()
+        testHostServicesCarriesTheFeedsItWasBuiltWith()
     }
 
     static func makeHost(
@@ -76,18 +77,19 @@ struct SystemBarPluginTests {
         let plugin = type.init(host: makeHost())
         expect(type.identifier == "fake", "the identifier is read from the metatype, not the instance")
         expect(plugin.title == "Fake", "the instance carries its title")
-        _ = MainActor.assumeIsolated { plugin.makeView() }
-        MainActor.assumeIsolated { plugin.visibilityChanged(isVisible: true) }
+        _ = plugin.makeView()
+        plugin.visibilityChanged(isVisible: true)
         // FakeTab does not write visibilityChanged; compiling it proves the default exists.
     }
 
     private static func testHostServicesForwardsToTheRunner() {
-        var seen: (path: String, arguments: [String], environment: [String: String]?, timeout: TimeInterval)?
+        let recorder = Recorder()
         let host = makeHost { path, arguments, environment, timeout in
-            seen = (path, arguments, environment, timeout)
+            recorder.record((path, arguments, environment, timeout))
             return CommandOutput(output: "ran", error: "", status: 0, didTimeout: false)
         }
         let output = host.run(path: "/bin/echo", arguments: ["hi"], environment: ["PATH": "/x"], timeout: 3)
+        let seen = recorder.seen
         expect(output.output == "ran", "run returns what the runner returned")
         expect(seen?.path == "/bin/echo" && seen?.arguments == ["hi"], "path and arguments reach the runner unchanged")
         expect(seen?.environment == ["PATH": "/x"] && seen?.timeout == 3, "environment and timeout reach the runner unchanged")
@@ -525,23 +527,54 @@ struct SystemBarPluginTests {
 
     private static func testFeedHoldsTheLatestValueAndPublishesTheNext() {
         let feed = Feed(initial: 1)
-        var received: [Int] = []
-        let subscription = feed.publisher.sink { received.append($0) }
-        feed.send(2)
-        feed.send(3)
+        var received: [(value: Int, wasOnMain: Bool)] = []
+        let subscription = feed.publisher.sink { value in
+            received.append((value, Thread.isMainThread))
+        }
+        // Both sends come from one async block, so their order is fixed; two separate blocks
+        // could be scheduled onto the global queue in either order.
+        DispatchQueue.global().async {
+            feed.send(2)
+            feed.send(3)
+        }
+        let deadline = Date().addingTimeInterval(2)
+        while received.count < 2 && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        expect(received.map(\.value) == [2, 3], "the publisher delivers every reading after subscription, in order, got \(received.map(\.value))")
+        expect(received.allSatisfy(\.wasOnMain), "every delivery lands on the main thread")
         expect(feed.value == 3, "value is the latest reading, got \(feed.value)")
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-        expect(received == [2, 3], "the publisher delivers every reading after subscription, on main, got \(received)")
         subscription.cancel()
     }
 
-    private static func testHostServicesCanBeBuiltByAnyoneAndCarriesTheProcessesFeed() {
+    private static func testHostServicesCarriesTheFeedsItWasBuiltWith() {
         let feed = Feed(initial: ProcessSummary())
-        let host = HostServices(homeDirectory: "/tmp", processes: feed, fastStats: Feed(initial: FastStatsSnapshot()), runner: ProcessRunner.run, log: { _ in })
+        let host = HostServices(
+            homeDirectory: "/tmp",
+            processes: feed,
+            fastStats: Feed(initial: FastStatsSnapshot()),
+            runner: ProcessRunner.run,
+            log: { _ in }
+        )
         expect(host.processes.value.totalCount == 0, "the feed a host is built with is the one plugins read")
         expect(host.fastStats.value.cpuUsagePercent == 0, "the 1-second feed is there too, starting empty")
         feed.send(ProcessSummary(rows: [ProcessSnapshot(name: "x", count: 1, physical: 1, virtualSize: 1, cpu: 1)], limit: 1))
         expect(host.processes.value.totalCount == 1, "a reading sent to the feed is visible through the host")
+    }
+}
+
+/// Captures what a `@Sendable` runner closure saw. A closure of that shape cannot mutate a
+/// local `var` directly, so the value is stored here, under a lock, instead.
+final class Recorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: (path: String, arguments: [String], environment: [String: String]?, timeout: TimeInterval)?
+
+    func record(_ value: (path: String, arguments: [String], environment: [String: String]?, timeout: TimeInterval)) {
+        lock.withLock { stored = value }
+    }
+
+    var seen: (path: String, arguments: [String], environment: [String: String]?, timeout: TimeInterval)? {
+        lock.withLock { stored }
     }
 }
 
@@ -577,7 +610,7 @@ final class OtherFakeTab: TabPlugin {
 struct MapTabSource: TabSource {
     let types: [String: TabPlugin.Type]
 
-    func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin {
+    @MainActor func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin {
         guard let name = entry.name, let type = types[name] else {
             throw TabLoadError(description: "no tab for \(entry.location)")
         }

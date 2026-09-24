@@ -66,15 +66,15 @@ public struct FastStatsSnapshot: Sendable {
 }
 
 public struct ProcessSummary: Sendable {
-    /// Every displayed row groups by process name; only the groups that land in that display
-    /// need a per-PID rusage syscall, so the snapshot pass and this slice share these limits.
+    /// How many rows `topMemory` and `topCPU` keep. The host samples only this many per list,
+    /// so a plugin sees at most these.
     public static let memoryDisplayLimit = 18
     public static let cpuDisplayLimit = 28
 
-    public var totalCount = 0
-    public var topMemory: [ProcessSnapshot] = []
-    public var topCPU: [ProcessSnapshot] = []
-    public var maxPhysical: UInt64 = 1
+    public private(set) var totalCount = 0
+    public private(set) var topMemory: [ProcessSnapshot] = []
+    public private(set) var topCPU: [ProcessSnapshot] = []
+    public private(set) var maxPhysical: UInt64 = 1
 
     public init() {}
 

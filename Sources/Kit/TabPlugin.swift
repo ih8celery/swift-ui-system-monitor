@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A shared sampler the host runs on a plugin's behalf while that plugin's tab is showing.
 /// Declaring one is what starts it; nothing starts by being read.
-public enum SharedFeed: Hashable {
+public enum SharedFeed: Hashable, Sendable {
     /// The 10-second `ps` summary: top processes by CPU and by memory, and counts.
     case processes
     /// The 1-second CPU and network counters and their histories.
@@ -13,10 +13,11 @@ public enum SharedFeed: Hashable {
 /// One tab. The host creates a plugin once at launch, calls `collect()` on the plugin's own
 /// queue only while its tab is on screen, and embeds `makeView()` in the window.
 ///
-/// Thread rules, fixed for every plugin built against this SDK: `collect()` runs on a queue the
-/// host owns for this plugin, never concurrently with itself; `makeView()` and
-/// `visibilityChanged(isVisible:)` run on the main thread; a plugin that publishes from
-/// `collect()` hops to the main thread first, because the panel observes it from there.
+/// Thread rules, fixed for every plugin built against this SDK: the host constructs every
+/// plugin on the main thread at launch; `collect()` runs on a queue the host owns for this
+/// plugin, never concurrently with itself; `makeView()` and `visibilityChanged(isVisible:)` run
+/// on the main thread; a plugin that publishes from `collect()` hops to the main thread first,
+/// because the panel observes it from there.
 public protocol TabPlugin: AnyObject {
     /// Stable, unique, lowercase. Two loaded plugins sharing one is an error the host shows.
     static var identifier: String { get }
@@ -29,7 +30,7 @@ public protocol TabPlugin: AnyObject {
     /// switching over it needs `@unknown default`.
     var sharedFeeds: Set<SharedFeed> { get }
 
-    init(host: HostServices)
+    @MainActor init(host: HostServices)
     /// This plugin's own queue, never concurrently with itself, only while visible.
     func collect()
     /// Main thread, when the tab is switched to or away from. Default: nothing.

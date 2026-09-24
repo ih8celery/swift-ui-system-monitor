@@ -23,9 +23,14 @@ public final class Feed<Value: Sendable>: @unchecked Sendable {
         subject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
-    /// The host's side: record a reading and tell subscribers. Any thread.
-    public func send(_ value: Value) {
-        lock.withLock { current = value }
-        subject.send(value)
+    /// The host's side: record a reading and tell subscribers. Any thread. Package-only: a
+    /// plugin may read `value` and observe `publisher`, but only the host writes.
+    package func send(_ value: Value) {
+        lock.withLock {
+            current = value
+            // Safe to send from inside the lock: `publisher` always delivers through
+            // `receive(on: .main)`, so no subscriber ever runs while the lock is held.
+            subject.send(value)
+        }
     }
 }

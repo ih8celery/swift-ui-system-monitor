@@ -26,7 +26,7 @@ struct BuiltinTabSource: TabSource {
 
     static let types = Dictionary(uniqueKeysWithValues: builtins.map { ($0.name, $0.type) })
 
-    func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin {
+    @MainActor func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin {
         guard let name = entry.name else {
             throw TabLoadError(description: "\"path\" entries are not supported yet; only the built-in tabs can be listed, by \"name\"")
         }

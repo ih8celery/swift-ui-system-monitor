@@ -1,6 +1,4 @@
-import AppKit
 import Foundation
-import SwiftUI
 
 public func byteString(_ bytes: UInt64) -> String {
     let units = ["B", "KB", "MB", "GB", "TB"]
@@ -29,26 +27,12 @@ public func rateString(_ bytesPerSecond: Double) -> String {
     return String(format: value >= 10 || index == 0 ? "%.0f %@" : "%.1f %@", value, units[index])
 }
 
-public func speedTestRateText(_ megabitsPerSecond: Double?) -> String {
-    guard let megabitsPerSecond else { return "-- Mbps" }
-    return String(format: megabitsPerSecond >= 100 ? "%.0f Mbps" : "%.1f Mbps", max(0, megabitsPerSecond))
-}
-
-public func speedTestLatencyText(_ milliseconds: Double?) -> String {
-    guard let milliseconds else { return "-- ms" }
-    return String(format: milliseconds >= 10 ? "%.0f ms" : "%.1f ms", max(0, milliseconds))
-}
-
 public func percentString(_ value: Double) -> String {
     String(format: "%.1f%%", max(0, value))
 }
 
 public func batteryStatLabel(percent: Int, isCharging: Bool?) -> String {
     isCharging == true ? "\(percent)% Charging" : "\(percent)%"
-}
-
-public func swapStatText(used: UInt64, total: UInt64) -> String {
-    "\(byteString(used)) / \(byteString(total))"
 }
 
 /// Compact "how long ago" for status lines: seconds, then minutes, then hours.
@@ -84,4 +68,3 @@ public func thermalStateLabel(_ state: ProcessInfo.ThermalState) -> String {
     @unknown default: return "Unknown"
     }
 }
-

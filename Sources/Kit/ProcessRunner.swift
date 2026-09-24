@@ -10,7 +10,7 @@ public enum ProcessRunner {
     /// A non-nil `environment` replaces the child's inherited environment entirely; it does not
     /// merge. To override one key, start from `ProcessInfo.processInfo.environment` and change
     /// that key.
-    public static func run(
+    @Sendable public static func run(
         path: String,
         arguments: [String],
         environment: [String: String]? = nil,
@@ -93,7 +93,7 @@ public struct CommandOutput: Sendable {
 
 /// Accumulates bytes delivered from a `FileHandle.readabilityHandler`; macOS
 /// invokes stdout's and stderr's handlers concurrently on separate queues.
-private final class PipeBuffer {
+private final class PipeBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
 

@@ -42,7 +42,7 @@ struct SystemBarPerformanceTests {
         testParseSleepAssertions()
         testSampleHealthFromIsOK()
         SystemBarCapacityTests.runAll()
-        SystemBarPluginTests.runAll()
+        MainActor.assumeIsolated { SystemBarPluginTests.runAll() }
         print("SystemBarPerformanceTests passed")
     }
 
