@@ -17,6 +17,32 @@ SystemBar replaces a cluttered row of individual menu bar monitors with one icon
 | **Power** | Battery and power source, and the sleep assertions keeping your Mac awake with their likely causes |
 | **Dev** | How much capacity the machine has left, and which projects are using it: one row per project with the kind of expensive work it is running (builds, simulators, test runs, bundlers, automation) and its measured CPU, memory and disk I/O, plus listening ports grouped by the project serving them |
 
+## Choosing tabs
+
+Which tabs appear, and in what order, comes from a file the app writes the first time it runs:
+
+```
+~/Library/Application Support/SystemBar/plugins.json
+```
+
+It lists the six tabs above. Reorder the entries to reorder the tabs, set `"enabled": false` on one to hide it, and press the Relaunch button in the popover header (the circular arrow next to Quit) or quit and reopen to apply the change. The first tab listed is the one that opens, so a fresh file opens on Power.
+
+```json
+{ "plugins": [
+  { "name": "Memory.bundle" },
+  { "name": "CPU.bundle" },
+  { "name": "Power.bundle", "enabled": false }
+] }
+```
+
+An entry the app cannot load, say a misspelt name, still gets a tab: it is titled Error and shows the entry, what went wrong, and where the file is, so a typo is never silent. A file that cannot be read or parsed at all gives one Error tab and nothing else. A key the app does not know, or a value of the wrong type, is reported with its place in the file. Two things the parser cannot catch: a trailing comma is accepted, and if a key appears twice the last one wins.
+
+`SystemBar --list-plugins` prints the same outcome to the terminal, one line per enabled entry, and exits without opening a window (on a fresh machine it creates the file, just like a normal launch). `SYSTEMBAR_PLUGINS_FILE=/some/other.json` points one run at a different file.
+
+Relaunch restarts the app in place: when SystemBar was installed as a login item it asks launchd to restart it, and otherwise it starts a fresh copy and quits. If a relaunch fails, the reason goes to the system log.
+
+Tabs built outside this repository are the next step; see `docs/one-page/systembar-tab-plugins.md`.
+
 ## Requirements
 
 - **macOS 13 (Ventura) or later** — the menu bar UI is built on SwiftUI's `MenuBarExtra`, which is 13+ only
@@ -89,6 +115,8 @@ SystemBar runs entirely as your user. It never asks for `sudo` or elevated privi
 ```bash
 ./test.sh
 ```
+
+You can also check the plugin loader from a script, without opening the app: `SystemBar --list-plugins` prints what it would show and exits. Point `SYSTEMBAR_PLUGINS_FILE` at a temporary file first, so the check reads and writes that instead of your real `plugins.json`.
 
 ## Status
 
