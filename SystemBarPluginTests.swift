@@ -316,7 +316,7 @@ struct SystemBarPluginTests {
 
     // MARK: - Catalog
 
-    private static let fakeSource = MapTabSource(types: ["fake": FakeTab.self, "other": OtherFakeTab.self])
+    private static let fakeSource = MapTabSource(types: ["fake": FakeTab.self, "fake-copy": FakeTab.self, "other": OtherFakeTab.self])
 
     private static func entry(_ name: String, enabled: Bool = true) -> PluginEntry {
         PluginEntry(name: name, path: nil, isEnabled: enabled)
@@ -341,13 +341,15 @@ struct SystemBarPluginTests {
     }
 
     private static func testCatalogRefusesADuplicateIdentifier() {
-        let config = PluginConfig(plugins: [entry("fake"), entry("fake")])
+        let config = PluginConfig(plugins: [entry("fake"), entry("fake-copy")])
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
-        guard tabs.count == 2, case .loaded = tabs[0], case let .failed(_, reason) = tabs[1] else {
+        guard tabs.count == 2, case .loaded = tabs[0], case let .failed(location, reason) = tabs[1] else {
             expect(false, "the first of two plugins with one id loads and the second fails, got \(tabs)")
             return
         }
-        expect(reason.contains("\"fake\""), "the duplicate failure names the clashing id, got: \(reason)")
+        expect(location == "fake-copy", "the failure sits at the second entry's own location, got \(location)")
+        expect(reason.contains("\"fake\"") && reason.contains("earlier in the list"),
+               "the duplicate failure names the clashing id and the earlier entry, got: \(reason)")
     }
 
     private static func testCatalogCarriesOnAfterAFailure() {

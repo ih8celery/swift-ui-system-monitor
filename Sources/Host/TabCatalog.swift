@@ -41,12 +41,14 @@ enum TabCatalog {
     /// Every enabled entry, in order, as a loaded tab or a failure. Nothing here stops on error.
     static func build(config: PluginConfig, source: TabSource, host: HostServices) -> [LoadedTab] {
         var tabs: [LoadedTab] = []
-        var loadedIDs = Set<String>()
+        // Identifier to the location of the entry that first claimed it, so a later duplicate
+        // can name which earlier entry it clashes with.
+        var loadedIDs: [String: String] = [:]
         for entry in config.plugins where entry.isEnabled {
             let tab = makeTab(for: entry, source: source, host: host, alreadyLoaded: loadedIDs)
             tabs.append(tab)
             if let plugin = tab.plugin {
-                loadedIDs.insert(type(of: plugin).identifier)
+                loadedIDs[type(of: plugin).identifier] = entry.location
             }
         }
         return tabs
@@ -56,17 +58,24 @@ enum TabCatalog {
         for entry: PluginEntry,
         source: TabSource,
         host: HostServices,
-        alreadyLoaded: Set<String>
+        alreadyLoaded: [String: String]
     ) -> LoadedTab {
         let plugin: TabPlugin
         do {
             plugin = try source.makeTab(for: entry, host: host)
         } catch {
-            return .failed(location: entry.location, reason: "\(error)")
+            // A TabSource throws TabLoadError for its own readable reasons; anything else (an
+            // NSError from Foundation, say, once a source loads real bundles) has a description
+            // worth showing instead of Swift's dump of its domain/code/userInfo.
+            let reason = (error as? TabLoadError)?.description ?? error.localizedDescription
+            return .failed(location: entry.location, reason: reason)
         }
         let id = type(of: plugin).identifier
-        if alreadyLoaded.contains(id) {
-            return .failed(location: entry.location, reason: "another loaded plugin already has the id \"\(id)\"")
+        if let earlierLocation = alreadyLoaded[id] {
+            return .failed(
+                location: entry.location,
+                reason: "the id \"\(id)\" is already used by \"\(earlierLocation)\", which comes earlier in the list"
+            )
         }
         return .loaded(location: entry.location, plugin: plugin)
     }
