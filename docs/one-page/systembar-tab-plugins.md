@@ -1,7 +1,7 @@
 # Every tab becomes a plugin
 
 - **Date:** 2026-09-23
-- **Epic:** to be created when the implementation plan is written
+- **Epic:** swift-ui-system-monitor-2ik
 - **Blocks:** swift-ui-system-monitor-jhi (Power) and 17o.7 (drop file), which wait for it
 - **Status:** approved in conversation 2026-09-23, spec awaiting review
 
@@ -341,7 +341,7 @@ plugin, the SDK would be wrong.
 
 ## Issue Map
 
-To be created by the implementation plan as one epic with three stages, each
+Epic swift-ui-system-monitor-2ik, three stage issues (2ik.1 to 2ik.3), each
 leaving a working, buildable, tested app:
 
 1. **Config and tab bar.** Kit and host exist as directories; `plugins.json` is
