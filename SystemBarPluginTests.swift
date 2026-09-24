@@ -54,7 +54,13 @@ struct SystemBarPluginTests {
 
     private static func testRunnerInheritsTheEnvironmentByDefault() {
         let output = ProcessRunner.run(path: "/usr/bin/env", arguments: [])
-        expect(output.output.contains("HOME="), "with no environment given, the child inherits this process's")
+        expect(output.status == 0, "env should exit cleanly, got status \(output.status)")
+        let inherited = ProcessInfo.processInfo.environment
+        guard let key = inherited.keys.sorted().first(where: { inherited[$0]?.isEmpty == false }) else {
+            expect(false, "the test process has no environment to inherit from")
+            return
+        }
+        expect(output.output.contains("\(key)="), "with no environment given, the child inherits this process's; expected \(key) in: \(output.output.prefix(200))")
     }
 }
 

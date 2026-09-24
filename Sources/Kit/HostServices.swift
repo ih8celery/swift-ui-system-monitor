@@ -20,7 +20,9 @@ public final class HostServices {
 
     /// The only way built-in plugins run a subprocess: explicit path, argument array, no shell.
     /// `environment` exists because an app started by launchd has almost no PATH; a plugin that
-    /// runs a `#!/usr/bin/env node` script has to say where node is.
+    /// runs a `#!/usr/bin/env node` script has to say where node is. A non-nil `environment`
+    /// replaces the child's inherited environment entirely; it does not merge. To override one
+    /// key, start from `ProcessInfo.processInfo.environment` and change that key.
     public func run(
         path: String,
         arguments: [String],

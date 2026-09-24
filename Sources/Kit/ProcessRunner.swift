@@ -7,6 +7,9 @@ public enum ProcessRunner {
     /// How long a child may run before it is killed, when the caller says nothing.
     public static let defaultTimeout: TimeInterval = 15
 
+    /// A non-nil `environment` replaces the child's inherited environment entirely; it does not
+    /// merge. To override one key, start from `ProcessInfo.processInfo.environment` and change
+    /// that key.
     public static func run(
         path: String,
         arguments: [String],
@@ -71,7 +74,7 @@ public enum ProcessRunner {
     }
 }
 
-public struct CommandOutput {
+public struct CommandOutput: Sendable {
     public let output: String
     public let error: String
     public let status: Int32
