@@ -54,7 +54,8 @@ enum PluginConfigParser {
         return "line \(line): \(text)"
     }
 
-    /// JSON `null` arrives as NSNull. For this file it means the same as leaving the key out.
+    /// JSON `null` arrives as NSNull. For a location key it means the same as leaving the key
+    /// out; for `enabled` it is not a boolean and is rejected like any other wrong type.
     private static func present(_ value: Any?) -> Any? {
         value is NSNull ? nil : value
     }
@@ -80,7 +81,7 @@ enum PluginConfigParser {
         if let path, !(path is String) {
             return .failure(.wrongType(key: "path", expected: "a string", where: place))
         }
-        return parseEnabled(present(object["enabled"]), where: place).map { isEnabled in
+        return parseEnabled(object["enabled"], where: place).map { isEnabled in
             PluginEntry(name: name as? String, path: path as? String, isEnabled: isEnabled)
         }
     }

@@ -24,6 +24,7 @@ struct SystemBarPluginTests {
         testParserRejectsNonObjectRootAndEntry()
         testParserRejectsNonStringName()
         testParserTreatsNullAsAbsent()
+        testParserRejectsNullEnabled()
     }
 
     static func makeHost(
@@ -198,6 +199,12 @@ struct SystemBarPluginTests {
         let config = try? parse(#"{ "plugins": [ { "name": null, "path": "/x/A.bundle" } ] }"#).get()
         expect(config?.plugins == [PluginEntry(name: nil, path: "/x/A.bundle", isEnabled: true)],
                "JSON null means the same as leaving the key out, so this is a path entry, not \"both\", got \(String(describing: config))")
+    }
+
+    private static func testParserRejectsNullEnabled() {
+        let error = failure(parse(#"{ "plugins": [ { "name": "A.bundle", "enabled": null } ] }"#))
+        expect(error == .wrongType(key: "enabled", expected: "true or false", where: "plugins[0]"),
+               "null for enabled is neither true nor false; someone who wrote it probably meant off, so it must not silently mean on, got \(String(describing: error))")
     }
 }
 
