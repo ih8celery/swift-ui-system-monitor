@@ -19,6 +19,11 @@ struct SystemBarPluginTests {
         testParserRejectsNonListPlugins()
         testParserReportsMalformedJSON()
         testEncodeThenParseRoundTrips()
+        testParserNamesTheLineOfMalformedJSON()
+        testParserRejectsMissingPluginsKey()
+        testParserRejectsNonObjectRootAndEntry()
+        testParserRejectsNonStringName()
+        testParserTreatsNullAsAbsent()
     }
 
     static func makeHost(
@@ -156,7 +161,43 @@ struct SystemBarPluginTests {
         let text = String(decoding: data, as: UTF8.self)
         expect(text.contains("\"enabled\" : false"), "a disabled entry writes enabled: false")
         expect(!text.contains("\"enabled\" : true"), "an enabled entry leaves enabled out, since true is the default")
+        expect(text.contains("\"/tmp/Leases.bundle\""), "paths are written without escaped slashes, got: \(text)")
         expect((try? PluginConfigParser.parse(data).get()) == config, "what encode writes, parse reads back unchanged")
+    }
+
+    private static func testParserNamesTheLineOfMalformedJSON() {
+        let result = parse("""
+        { "plugins": [
+            { "name": "A.bundle" },
+            { name: "B.bundle" }
+        ] }
+        """)
+        guard case .malformedJSON(let detail)? = failure(result) else {
+            expect(false, "an unquoted key is malformed JSON")
+            return
+        }
+        expect(detail.hasPrefix("line 3"), "the error names the line the mistake is on, got: \(detail)")
+    }
+
+    private static func testParserRejectsMissingPluginsKey() {
+        let error = failure(parse("{}"))
+        expect(error == .missingKey("plugins", where: "the top level"), "a file without \"plugins\" says so, rather than calling it the wrong type, got \(String(describing: error))")
+    }
+
+    private static func testParserRejectsNonObjectRootAndEntry() {
+        expect(failure(parse("[]")) == .notAnObject(where: "the top level"), "a top-level list is not a config")
+        expect(failure(parse(#"{ "plugins": [ 5 ] }"#)) == .notAnObject(where: "plugins[0]"), "an entry that is not an object is reported at its index")
+    }
+
+    private static func testParserRejectsNonStringName() {
+        let error = failure(parse(#"{ "plugins": [ { "name": 5 } ] }"#))
+        expect(error == .wrongType(key: "name", expected: "a string", where: "plugins[0]"), "a non-string name is a type error, got \(String(describing: error))")
+    }
+
+    private static func testParserTreatsNullAsAbsent() {
+        let config = try? parse(#"{ "plugins": [ { "name": null, "path": "/x/A.bundle" } ] }"#).get()
+        expect(config?.plugins == [PluginEntry(name: nil, path: "/x/A.bundle", isEnabled: true)],
+               "JSON null means the same as leaving the key out, so this is a path entry, not \"both\", got \(String(describing: config))")
     }
 }
 

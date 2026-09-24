@@ -2,38 +2,61 @@ import Foundation
 
 /// Reads and writes plugins.json. Uses JSONSerialization rather than Codable because the file
 /// is hand-edited: an unknown key or a wrong type must be an error that names its place, and
-/// Codable ignores unknown keys silently.
+/// Codable ignores unknown keys silently. What JSONSerialization cannot see, this cannot either:
+/// a duplicate key keeps its first value, and a trailing comma is accepted.
 enum PluginConfigParser {
+    private static let topLevel = "the top level"
     private static let topLevelKeys: Set<String> = ["plugins"]
     private static let entryKeys: Set<String> = ["name", "path", "enabled"]
+    /// Foundation's own userInfo key for the byte offset a parse failed at. Named by string
+    /// because the constant is not exposed to Swift on every SDK.
+    private static let errorIndexKey = "NSJSONSerializationErrorIndex"
 
     static func parse(_ data: Data) -> Result<PluginConfig, PluginConfigError> {
         let object: Any
         do {
             object = try JSONSerialization.jsonObject(with: data)
         } catch {
-            let detail = (error as NSError).userInfo[NSDebugDescriptionErrorKey] as? String ?? error.localizedDescription
-            return .failure(.malformedJSON(detail))
+            return .failure(.malformedJSON(malformedDetail(from: error as NSError, in: data)))
         }
         guard let root = object as? [String: Any] else {
-            return .failure(.notAnObject(where: "the top level"))
+            return .failure(.notAnObject(where: topLevel))
         }
         if let unknown = root.keys.sorted().first(where: { !topLevelKeys.contains($0) }) {
-            return .failure(.unknownKey(unknown, where: "the top level"))
+            return .failure(.unknownKey(unknown, where: topLevel))
         }
-        guard let rawEntries = root["plugins"] as? [Any] else {
-            return .failure(.wrongType(key: "plugins", expected: "a list", where: "the top level"))
+        guard let rawPlugins = present(root["plugins"]) else {
+            return .failure(.missingKey("plugins", where: topLevel))
         }
-        let empty = Result<PluginConfig, PluginConfigError>.success(PluginConfig(plugins: []))
-        return rawEntries.enumerated().reduce(into: empty) { result, indexed in
-            guard case .success(let soFar) = result else { return }
-            switch parseEntry(indexed.element, where: "plugins[\(indexed.offset)]") {
+        guard let rawEntries = rawPlugins as? [Any] else {
+            return .failure(.wrongType(key: "plugins", expected: "a list", where: topLevel))
+        }
+        var entries: [PluginEntry] = []
+        for (index, raw) in rawEntries.enumerated() {
+            switch parseEntry(raw, where: "plugins[\(index)]") {
             case .success(let entry):
-                result = .success(PluginConfig(plugins: soFar.plugins + [entry]))
+                entries.append(entry)
             case .failure(let error):
-                result = .failure(error)
+                return .failure(error)
             }
         }
+        return .success(PluginConfig(plugins: entries))
+    }
+
+    /// The byte offset Foundation reports, turned into a line number this code owns. The debug
+    /// description's wording has changed between macOS releases; a count of newlines has not.
+    private static func malformedDetail(from error: NSError, in data: Data) -> String {
+        let text = error.userInfo[NSDebugDescriptionErrorKey] as? String ?? error.localizedDescription
+        guard let offset = error.userInfo[errorIndexKey] as? Int, offset >= 0, offset <= data.count else {
+            return text
+        }
+        let line = data.prefix(offset).filter { $0 == UInt8(ascii: "\n") }.count + 1
+        return "line \(line): \(text)"
+    }
+
+    /// JSON `null` arrives as NSNull. For this file it means the same as leaving the key out.
+    private static func present(_ value: Any?) -> Any? {
+        value is NSNull ? nil : value
     }
 
     private static func parseEntry(_ raw: Any, where place: String) -> Result<PluginEntry, PluginConfigError> {
@@ -43,8 +66,8 @@ enum PluginConfigParser {
         if let unknown = object.keys.sorted().first(where: { !entryKeys.contains($0) }) {
             return .failure(.unknownKey(unknown, where: place))
         }
-        let name = object["name"]
-        let path = object["path"]
+        let name = present(object["name"])
+        let path = present(object["path"])
         if name != nil, path != nil {
             return .failure(.entryHasBoth(where: place))
         }
@@ -57,7 +80,7 @@ enum PluginConfigParser {
         if let path, !(path is String) {
             return .failure(.wrongType(key: "path", expected: "a string", where: place))
         }
-        return parseEnabled(object["enabled"], where: place).map { isEnabled in
+        return parseEnabled(present(object["enabled"]), where: place).map { isEnabled in
             PluginEntry(name: name as? String, path: path as? String, isEnabled: isEnabled)
         }
     }
@@ -77,7 +100,10 @@ enum PluginConfigParser {
 
     static func encode(_ config: PluginConfig) throws -> Data {
         let entries = config.plugins.map(object(for:))
-        return try JSONSerialization.data(withJSONObject: ["plugins": entries], options: [.prettyPrinted, .sortedKeys])
+        return try JSONSerialization.data(
+            withJSONObject: ["plugins": entries],
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        )
     }
 
     /// `enabled` is written only when false, since true is the default a reader assumes.
