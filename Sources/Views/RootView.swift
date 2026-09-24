@@ -3,7 +3,8 @@ import Foundation
 import SwiftUI
 
 struct RootView: View {
-    @ObservedObject var monitor: UnifiedMonitor
+    // Not observed: the panels observe the monitor themselves; RootView only tells it what is visible.
+    let monitor: UnifiedMonitor
     let tabs: [LoadedTab]
     let configPath: String
     /// An index, not an id: a failed tab has no id, and two failures may share a location.
@@ -43,16 +44,19 @@ struct RootView: View {
                 .foregroundStyle(accent)
                 .frame(width: 28)
 
-            Picker("Tab", selection: $selection) {
-                ForEach(Array(tabs.enumerated()), id: \.offset) { offset, tab in
-                    Label(tab.title, systemImage: tab.systemImage)
-                        .help(tab.title)
-                        .tag(offset)
+            if !tabs.isEmpty {
+                Picker("Tab", selection: $selection) {
+                    // Keyed by position: the list is fixed at launch. Revisit if tabs can ever change while running.
+                    ForEach(Array(tabs.enumerated()), id: \.offset) { offset, tab in
+                        Label(tab.title, systemImage: tab.systemImage)
+                            .help(tab.title)
+                            .tag(offset)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelStyle(.titleAndIcon)
+                .labelsHidden()
             }
-            .pickerStyle(.segmented)
-            .labelStyle(.titleAndIcon)
-            .labelsHidden()
 
             Button {
                 relaunch()
@@ -115,6 +119,7 @@ struct RootView: View {
         let plugin = loadedPlugin(at: index)
         plugin?.visibilityChanged(isVisible: isVisible)
         guard let backed = plugin as? MonitorBackedTab else {
+            // The mode is ignored while nothing is visible; .memory is just a placeholder.
             monitor.updatePresentation(isVisible: false, mode: .memory)
             return
         }
