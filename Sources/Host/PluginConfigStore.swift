@@ -39,17 +39,6 @@ struct PluginConfigStore {
         }
     }
 
-    func load() -> Result<PluginConfig, PluginConfigError> {
-        switch read() {
-        case .success(let data):
-            return PluginConfigParser.parse(data)
-        case .failure(.notFound):
-            return .failure(.unreadable("there is no file at \(fileURL.path)"))
-        case .failure(.unreadable(let reason)):
-            return .failure(.unreadable(reason))
-        }
-    }
-
     private enum ReadFailure: Error {
         case notFound
         case unreadable(String)

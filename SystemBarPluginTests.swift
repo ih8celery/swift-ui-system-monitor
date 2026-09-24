@@ -25,6 +25,8 @@ struct SystemBarPluginTests {
         testParserRejectsNonStringName()
         testParserTreatsNullLocationAsAbsent()
         testParserRejectsNullEnabled()
+        testParserKeepsTheFirstOfTwoDuplicateKeys()
+        testParserAcceptsATrailingComma()
         testStoreUsesApplicationSupportByDefault()
         testStoreHonoursTheEnvironmentOverride()
         testStoreWritesTheDefaultWhenTheFileIsMissing()
@@ -197,7 +199,9 @@ struct SystemBarPluginTests {
             expect(false, "an unquoted key is malformed JSON")
             return
         }
-        expect(detail.hasPrefix("line 3"), "the error names the line the mistake is on, got: \(detail)")
+        expect(detail.contains("line 3"), "the error names the line the mistake is on, got: \(detail)")
+        let occurrences = detail.components(separatedBy: "line 3").count - 1
+        expect(occurrences == 1, "the line number is not said twice, even though Foundation's own text may also name it, got: \(detail)")
     }
 
     private static func testParserRejectsMissingPluginsKey() {
@@ -225,6 +229,17 @@ struct SystemBarPluginTests {
         let error = failure(parse(#"{ "plugins": [ { "name": "A.bundle", "enabled": null } ] }"#))
         expect(error == .wrongType(key: "enabled", expected: "true or false", where: "plugins[0]"),
                "null for enabled is neither true nor false; someone who wrote it probably meant off, so it must not silently mean on, got \(String(describing: error))")
+    }
+
+    private static func testParserKeepsTheFirstOfTwoDuplicateKeys() {
+        let config = try? parse(#"{ "plugins": [ { "name": "A.bundle", "name": "B.bundle" } ] }"#).get()
+        expect(config?.plugins.count == 1 && config?.plugins.first?.name == "A.bundle",
+               "JSONSerialization keeps the first duplicate key, and the docs promise that; got \(String(describing: config))")
+    }
+
+    private static func testParserAcceptsATrailingComma() {
+        let config = try? parse(#"{ "plugins": [ { "name": "A.bundle" }, ] }"#).get()
+        expect(config?.plugins.count == 1, "JSONSerialization accepts a trailing comma, and the docs say so")
     }
 
     // MARK: - Config store
@@ -259,7 +274,10 @@ struct SystemBarPluginTests {
         let result = store.loadOrCreate(default: sampleDefault)
         expect((try? result.get()) == sampleDefault, "a missing file yields the default, got \(result)")
         expect(FileManager.default.fileExists(atPath: store.fileURL.path), "and the default is written, creating its directory")
-        expect((try? store.load().get()) == sampleDefault, "what was written reads back as the same config")
+        let written = try? Data(contentsOf: store.fileURL)
+        expect((try? store.loadOrCreate(default: .builtins(named: ["ignored.bundle"])).get()) == sampleDefault,
+               "what was written reads back as the same config, and the default passed here is never used")
+        expect((try? Data(contentsOf: store.fileURL)) == written, "the file exists, so this call never writes to it")
     }
 
     private static func testStoreWritesAFileThatEndsWithANewline() {
@@ -283,14 +301,23 @@ struct SystemBarPluginTests {
     }
 
     private static func testStoreReportsAnUnreadableFile() {
-        // A directory where the file should be: exists, but cannot be read as data.
-        let directory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = PluginConfigStore(fileURL: directory)
-        guard case .failure(.unreadable) = store.loadOrCreate(default: sampleDefault) else {
-            expect(false, "a path that exists but cannot be read is reported as unreadable, not silently replaced")
+        // A real file with permissions that forbid reading it: the general `.unreadable` branch,
+        // as distinct from the folder case covered by testStoreSaysWhenAFolderSitsWhereTheFileShouldBe.
+        guard getuid() != 0 else {
+            expect(true, "running as root ignores permissions, so this file would read fine; skipping")
             return
         }
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
+        try? Data("{}".utf8).write(to: store.fileURL)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: store.fileURL.path) }
+        try? FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: store.fileURL.path)
+        guard case .failure(.unreadable(let reason)) = store.loadOrCreate(default: sampleDefault) else {
+            expect(false, "a file that exists but cannot be read is reported as unreadable, not silently replaced")
+            return
+        }
+        expect(!reason.contains("folder"), "this is the general unreadable branch, not the folder case, got: \(reason)")
     }
 
     private static func testStoreReportsAnUnwritableLocation() {

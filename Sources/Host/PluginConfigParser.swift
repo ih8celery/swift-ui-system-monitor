@@ -44,10 +44,16 @@ enum PluginConfigParser {
     }
 
     /// The byte offset Foundation reports, turned into a line number this code owns. The debug
-    /// description's wording has changed between macOS releases; a count of newlines has not.
+    /// description's wording has changed between macOS releases; a count of newlines has not. On
+    /// current macOS, Foundation's own text already says "around line N, column M", so the
+    /// "line N: " prefix is added only when the text does not already mention a line, to avoid
+    /// saying it twice.
     private static func malformedDetail(from error: NSError, in data: Data) -> String {
         let text = error.userInfo[NSDebugDescriptionErrorKey] as? String ?? error.localizedDescription
         guard let offset = error.userInfo[errorIndexKey] as? Int, offset >= 0, offset <= data.count else {
+            return text
+        }
+        guard !text.contains("line") else {
             return text
         }
         let line = data.prefix(offset).filter { $0 == UInt8(ascii: "\n") }.count + 1
