@@ -23,7 +23,7 @@ struct SystemBarPluginTests {
         testParserRejectsMissingPluginsKey()
         testParserRejectsNonObjectRootAndEntry()
         testParserRejectsNonStringName()
-        testParserTreatsNullAsAbsent()
+        testParserTreatsNullLocationAsAbsent()
         testParserRejectsNullEnabled()
         testStoreUsesApplicationSupportByDefault()
         testStoreHonoursTheEnvironmentOverride()
@@ -32,6 +32,8 @@ struct SystemBarPluginTests {
         testStoreReadsAnExistingFileInsteadOfTheDefault()
         testStoreReportsAnUnreadableFile()
         testStoreReportsAnUnwritableLocation()
+        testStoreExpandsTildeInTheOverride()
+        testStoreSaysWhenAFolderSitsWhereTheFileShouldBe()
     }
 
     static func makeHost(
@@ -202,7 +204,7 @@ struct SystemBarPluginTests {
         expect(error == .wrongType(key: "name", expected: "a string", where: "plugins[0]"), "a non-string name is a type error, got \(String(describing: error))")
     }
 
-    private static func testParserTreatsNullAsAbsent() {
+    private static func testParserTreatsNullLocationAsAbsent() {
         let config = try? parse(#"{ "plugins": [ { "name": null, "path": "/x/A.bundle" } ] }"#).get()
         expect(config?.plugins == [PluginEntry(name: nil, path: "/x/A.bundle", isEnabled: true)],
                "JSON null means the same as leaving the key out, so this is a path entry, not \"both\", got \(String(describing: config))")
@@ -240,7 +242,9 @@ struct SystemBarPluginTests {
     }
 
     private static func testStoreWritesTheDefaultWhenTheFileIsMissing() {
-        let store = PluginConfigStore(fileURL: temporaryDirectory().appendingPathComponent("nested/plugins.json"))
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PluginConfigStore(fileURL: directory.appendingPathComponent("nested/plugins.json"))
         let result = store.loadOrCreate(default: sampleDefault)
         expect((try? result.get()) == sampleDefault, "a missing file yields the default, got \(result)")
         expect(FileManager.default.fileExists(atPath: store.fileURL.path), "and the default is written, creating its directory")
@@ -248,24 +252,30 @@ struct SystemBarPluginTests {
     }
 
     private static func testStoreWritesAFileThatEndsWithANewline() {
-        let store = PluginConfigStore(fileURL: temporaryDirectory().appendingPathComponent("plugins.json"))
-        try? store.write(sampleDefault)
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
+        expect((try? store.write(sampleDefault)) != nil, "setup: the sample file could be written")
         let text = (try? String(contentsOf: store.fileURL, encoding: .utf8)) ?? ""
         expect(text.hasSuffix("\n"), "a hand-edited file ends with a newline so editors and diffs behave")
         expect(!text.hasSuffix("\n\n"), "but only one")
     }
 
     private static func testStoreReadsAnExistingFileInsteadOfTheDefault() {
-        let store = PluginConfigStore(fileURL: temporaryDirectory().appendingPathComponent("plugins.json"))
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         let existing = PluginConfig.builtins(named: ["Disk.bundle"])
-        try? store.write(existing)
+        expect((try? store.write(existing)) != nil, "setup: the sample file could be written")
         let result = store.loadOrCreate(default: sampleDefault)
         expect((try? result.get()) == existing, "an existing file wins over the default, got \(result)")
     }
 
     private static func testStoreReportsAnUnreadableFile() {
         // A directory where the file should be: exists, but cannot be read as data.
-        let store = PluginConfigStore(fileURL: temporaryDirectory())
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PluginConfigStore(fileURL: directory)
         guard case .failure(.unreadable) = store.loadOrCreate(default: sampleDefault) else {
             expect(false, "a path that exists but cannot be read is reported as unreadable, not silently replaced")
             return
@@ -278,6 +288,25 @@ struct SystemBarPluginTests {
             expect(false, "a location the default cannot be written to is reported, not swallowed")
             return
         }
+    }
+
+    private static func testStoreExpandsTildeInTheOverride() {
+        let store = PluginConfigStore.standard(
+            environment: [PluginConfigStore.environmentOverride: "~/somewhere/plugins.json"],
+            applicationSupport: URL(fileURLWithPath: "/ignored")
+        )
+        expect(store.fileURL.path == NSHomeDirectory() + "/somewhere/plugins.json",
+               "a ~ in SYSTEMBAR_PLUGINS_FILE means the home directory, even with no shell to expand it, got \(store.fileURL.path)")
+    }
+
+    private static func testStoreSaysWhenAFolderSitsWhereTheFileShouldBe() {
+        let store = PluginConfigStore(fileURL: temporaryDirectory())
+        defer { try? FileManager.default.removeItem(at: store.fileURL) }
+        guard case .failure(let error) = store.loadOrCreate(default: sampleDefault) else {
+            expect(false, "a folder at the path is an error")
+            return
+        }
+        expect(error.description.contains("is a folder"), "the message says what is actually there, got: \(error.description)")
     }
 }
 
