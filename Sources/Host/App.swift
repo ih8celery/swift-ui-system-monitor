@@ -7,11 +7,15 @@ import SwiftUI
 struct SystemBarApp: App {
     private let tabs: [LoadedTab]
     private let configPath: String
+    private let processes = Feed(initial: ProcessSummary())
+    private let fastStats = Feed(initial: FastStatsSnapshot())
 
     init() {
         let store = PluginConfigStore.standard()
         let host = HostServices(
             homeDirectory: NSHomeDirectory(),
+            processes: processes,
+            fastStats: fastStats,
             runner: ProcessRunner.run,
             log: { NSLog("%@", $0) }
         )

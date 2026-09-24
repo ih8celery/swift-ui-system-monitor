@@ -12,6 +12,11 @@ public enum SharedFeed: Hashable {
 
 /// One tab. The host creates a plugin once at launch, calls `collect()` on the plugin's own
 /// queue only while its tab is on screen, and embeds `makeView()` in the window.
+///
+/// Thread rules, fixed for every plugin built against this SDK: `collect()` runs on a queue the
+/// host owns for this plugin, never concurrently with itself; `makeView()` and
+/// `visibilityChanged(isVisible:)` run on the main thread; a plugin that publishes from
+/// `collect()` hops to the main thread first, because the panel observes it from there.
 public protocol TabPlugin: AnyObject {
     /// Stable, unique, lowercase. Two loaded plugins sharing one is an error the host shows.
     static var identifier: String { get }
@@ -20,18 +25,19 @@ public protocol TabPlugin: AnyObject {
     var accent: Color { get }
     /// How often the host calls `collect()` while this tab is showing.
     var refreshInterval: TimeInterval { get }
-    /// Which shared samplers must run while this tab is showing.
+    /// Which shared samplers must run while this tab is showing. The set is not frozen: a host
+    /// switching over it needs `@unknown default`.
     var sharedFeeds: Set<SharedFeed> { get }
 
     init(host: HostServices)
-    /// Runs on this plugin's own queue, never concurrently with itself, only while visible.
+    /// This plugin's own queue, never concurrently with itself, only while visible.
     func collect()
-    /// Main thread, when the tab is switched to or away from.
-    func visibilityChanged(isVisible: Bool)
+    /// Main thread, when the tab is switched to or away from. Default: nothing.
+    @MainActor func visibilityChanged(isVisible: Bool)
     /// Main thread. The panel observes the plugin's own model objects.
-    func makeView() -> AnyView
+    @MainActor func makeView() -> AnyView
 }
 
 public extension TabPlugin {
-    func visibilityChanged(isVisible: Bool) {}
+    @MainActor func visibilityChanged(isVisible: Bool) {}
 }

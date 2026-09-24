@@ -1,0 +1,31 @@
+import Combine
+import Foundation
+
+/// A value the host samples on a plugin's behalf: the latest reading, plus a publisher for the
+/// readings after it. Readings are delivered on the main thread. Reading `value` never starts
+/// the sampler; listing the feed in `sharedFeeds` does.
+public final class Feed<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Value
+    private let subject = PassthroughSubject<Value, Never>()
+
+    public init(initial: Value) {
+        current = initial
+    }
+
+    /// The latest reading. Safe to read from any thread, including a plugin's collect queue.
+    public var value: Value {
+        lock.withLock { current }
+    }
+
+    /// Every reading after now, on the main thread.
+    public var publisher: AnyPublisher<Value, Never> {
+        subject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
+    }
+
+    /// The host's side: record a reading and tell subscribers. Any thread.
+    public func send(_ value: Value) {
+        lock.withLock { current = value }
+        subject.send(value)
+    }
+}

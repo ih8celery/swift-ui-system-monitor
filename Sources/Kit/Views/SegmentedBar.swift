@@ -2,21 +2,32 @@ import SwiftUI
 
 /// A labeled slice of a SegmentedBar/SegmentedLegend pair — e.g. one memory category or one
 /// disk capacity bucket.
-struct BarSegment: Identifiable, Hashable {
-    let label: String
-    let value: UInt64
-    let color: Color
+public struct BarSegment: Identifiable, Hashable {
+    public let label: String
+    public let value: UInt64
+    public let color: Color
 
-    var id: String { label }
+    public var id: String { label }
+
+    public init(label: String, value: UInt64, color: Color) {
+        self.label = label
+        self.value = value
+        self.color = color
+    }
 }
 
 /// Proportional horizontal bar shared by MemoryBar and CapacityBar: each segment's width is
 /// its share of `total`.
-struct SegmentedBar: View {
+public struct SegmentedBar: View {
     let segments: [BarSegment]
     let total: UInt64
 
-    var body: some View {
+    public init(segments: [BarSegment], total: UInt64) {
+        self.segments = segments
+        self.total = total
+    }
+
+    public var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 2) {
                 ForEach(segments) { segment in
@@ -32,10 +43,14 @@ struct SegmentedBar: View {
 
 /// Two-column legend shared by MemoryLegend and CapacityLegend: a colored dot, label, and
 /// byte value per row.
-struct SegmentedLegend: View {
+public struct SegmentedLegend: View {
     let rows: [BarSegment]
 
-    var body: some View {
+    public init(rows: [BarSegment]) {
+        self.rows = rows
+    }
+
+    public var body: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 7) {
             ForEach(rows) { row in
                 HStack(spacing: 6) {

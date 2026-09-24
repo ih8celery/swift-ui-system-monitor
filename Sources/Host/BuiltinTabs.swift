@@ -54,7 +54,7 @@ final class PowerTab: MonitorBackedTab {
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(PowerPanel(monitor: .shared)) }
+    @MainActor func makeView() -> AnyView { AnyView(PowerPanel(monitor: .shared)) }
 }
 
 final class DevTab: MonitorBackedTab {
@@ -68,7 +68,7 @@ final class DevTab: MonitorBackedTab {
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(DeveloperPanel(monitor: .shared)) }
+    @MainActor func makeView() -> AnyView { AnyView(DeveloperPanel(monitor: .shared)) }
 }
 
 final class MemoryTab: MonitorBackedTab {
@@ -82,7 +82,7 @@ final class MemoryTab: MonitorBackedTab {
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(MemoryPanel(monitor: .shared)) }
+    @MainActor func makeView() -> AnyView { AnyView(MemoryPanel(monitor: .shared)) }
 }
 
 final class DiskTab: MonitorBackedTab {
@@ -96,7 +96,7 @@ final class DiskTab: MonitorBackedTab {
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(DiskPanel(monitor: .shared)) }
+    @MainActor func makeView() -> AnyView { AnyView(DiskPanel(monitor: .shared)) }
 }
 
 final class NetworkTab: MonitorBackedTab {
@@ -110,7 +110,7 @@ final class NetworkTab: MonitorBackedTab {
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(NetworkPanel(monitor: .shared)) }
+    @MainActor func makeView() -> AnyView { AnyView(NetworkPanel(monitor: .shared)) }
 }
 
 final class CPUTab: MonitorBackedTab {
@@ -124,5 +124,5 @@ final class CPUTab: MonitorBackedTab {
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(CPUPanel(monitor: .shared)) }
+    @MainActor func makeView() -> AnyView { AnyView(CPUPanel(monitor: .shared)) }
 }

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 
@@ -50,6 +51,8 @@ struct SystemBarPluginTests {
         testBuiltinSourceDoesNotTakePathsYet()
         testRelauncherBuildsLaunchctlArguments()
         testRelauncherReadsThePidFromLaunchctlPrint()
+        testFeedHoldsTheLatestValueAndPublishesTheNext()
+        testHostServicesCanBeBuiltByAnyoneAndCarriesTheProcessesFeed()
     }
 
     static func makeHost(
@@ -57,7 +60,13 @@ struct SystemBarPluginTests {
             CommandOutput(output: "", error: "", status: 0, didTimeout: false)
         }
     ) -> HostServices {
-        HostServices(homeDirectory: "/tmp/systembar-tests", runner: runner, log: { _ in })
+        HostServices(
+            homeDirectory: "/tmp/systembar-tests",
+            processes: Feed(initial: ProcessSummary()),
+            fastStats: Feed(initial: FastStatsSnapshot()),
+            runner: runner,
+            log: { _ in }
+        )
     }
 
     // MARK: - Contract
@@ -67,8 +76,8 @@ struct SystemBarPluginTests {
         let plugin = type.init(host: makeHost())
         expect(type.identifier == "fake", "the identifier is read from the metatype, not the instance")
         expect(plugin.title == "Fake", "the instance carries its title")
-        _ = plugin.makeView()
-        plugin.visibilityChanged(isVisible: true)
+        _ = MainActor.assumeIsolated { plugin.makeView() }
+        MainActor.assumeIsolated { plugin.visibilityChanged(isVisible: true) }
         // FakeTab does not write visibilityChanged; compiling it proves the default exists.
     }
 
@@ -511,6 +520,29 @@ struct SystemBarPluginTests {
         expect(Relauncher.pid(fromLaunchctlPrint: "pid = abc") == nil, "a pid that is not a number is no pid")
         expect(Relauncher.pid(fromLaunchctlPrint: "pid = 99999999999") == nil, "a pid too big for Int32 is no pid")
     }
+
+    // MARK: - Feed
+
+    private static func testFeedHoldsTheLatestValueAndPublishesTheNext() {
+        let feed = Feed(initial: 1)
+        var received: [Int] = []
+        let subscription = feed.publisher.sink { received.append($0) }
+        feed.send(2)
+        feed.send(3)
+        expect(feed.value == 3, "value is the latest reading, got \(feed.value)")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        expect(received == [2, 3], "the publisher delivers every reading after subscription, on main, got \(received)")
+        subscription.cancel()
+    }
+
+    private static func testHostServicesCanBeBuiltByAnyoneAndCarriesTheProcessesFeed() {
+        let feed = Feed(initial: ProcessSummary())
+        let host = HostServices(homeDirectory: "/tmp", processes: feed, fastStats: Feed(initial: FastStatsSnapshot()), runner: ProcessRunner.run, log: { _ in })
+        expect(host.processes.value.totalCount == 0, "the feed a host is built with is the one plugins read")
+        expect(host.fastStats.value.cpuUsagePercent == 0, "the 1-second feed is there too, starting empty")
+        feed.send(ProcessSummary(rows: [ProcessSnapshot(name: "x", count: 1, physical: 1, virtualSize: 1, cpu: 1)], limit: 1))
+        expect(host.processes.value.totalCount == 1, "a reading sent to the feed is visible through the host")
+    }
 }
 
 /// The smallest possible plugin. Shared by every test that needs a tab.
@@ -524,7 +556,7 @@ final class FakeTab: TabPlugin {
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(Text("fake")) }
+    @MainActor func makeView() -> AnyView { AnyView(Text("fake")) }
 }
 
 /// A second plugin with its own id, for duplicate-id and ordering tests.
@@ -538,7 +570,7 @@ final class OtherFakeTab: TabPlugin {
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(Text("other")) }
+    @MainActor func makeView() -> AnyView { AnyView(Text("other")) }
 }
 
 /// A source that knows a fixed set of names, standing in for built-ins and, later, bundles.

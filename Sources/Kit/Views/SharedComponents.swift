@@ -2,12 +2,18 @@ import AppKit
 import Foundation
 import SwiftUI
 
-struct EvidenceRow: View {
+public struct EvidenceRow: View {
     let label: String
     let value: String
     let detail: String
 
-    var body: some View {
+    public init(label: String, value: String, detail: String) {
+        self.label = label
+        self.value = value
+        self.detail = detail
+    }
+
+    public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label)
@@ -31,12 +37,18 @@ struct EvidenceRow: View {
 }
 
 
-struct RateCard: View {
+public struct RateCard: View {
     let title: String
     let value: String
     let color: Color
 
-    var body: some View {
+    public init(title: String, value: String, color: Color) {
+        self.title = title
+        self.value = value
+        self.color = color
+    }
+
+    public var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption)
@@ -54,11 +66,16 @@ struct RateCard: View {
     }
 }
 
-struct StatPill: View {
+public struct StatPill: View {
     let label: String
     let value: String
 
-    var body: some View {
+    public init(label: String, value: String) {
+        self.label = label
+        self.value = value
+    }
+
+    public var body: some View {
         HStack(spacing: 6) {
             Text(label)
                 .foregroundStyle(.secondary)
@@ -75,14 +92,14 @@ struct StatPill: View {
     }
 }
 
-struct SectionTitle: View {
+public struct SectionTitle: View {
     let text: String
 
-    init(_ text: String) {
+    public init(_ text: String) {
         self.text = text
     }
 
-    var body: some View {
+    public var body: some View {
         Text(text)
             .font(.system(size: 12, weight: .bold))
             .foregroundStyle(Color.white.opacity(0.78))
@@ -90,25 +107,30 @@ struct SectionTitle: View {
     }
 }
 
-struct ChartUnitLabel: View {
+public struct ChartUnitLabel: View {
     let text: String
 
-    init(_ text: String) {
+    public init(_ text: String) {
         self.text = text
     }
 
-    var body: some View {
+    public var body: some View {
         Text(text)
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .foregroundStyle(.secondary)
     }
 }
 
-struct LegendLabel: View {
+public struct LegendLabel: View {
     let text: String
     let color: Color
 
-    var body: some View {
+    public init(text: String, color: Color) {
+        self.text = text
+        self.color = color
+    }
+
+    public var body: some View {
         HStack(spacing: 5) {
             Circle()
                 .fill(color)
@@ -120,11 +142,16 @@ struct LegendLabel: View {
     }
 }
 
-struct ProgressBar: View {
+public struct ProgressBar: View {
     let value: Double
     let color: Color
 
-    var body: some View {
+    public init(value: Double, color: Color) {
+        self.value = value
+        self.color = color
+    }
+
+    public var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.08))
@@ -136,13 +163,20 @@ struct ProgressBar: View {
     }
 }
 
-struct Sparkline: View {
+public struct Sparkline: View {
     let values: [Double]
     let maxValue: Double
     let color: Color
     let fill: Bool
 
-    var body: some View {
+    public init(values: [Double], maxValue: Double, color: Color, fill: Bool) {
+        self.values = values
+        self.maxValue = maxValue
+        self.color = color
+        self.fill = fill
+    }
+
+    public var body: some View {
         GeometryReader { geometry in
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -190,22 +224,28 @@ struct Sparkline: View {
     }
 }
 
-struct DualSparkline: View {
+public struct DualSparkline: View {
     let first: [Double]
     let second: [Double]
     let firstColor: Color
     let secondColor: Color
 
+    public init(first: [Double], second: [Double], firstColor: Color, secondColor: Color) {
+        self.first = first
+        self.second = second
+        self.firstColor = firstColor
+        self.secondColor = secondColor
+    }
+
     private var maxValue: Double {
         max(first.max() ?? 1, second.max() ?? 1, 1)
     }
 
-    var body: some View {
+    public var body: some View {
         ZStack {
             Sparkline(values: first, maxValue: maxValue, color: firstColor, fill: true)
             Sparkline(values: second, maxValue: maxValue, color: secondColor, fill: false)
         }
     }
 }
-
 
