@@ -601,6 +601,8 @@ cd "$(dirname "$0")"
 # against it agree on the language mode and the oldest macOS they run on.
 target=arm64-apple-macos14
 swift_version=5
+# `package` members (the host's side of a Feed) are visible to the app and the tests, never to a plugin.
+package_name=SystemBar
 
 rm -rf build SystemBar.app
 mkdir -p build/Frameworks build/SDK
@@ -610,6 +612,7 @@ mkdir -p build/Frameworks build/SDK
 swiftc \
   -emit-library -parse-as-library -module-name SystemBarKit \
   -enable-library-evolution -swift-version "$swift_version" -target "$target" \
+  -package-name "$package_name" \
   -emit-module -emit-module-path build/SDK/SystemBarKit.swiftmodule \
   -emit-module-interface-path build/SDK/SystemBarKit.swiftinterface \
   -Xlinker -install_name -Xlinker @rpath/libSystemBarKit.dylib \
@@ -620,7 +623,7 @@ swiftc \
 # 2. The app, linked against the SDK it will carry.
 swiftc \
   -parse-as-library -module-name SystemBar \
-  -swift-version "$swift_version" -target "$target" \
+  -swift-version "$swift_version" -target "$target" -package-name "$package_name" \
   -I build/SDK -L build/Frameworks -lSystemBarKit \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
   -framework SwiftUI -framework AppKit \
@@ -659,7 +662,7 @@ cd "$(dirname "$0")"
 swiftc \
   -D TESTING \
   -parse-as-library -module-name SystemBarTests \
-  -swift-version 5 -target arm64-apple-macos14 \
+  -swift-version 5 -target arm64-apple-macos14 -package-name SystemBar \
   -I build/SDK -L build/Frameworks -lSystemBarKit \
   -Xlinker -rpath -Xlinker "$(pwd)/build/Frameworks" \
   -framework SwiftUI -framework AppKit \
@@ -691,7 +694,7 @@ otool -L SystemBar.app/Contents/MacOS/SystemBar | grep SystemBarKit
 otool -l SystemBar.app/Contents/MacOS/SystemBar | grep -A2 LC_RPATH | grep path
 ```
 
-prints an interface header with `-enable-library-evolution` and `-target arm64-apple-macos14`, a `@rpath/libSystemBarKit.dylib` dependency, and the rpath `@executable_path/../Frameworks`. Then the app must still start and list plugins:
+prints an interface header with `-enable-library-evolution` and `-target arm64-apple-macos14`, a `@rpath/libSystemBarKit.dylib` dependency, and the rpath `@executable_path/../Frameworks`. Also `grep -c "package func\|package var" build/SDK/SystemBarKit.swiftinterface` must print 0: the public interface a plugin compiles against has no `send`. Then the app must still start and list plugins:
 
 ```bash
 SYSTEMBAR_PLUGINS_FILE=$SCRATCH/plugins-check.json ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins
@@ -1377,6 +1380,8 @@ Create `Plugins/Power/Tests/PowerTests.swift`, moving `testBatteryParsing` and `
 import Foundation
 import SystemBarKit
 
+/// Main-actor because a plugin is constructed on the main thread, by contract.
+@MainActor
 enum PowerTests {
     static func runAll() {
         testBatteryParsing()
@@ -1435,7 +1440,7 @@ enum PowerTests {
 }
 ```
 
-The two moved tests are the existing ones with `UnifiedMonitor.` replaced by `PowerCollector.`. Call `PowerTests.runAll()` from `SystemBarPerformanceTests.main()` where `testBatteryParsing()` was, and delete the `testParseSleepAssertions()` call and both bodies there.
+The two moved tests are the existing ones with `UnifiedMonitor.` replaced by `PowerCollector.`. Call `MainActor.assumeIsolated { PowerTests.runAll() }` from `SystemBarPerformanceTests.main()` where `testBatteryParsing()` was (the same way `SystemBarPluginTests.runAll()` is called there), and delete the `testParseSleepAssertions()` call and both bodies there.
 
 In `SystemBarPluginTests.swift`:
 - `testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode`: the count becomes 5, and the order assertion compares against `MonitorMode.allCases` (which will have five cases).
@@ -1614,7 +1619,7 @@ public final class PowerPlugin: NSObject, TabPlugin, ObservableObject {
     @Published var snapshot = PowerSnapshot()
     private let host: HostServices
 
-    public init(host: HostServices) {
+    @MainActor public init(host: HostServices) {
         self.host = host
         super.init()
     }
@@ -1690,6 +1695,7 @@ rm -rf "$out"
 mkdir -p "$out/Contents/MacOS"
 
 # @executable_path is the app that loads the bundle, so the SDK is found wherever the bundle lives.
+# No -package-name here: a plugin sees only the SDK's public interface.
 swiftc \
   -emit-library -parse-as-library -module-name "$name" \
   -swift-version 5 -target arm64-apple-macos14 \
@@ -1804,7 +1810,8 @@ public final class HelloTabPlugin: NSObject, TabPlugin, ObservableObject {
     @Published var greeting = "Collecting…"
     private let host: HostServices
 
-    public init(host: HostServices) {
+    /// Main thread, once, at launch.
+    @MainActor public init(host: HostServices) {
         self.host = host
         super.init()
     }
@@ -1947,7 +1954,7 @@ Replace the second paragraph of `## Architecture Overview` with:
 
 "The tab bar is being converted to plugins (spec: `docs/one-page/systembar-tab-plugins.md`). `Sources/Kit/` is the SDK: the `TabPlugin` contract, `HostServices` with its `processes` feed, `ProcessRunner`, the shared models and the shared views, all public and built as a dylib whose `.swiftinterface` ships in the app. `Sources/Host/` is the app: it reads `~/Library/Application Support/SystemBar/plugins.json`, resolves each entry to a class (a bundle in `Contents/PlugIns/`, a bundle at a path, or one of the five tabs still compiled in through `BuiltinTabs.swift`), constructs it after the duplicate-id check, and runs its `collect()` on its own queue while visible (`PluginScheduler`). `Plugins/Power/` is the first real bundle. `RootView` renders the loaded list and never names a tab. `UnifiedMonitor.shared` still samples for the compiled-in tabs and feeds the process summary to plugins; it is deleted in Stage 3."
 
-Under `## Conventions & Patterns`, add: "The SDK's public surface is frozen by its `.swiftinterface`: a new `TabPlugin` requirement needs a default in a protocol extension or older bundles stop loading, `SharedFeed` is not frozen so host switches over it need `@unknown default`, and everything builds with `-swift-version 5 -target arm64-apple-macos14` so the interface and the plugins agree."
+Under `## Conventions & Patterns`, add: "The SDK's public surface is frozen by its `.swiftinterface`: a new `TabPlugin` requirement needs a default in a protocol extension or older bundles stop loading, `SharedFeed` is not frozen so host switches over it need `@unknown default`, and everything builds with `-swift-version 5 -target arm64-apple-macos14` so the interface and the plugins agree. The host's side of a `Feed` (`send`) is `package` access: the app and the tests build with `-package-name SystemBar`, plugins never do, so a plugin can read a feed but not overwrite it. A plugin is constructed on the main thread (`init(host:)` is `@MainActor`), collects on its own queue, and draws on main."
 
 - [ ] **Step 3: The spec's decision log**
 
@@ -1963,6 +1970,13 @@ Append to the Decision Log in `docs/one-page/systembar-tab-plugins.md`:
   protected nothing — Adam.
 - 2026-09-24 — Minimum macOS is 14: the SDK interface records a target, and the
   code already used a macOS 14 API — Adam.
+- 2026-09-24 — `init(host:)` is `@MainActor`: the host already constructs on
+  main, a plugin's model objects usually are main-actor, and adding the
+  attribute after the freeze would break every existing bundle — Claude,
+  from code review, for Adam to confirm.
+- 2026-09-24 — `Feed.send` is `package` access, not public: a plugin reads a
+  shared feed and can never overwrite it for the others — Claude, from code
+  review, for Adam to confirm.
 - 2026-09-24 — Stage 2 landed: Power loads from `Contents/PlugIns/Power.bundle`
   through the same loader as a user's bundle; a plugin's published changes were
   seen redrawing the host window before any of it was built — Claude, recorded
