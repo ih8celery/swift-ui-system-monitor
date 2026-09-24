@@ -36,6 +36,9 @@ struct SystemBarPluginTests {
         testStoreReportsAnUnwritableLocation()
         testStoreExpandsTildeInTheOverride()
         testStoreSaysWhenAFolderSitsWhereTheFileShouldBe()
+        testLoaderWritesTheDefaultAndLoadsSixTabsOnFirstRun()
+        testLoaderTurnsAnUnparseableFileIntoOneErrorTab()
+        testLoaderReportsNothingForAnEmptyList()
         testCatalogKeepsOrderAndSkipsDisabledEntries()
         testCatalogShowsAFailedEntryInItsPlace()
         testCatalogRefusesADuplicateIdentifier()
@@ -345,6 +348,42 @@ struct SystemBarPluginTests {
             return
         }
         expect(error.description.contains("is a folder"), "the message says what is actually there, got: \(error.description)")
+    }
+
+    // MARK: - Loader
+
+    private static func testLoaderWritesTheDefaultAndLoadsSixTabsOnFirstRun() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
+        let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: makeHost())
+        expect(loaded.map(\.title) == ["Power", "Dev", "Memory", "Disk", "Network", "CPU"],
+               "a fresh file loads every built-in in its default order, got \(loaded.map(\.title))")
+        expect(FileManager.default.fileExists(atPath: store.fileURL.path), "and the default file is written")
+    }
+
+    private static func testLoaderTurnsAnUnparseableFileIntoOneErrorTab() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
+        try? Data(#"{ "plugins": [ { "name": } ] }"#.utf8).write(to: store.fileURL)
+        let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: makeHost())
+        guard loaded.count == 1, case .failed(let location, let reason) = loaded[0] else {
+            expect(false, "an unparseable file yields exactly one error tab, got \(loaded)")
+            return
+        }
+        expect(location == store.fileURL.path, "the error tab names the file's own path, got \(location)")
+        expect(reason.contains("line"), "the reason names the line the mistake is on, got: \(reason)")
+    }
+
+    private static func testLoaderReportsNothingForAnEmptyList() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
+        try? Data(#"{ "plugins": [ { "name": "CPU.bundle", "enabled": false } ] }"#.utf8).write(to: store.fileURL)
+        let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: makeHost())
+        expect(loaded.isEmpty, "a disabled-only config loads nothing, got \(loaded)")
+        expect(PluginListReport.lines(for: loaded).isEmpty, "and --list-plugins prints nothing for it")
     }
 
     // MARK: - Catalog
