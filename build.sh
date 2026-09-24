@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-source "$(dirname "$0")/toolchain.env"
+source ./toolchain.env
 
 rm -rf build SystemBar.app
 mkdir -p build/Frameworks build/SDK

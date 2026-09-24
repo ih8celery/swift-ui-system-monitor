@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-source "$(dirname "$0")/toolchain.env"
+source ./toolchain.env
 
 # The tests link the same SDK dylib the app does, built by build.sh a moment ago. Everything
 # else (host without its @main, each plugin's sources and tests, the test files) is one module.
