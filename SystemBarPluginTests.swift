@@ -39,6 +39,10 @@ struct SystemBarPluginTests {
         testCatalogRefusesADuplicateIdentifier()
         testCatalogCarriesOnAfterAFailure()
         testListReportPrintsOneLinePerEntry()
+        testEveryDefaultNameIsABuiltin()
+        testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode()
+        testBuiltinSourceNamesTheUnknownTab()
+        testBuiltinSourceDoesNotTakePathsYet()
     }
 
     static func makeHost(
@@ -363,6 +367,53 @@ struct SystemBarPluginTests {
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
         expect(PluginListReport.lines(for: tabs) == ["ok fake Fake fake", "error nope: no tab for nope"],
                "--list-plugins prints ok/error lines in order, got \(PluginListReport.lines(for: tabs))")
+    }
+
+    // MARK: - Built-in tabs
+
+    private static func testEveryDefaultNameIsABuiltin() {
+        let names = BuiltinTabSource.defaultNames
+        expect(names.count == BuiltinTabSource.types.count, "the default file lists every built-in exactly once")
+        expect(names.allSatisfy { BuiltinTabSource.types[$0] != nil }, "every default name resolves to a built-in type")
+        expect(names.allSatisfy { $0.hasSuffix(".bundle") }, "names are the bundle names each tab will have once it is a real bundle")
+    }
+
+    private static func testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode() {
+        let config = PluginConfig.builtins(named: BuiltinTabSource.defaultNames)
+        let tabs = TabCatalog.build(config: config, source: BuiltinTabSource(), host: makeHost())
+        let plugins = tabs.compactMap(\.plugin)
+        expect(plugins.count == 6, "all six built-ins load, got \(PluginListReport.lines(for: tabs))")
+        let ids = Set(plugins.map { type(of: $0).identifier })
+        expect(ids.count == 6, "the six built-ins have six different ids, got \(ids)")
+        for plugin in plugins {
+            guard let backed = plugin as? MonitorBackedTab else {
+                expect(false, "\(plugin.title) must say which MonitorMode drives its sampling until it owns a collector")
+                return
+            }
+            expect(backed.monitorMode.icon == plugin.systemImage, "\(plugin.title) keeps the icon its MonitorMode had")
+            expect(backed.monitorMode.rawValue == plugin.title, "\(plugin.title) keeps the title its MonitorMode had")
+        }
+    }
+
+    private static func testBuiltinSourceNamesTheUnknownTab() {
+        let didThrow = (try? BuiltinTabSource().makeTab(for: entry("Weather.bundle"), host: makeHost())) == nil
+        expect(didThrow, "an unknown name throws")
+        do {
+            _ = try BuiltinTabSource().makeTab(for: entry("Weather.bundle"), host: makeHost())
+        } catch {
+            expect("\(error)".contains("Weather.bundle") && "\(error)".contains("CPU.bundle"),
+                   "the error names the bad name and lists the real ones, got: \(error)")
+        }
+    }
+
+    private static func testBuiltinSourceDoesNotTakePathsYet() {
+        let pathEntry = PluginEntry(name: nil, path: "/tmp/X.bundle", isEnabled: true)
+        do {
+            _ = try BuiltinTabSource().makeTab(for: pathEntry, host: makeHost())
+            expect(false, "a path entry cannot load until bundles exist")
+        } catch {
+            expect("\(error)".contains("path"), "the error says path entries are not supported yet, got: \(error)")
+        }
     }
 }
 

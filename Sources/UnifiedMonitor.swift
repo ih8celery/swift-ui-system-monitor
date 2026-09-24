@@ -85,6 +85,10 @@ final class UnifiedMonitor: ObservableObject {
     var capacity: CapacitySnapshot { capacitySnapshot }
     var disk: DiskSnapshot { diskSnapshot }
 
+    /// Stage 1 of the plugin conversion: the built-in tabs reach the one monitor through this
+    /// until each owns its own collector. Deleted with the class.
+    static let shared = UnifiedMonitor()
+
     init() {
         start()
     }
