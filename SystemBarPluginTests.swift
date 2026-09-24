@@ -43,6 +43,8 @@ struct SystemBarPluginTests {
         testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode()
         testBuiltinSourceNamesTheUnknownTab()
         testBuiltinSourceDoesNotTakePathsYet()
+        testRelauncherBuildsLaunchctlArguments()
+        testRelauncherReadsThePidFromLaunchctlPrint()
     }
 
     static func makeHost(
@@ -416,6 +418,29 @@ struct SystemBarPluginTests {
         } catch {
             expect("\(error)".contains("path"), "the error says path entries are not supported yet, got: \(error)")
         }
+    }
+
+    // MARK: - Relaunch
+
+    private static func testRelauncherBuildsLaunchctlArguments() {
+        expect(Relauncher.launchctlProbeArguments(uid: 501, label: "com.example.bar") == ["print", "gui/501/com.example.bar"],
+               "the probe asks launchd about this user's agent by label")
+        expect(Relauncher.launchctlKickstartArguments(uid: 501, label: "com.example.bar") == ["kickstart", "-k", "gui/501/com.example.bar"],
+               "the kickstart kills and restarts that same agent")
+    }
+
+    private static func testRelauncherReadsThePidFromLaunchctlPrint() {
+        let output = """
+        com.ih8celery.systembar = {
+            active count = 1
+            path = /Users/x/Library/LaunchAgents/com.ih8celery.systembar.plist
+            state = running
+            pid = 4242
+            program = /Users/x/Applications/SystemBar.app/Contents/MacOS/SystemBar
+        }
+        """
+        expect(Relauncher.pid(fromLaunchctlPrint: output) == 4242, "the running pid is read from the 'pid = N' line")
+        expect(Relauncher.pid(fromLaunchctlPrint: "state = not running") == nil, "no pid line means no running instance")
     }
 }
 
