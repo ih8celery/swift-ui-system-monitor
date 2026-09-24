@@ -20,7 +20,8 @@ struct SystemBarApp: App {
             runner: ProcessRunner.run,
             log: { NSLog("%@", $0) }
         )
-        let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: host)
+        let source = HostTabSource(bundles: .standard(), builtins: BuiltinTabSource())
+        let loaded = TabLoader.load(store: store, source: source, host: host)
         tabs = loaded
         configPath = store.fileURL.path
 

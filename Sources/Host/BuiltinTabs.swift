@@ -27,15 +27,15 @@ struct BuiltinTabSource: TabSource {
 
     static let types = Dictionary(uniqueKeysWithValues: builtins.map { ($0.name, $0.type) })
 
-    @MainActor func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin {
+    func resolve(_ entry: PluginEntry) throws -> TabPlugin.Type {
         guard let name = entry.name else {
-            throw TabLoadError(description: "\"path\" entries are not supported yet; only the built-in tabs can be listed, by \"name\"")
+            throw TabLoadError(description: "only the compiled-in tabs can be found by name; a \"path\" entry is a bundle")
         }
         guard let type = Self.types[name] else {
             let known = Self.types.keys.sorted().joined(separator: ", ")
-            throw TabLoadError(description: "no built-in tab is named \"\(name)\"; the names are \(known)")
+            throw TabLoadError(description: "no compiled-in tab is named \"\(name)\"; the names are \(known)")
         }
-        return type.init(host: host)
+        return type
     }
 }
 

@@ -32,10 +32,10 @@ struct TabLoadError: Error, CustomStringConvertible {
     let description: String
 }
 
-/// Turns one config entry into a plugin, or throws. Stage 1 has one source, the built-ins;
-/// Stage 2 adds the one that loads bundles.
+/// Turns one config entry into a plugin class, or throws. The catalog constructs it, after the
+/// duplicate-id check, so a refused duplicate never runs its init.
 protocol TabSource {
-    @MainActor func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin
+    func resolve(_ entry: PluginEntry) throws -> TabPlugin.Type
 }
 
 enum TabCatalog {
@@ -61,23 +61,19 @@ enum TabCatalog {
         host: HostServices,
         alreadyLoaded: [String: String]
     ) -> LoadedTab {
-        let plugin: TabPlugin
+        let type: TabPlugin.Type
         do {
-            plugin = try source.makeTab(for: entry, host: host)
+            type = try source.resolve(entry)
         } catch {
-            // A TabSource throws TabLoadError for its own readable reasons; anything else (an
-            // NSError from Foundation, say, once a source loads real bundles) has a description
-            // worth showing instead of Swift's dump of its domain/code/userInfo.
+            // A TabSource throws TabLoadError for its own reasons; anything else (a Foundation
+            // error from a bundle, say) should show its message, not Swift's dump of it.
             let reason = (error as? TabLoadError)?.description ?? error.localizedDescription
             return .failed(location: entry.location, reason: reason)
         }
-        let id = type(of: plugin).identifier
-        if let earlierLocation = alreadyLoaded[id] {
-            return .failed(
-                location: entry.location,
-                reason: "the id \"\(id)\" is already used by \"\(earlierLocation)\", which comes earlier in the list"
-            )
+        let id = type.identifier
+        if let earlier = alreadyLoaded[id] {
+            return .failed(location: entry.location, reason: "the id \"\(id)\" is already used by \"\(earlier)\", which comes earlier in the list")
         }
-        return .loaded(location: entry.location, plugin: plugin)
+        return .loaded(location: entry.location, plugin: type.init(host: host))
     }
 }

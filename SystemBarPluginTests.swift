@@ -46,11 +46,19 @@ struct SystemBarPluginTests {
         testCatalogShowsAFailedEntryInItsPlace()
         testCatalogRefusesADuplicateIdentifier()
         testCatalogCarriesOnAfterAFailure()
+        testCatalogRefusesADuplicateBeforeConstructingIt()
         testListReportPrintsOneLinePerEntry()
         testEveryDefaultNameIsABuiltin()
         testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode()
         testBuiltinSourceNamesTheUnknownTab()
-        testBuiltinSourceDoesNotTakePathsYet()
+        testBuiltinSourceDoesNotTakePaths()
+        testPluginPathResolvesNamesInsideThePlugInsFolder()
+        testPluginPathRejectsNamesThatLeaveTheFolder()
+        testPluginPathResolvesAbsoluteAndTildePaths()
+        testPluginPathRejectsRelativeAndEmptyPaths()
+        testBundleSourceReportsEachFailureStep()
+        testBundleSourceFindsAPrincipalClassThatAdoptsTabPlugin()
+        testHostSourcePrefersABundleOverTheCompiledInTab()
         testRelauncherBuildsLaunchctlArguments()
         testRelauncherReadsThePidFromLaunchctlPrint()
         testFeedHoldsTheLatestValueAndPublishesTheNext()
@@ -442,6 +450,15 @@ struct SystemBarPluginTests {
         expect(tabs.map(\.title) == ["Error", "Other"], "a failure earlier in the list does not stop later entries, got \(tabs.map(\.title))")
     }
 
+    private static func testCatalogRefusesADuplicateBeforeConstructingIt() {
+        CountingTab.constructed = 0
+        let source = MapTabSource(types: ["a": CountingTab.self, "b": CountingTab.self])
+        let config = PluginConfig(plugins: [entry("a"), entry("b")])
+        let tabs = TabCatalog.build(config: config, source: source, host: makeHost())
+        expect(tabs.compactMap(\.plugin).count == 1, "one of the two loads")
+        expect(CountingTab.constructed == 1, "the duplicate is refused before its init runs, got \(CountingTab.constructed) constructions")
+    }
+
     private static func testListReportPrintsOneLinePerEntry() {
         let config = PluginConfig(plugins: [entry("fake-first"), entry("nope")])
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
@@ -480,7 +497,7 @@ struct SystemBarPluginTests {
 
     private static func testBuiltinSourceNamesTheUnknownTab() {
         do {
-            _ = try BuiltinTabSource().makeTab(for: entry("Weather.bundle"), host: makeHost())
+            _ = try BuiltinTabSource().resolve(entry("Weather.bundle"))
             expect(false, "an unknown name throws")
         } catch {
             expect("\(error)".contains("Weather.bundle") && "\(error)".contains("CPU.bundle"),
@@ -488,14 +505,115 @@ struct SystemBarPluginTests {
         }
     }
 
-    private static func testBuiltinSourceDoesNotTakePathsYet() {
+    private static func testBuiltinSourceDoesNotTakePaths() {
         let pathEntry = PluginEntry(name: nil, path: "/tmp/X.bundle", isEnabled: true)
         do {
-            _ = try BuiltinTabSource().makeTab(for: pathEntry, host: makeHost())
+            _ = try BuiltinTabSource().resolve(pathEntry)
             expect(false, "a path entry cannot load until bundles exist")
         } catch {
             expect("\(error)".contains("path"), "the error says path entries are not supported yet, got: \(error)")
         }
+    }
+
+    // MARK: - Bundles
+
+    private static let plugIns = URL(fileURLWithPath: "/App/Contents/PlugIns")
+
+    private static func pathEntry(_ path: String) -> PluginEntry {
+        PluginEntry(name: nil, path: path, isEnabled: true)
+    }
+
+    private static func testPluginPathResolvesNamesInsideThePlugInsFolder() {
+        let url = try? PluginPath.resolve(entry("Power.bundle"), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
+        expect(url?.path == "/App/Contents/PlugIns/Power.bundle", "a name is a bundle inside the app's PlugIns folder, got \(String(describing: url?.path))")
+        do {
+            _ = try PluginPath.resolve(entry("Power.bundle"), builtInPlugInsURL: nil, homeDirectory: "/Users/x")
+            expect(false, "a build with no PlugIns folder cannot resolve a name")
+        } catch {
+            expect("\(error)".contains("PlugIns"), "the error says the folder is missing, got: \(error)")
+        }
+    }
+
+    private static func testPluginPathRejectsNamesThatLeaveTheFolder() {
+        for bad in ["", "..", "../Other.bundle", "a/b.bundle", "/etc/passwd"] {
+            do {
+                _ = try PluginPath.resolve(entry(bad), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
+                expect(false, "the name \"\(bad)\" must be refused")
+            } catch {
+                expect("\(error)".contains("\"\(bad)\""), "the error quotes the bad name, got: \(error)")
+            }
+        }
+    }
+
+    private static func testPluginPathResolvesAbsoluteAndTildePaths() {
+        let absolute = try? PluginPath.resolve(pathEntry("/opt/tabs/X.bundle"), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
+        expect(absolute?.path == "/opt/tabs/X.bundle", "an absolute path is used as is")
+        let tilde = try? PluginPath.resolve(pathEntry("~/Library/X.bundle"), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
+        expect(tilde?.path == "/Users/x/Library/X.bundle", "a ~ path starts at the home directory, got \(String(describing: tilde?.path))")
+    }
+
+    private static func testPluginPathRejectsRelativeAndEmptyPaths() {
+        for bad in ["", "tabs/X.bundle", "~tabs/X.bundle"] {
+            do {
+                _ = try PluginPath.resolve(pathEntry(bad), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
+                expect(false, "the path \"\(bad)\" must be refused")
+            } catch {
+                expect("\(error)".contains("absolute") , "the error says a path must be absolute or start with ~/, got: \(error)")
+            }
+        }
+    }
+
+    private static func testBundleSourceReportsEachFailureStep() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for name in ["Empty.bundle", "Broken.bundle", "Plain.bundle"] {
+            expect((try? FileManager.default.createDirectory(at: folder.appendingPathComponent(name), withIntermediateDirectories: true)) != nil, "setup: create \(name)")
+        }
+        let loader = FakeBundleLoader(
+            classes: ["Plain.bundle": NotATab.self],
+            failures: ["Broken.bundle": "dyld says no"]
+        )
+        let source = BundleTabSource(builtInPlugInsURL: folder, homeDirectory: "/Users/x", loader: loader)
+        let cases: [(String, String)] = [
+            ("Missing.bundle", "nothing at"),
+            ("Broken.bundle", "dyld says no"),
+            ("Empty.bundle", "NSPrincipalClass"),
+            ("Plain.bundle", "does not adopt TabPlugin"),
+        ]
+        for (name, expected) in cases {
+            do {
+                _ = try source.resolve(entry(name))
+                expect(false, "\(name) must fail to resolve")
+            } catch {
+                expect("\(error)".contains(expected), "\(name): expected the reason to mention \"\(expected)\", got: \(error)")
+            }
+        }
+    }
+
+    private static func testBundleSourceFindsAPrincipalClassThatAdoptsTabPlugin() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        expect((try? FileManager.default.createDirectory(at: folder.appendingPathComponent("ObjC.bundle"), withIntermediateDirectories: true)) != nil, "setup: create ObjC.bundle")
+        let source = BundleTabSource(builtInPlugInsURL: folder, homeDirectory: "/Users/x", loader: FakeBundleLoader(classes: ["ObjC.bundle": FakeObjCTab.self]))
+        let type = try? source.resolve(entry("ObjC.bundle"))
+        expect(type?.identifier == "objc", "an NSObject subclass with an @objc name resolves through the protocol, got \(String(describing: type))")
+    }
+
+    private static func testHostSourcePrefersABundleOverTheCompiledInTab() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        expect((try? FileManager.default.createDirectory(at: folder.appendingPathComponent("CPU.bundle"), withIntermediateDirectories: true)) != nil, "setup: create CPU.bundle")
+        let bundles = BundleTabSource(builtInPlugInsURL: folder, homeDirectory: "/Users/x", loader: FakeBundleLoader(classes: ["CPU.bundle": FakeObjCTab.self]))
+        let source = HostTabSource(bundles: bundles, builtins: BuiltinTabSource())
+        expect((try? source.resolve(entry("CPU.bundle")))?.identifier == "objc", "a bundle in PlugIns wins over the compiled-in tab of the same name")
+        expect((try? source.resolve(entry("Memory.bundle")))?.identifier == "memory", "a name with no bundle still finds the compiled-in tab")
+        do {
+            _ = try source.resolve(entry("Weather.bundle"))
+            expect(false, "an unknown name fails")
+        } catch {
+            expect("\(error)".contains("Weather.bundle"), "the error names the entry, got: \(error)")
+        }
+        expect((try? source.resolve(pathEntry("/nowhere/X.bundle"))) == nil, "a path entry never falls back to the compiled-in table")
     }
 
     // MARK: - Relaunch
@@ -607,14 +725,60 @@ final class OtherFakeTab: TabPlugin {
     @MainActor func makeView() -> AnyView { AnyView(Text("other")) }
 }
 
-/// A source that knows a fixed set of names, standing in for built-ins and, later, bundles.
+/// A source that knows a fixed set of names, standing in for built-ins and bundles.
 struct MapTabSource: TabSource {
     let types: [String: TabPlugin.Type]
 
-    @MainActor func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin {
+    func resolve(_ entry: PluginEntry) throws -> TabPlugin.Type {
         guard let name = entry.name, let type = types[name] else {
             throw TabLoadError(description: "no tab for \(entry.location)")
         }
-        return type.init(host: host)
+        return type
+    }
+}
+
+/// Counts constructions, to prove a duplicate is refused before its init runs.
+final class CountingTab: TabPlugin {
+    static let identifier = "counting"
+    nonisolated(unsafe) static var constructed = 0
+    let title = "Counting"
+    let systemImage = "number"
+    let accent = Color.gray
+    let refreshInterval: TimeInterval = 5
+    let sharedFeeds: Set<SharedFeed> = []
+
+    init(host: HostServices) { Self.constructed += 1 }
+    func collect() {}
+    @MainActor func makeView() -> AnyView { AnyView(Text("counting")) }
+}
+
+/// An NSObject subclass with an @objc name, the shape a real bundle's principal class has.
+@objc(FakeObjCTab)
+final class FakeObjCTab: NSObject, TabPlugin {
+    static let identifier = "objc"
+    let title = "ObjC"
+    let systemImage = "circle"
+    let accent = Color.gray
+    let refreshInterval: TimeInterval = 5
+    let sharedFeeds: Set<SharedFeed> = []
+
+    init(host: HostServices) { super.init() }
+    func collect() {}
+    @MainActor func makeView() -> AnyView { AnyView(Text("objc")) }
+}
+
+final class NotATab: NSObject {}
+
+/// Stands in for Foundation's Bundle: what the principal class is, or why loading failed,
+/// keyed by the bundle's file name.
+struct FakeBundleLoader: BundleLoading {
+    var classes: [String: AnyClass] = [:]
+    var failures: [String: String] = [:]
+
+    func principalClass(at url: URL) throws -> AnyClass? {
+        if let reason = failures[url.lastPathComponent] {
+            throw TabLoadError(description: reason)
+        }
+        return classes[url.lastPathComponent]
     }
 }
