@@ -60,7 +60,7 @@ struct SystemBarPluginTests {
         testBundleSourceReportsEachFailureStep()
         testBundleSourceFindsAPrincipalClassThatAdoptsTabPlugin()
         testHostSourcePrefersABundleOverTheCompiledInTab()
-        testFoundationLoaderReportsAFolderWithNoExecutable()
+        testFoundationLoaderRefusesABareFolder()
         testFoundationLoaderRefusesAPlainFile()
         testFoundationLoaderRefusesABundleWithNoPrincipalClass()
         testRelauncherBuildsLaunchctlArguments()
@@ -634,7 +634,7 @@ struct SystemBarPluginTests {
         }
     }
 
-    private static func testFoundationLoaderReportsAFolderWithNoExecutable() {
+    private static func testFoundationLoaderRefusesABareFolder() {
         let folder = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: folder) }
         let bundleURL = folder.appendingPathComponent("X.bundle")
