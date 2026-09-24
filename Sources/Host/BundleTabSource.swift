@@ -1,25 +1,44 @@
 import Foundation
 import SystemBarKit
 
-/// The two Foundation calls that load a bundle, behind a protocol so the loader's outcomes can
-/// be tested without a real dylib.
+/// The Foundation calls that load a bundle and read its principal class, behind a protocol so
+/// the loader's outcomes can be tested without a real dylib.
 protocol BundleLoading {
-    /// Loads the bundle at `url` and returns its principal class, `nil` when Info.plist names
-    /// none, or throws when the bundle is not a bundle or its code will not load.
-    func principalClass(at url: URL) throws -> AnyClass?
+    /// Loads the bundle at `url` and returns its principal class, or throws when the bundle is
+    /// not a bundle, its code will not load, its Info.plist names no `NSPrincipalClass`, or that
+    /// class is not in its code.
+    func principalClass(at url: URL) throws -> AnyClass
 }
 
 struct FoundationBundleLoader: BundleLoading {
-    func principalClass(at url: URL) throws -> AnyClass? {
+    func principalClass(at url: URL) throws -> AnyClass {
         guard let bundle = Bundle(url: url) else {
             throw TabLoadError(description: "\(url.lastPathComponent) is not a bundle")
         }
         do {
             try bundle.loadAndReturnError()
         } catch {
-            throw TabLoadError(description: "\(url.lastPathComponent) would not load: \(error.localizedDescription)")
+            // The localized description is the generic "couldn't be loaded" message; the actual
+            // dyld reason (bad architecture, a missing symbol) lives in the NSError's debug
+            // description, when Foundation supplies one.
+            let nsError = error as NSError
+            var reason = "\(url.lastPathComponent) would not load: \(error.localizedDescription)"
+            if let debug = nsError.userInfo[NSDebugDescriptionErrorKey] as? String {
+                let trimmed = debug.range(of: ", tried:").map { String(debug[..<$0.lowerBound]) } ?? debug
+                reason += " (\(trimmed))"
+            }
+            throw TabLoadError(description: reason)
         }
-        return bundle.principalClass
+        guard let name = bundle.object(forInfoDictionaryKey: "NSPrincipalClass") as? String, !name.isEmpty else {
+            throw TabLoadError(description: "\(url.lastPathComponent)'s Info.plist has no NSPrincipalClass")
+        }
+        // Bundle.classNamed looks the name up in the ObjC runtime, not in this bundle's own
+        // image: two bundles exporting the same @objc class name collide there and the first
+        // loaded wins, so a plugin's class name should be unique to it.
+        guard let cls = bundle.classNamed(name) else {
+            throw TabLoadError(description: "\(url.lastPathComponent) names the class \"\(name)\" in NSPrincipalClass, but its code has no class by that name")
+        }
+        return cls
     }
 }
 
@@ -36,7 +55,7 @@ struct BundleTabSource: TabSource {
 
     /// True when a bundle by this name sits in the app's PlugIns folder.
     func hasBundle(named name: String) -> Bool {
-        guard let url = try? PluginPath.resolve(PluginEntry(name: name, path: nil, isEnabled: true), builtInPlugInsURL: builtInPlugInsURL, homeDirectory: homeDirectory) else {
+        guard let url = try? PluginPath.resolveName(name, builtInPlugInsURL: builtInPlugInsURL) else {
             return false
         }
         return FileManager.default.fileExists(atPath: url.path)
@@ -47,9 +66,7 @@ struct BundleTabSource: TabSource {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw TabLoadError(description: "nothing at \(url.path)")
         }
-        guard let cls = try loader.principalClass(at: url) else {
-            throw TabLoadError(description: "\(url.lastPathComponent) names no NSPrincipalClass in its Info.plist, or that class is not in its code")
-        }
+        let cls: AnyClass = try loader.principalClass(at: url)
         guard let type = cls as? TabPlugin.Type else {
             throw TabLoadError(description: "\(NSStringFromClass(cls)) in \(url.lastPathComponent) does not adopt TabPlugin")
         }

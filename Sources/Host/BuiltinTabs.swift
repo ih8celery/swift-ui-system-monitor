@@ -27,6 +27,11 @@ struct BuiltinTabSource: TabSource {
 
     static let types = Dictionary(uniqueKeysWithValues: builtins.map { ($0.name, $0.type) })
 
+    /// True when a compiled-in tab has this name, so callers do not need the static table.
+    func has(named name: String) -> Bool {
+        Self.types[name] != nil
+    }
+
     func resolve(_ entry: PluginEntry) throws -> TabPlugin.Type {
         guard let name = entry.name else {
             throw TabLoadError(description: "only the compiled-in tabs can be found by name; a \"path\" entry is a bundle")

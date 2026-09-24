@@ -9,7 +9,7 @@ struct HostTabSource: TabSource {
     let builtins: BuiltinTabSource
 
     func resolve(_ entry: PluginEntry) throws -> TabPlugin.Type {
-        if let name = entry.name, !bundles.hasBundle(named: name), BuiltinTabSource.types[name] != nil {
+        if let name = entry.name, !bundles.hasBundle(named: name), builtins.has(named: name) {
             return try builtins.resolve(entry)
         }
         return try bundles.resolve(entry)

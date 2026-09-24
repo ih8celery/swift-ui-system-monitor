@@ -59,6 +59,8 @@ struct SystemBarPluginTests {
         testBundleSourceReportsEachFailureStep()
         testBundleSourceFindsAPrincipalClassThatAdoptsTabPlugin()
         testHostSourcePrefersABundleOverTheCompiledInTab()
+        testFoundationLoaderReportsAFolderWithNoExecutable()
+        testFoundationLoaderRefusesAPlainFile()
         testRelauncherBuildsLaunchctlArguments()
         testRelauncherReadsThePidFromLaunchctlPrint()
         testFeedHoldsTheLatestValueAndPublishesTheNext()
@@ -535,10 +537,12 @@ struct SystemBarPluginTests {
     }
 
     private static func testPluginPathRejectsNamesThatLeaveTheFolder() {
-        for bad in ["", "..", "../Other.bundle", "a/b.bundle", "/etc/passwd"] {
+        for bad in ["", "..", "../Other.bundle", "a/b.bundle", "/etc/passwd", ".", "..\u{0}x"] {
             do {
-                _ = try PluginPath.resolve(entry(bad), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
-                expect(false, "the name \"\(bad)\" must be refused")
+                let url = try PluginPath.resolve(entry(bad), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
+                // A name with a NUL byte is not refused outright, but URL escaping keeps it
+                // inside the PlugIns folder rather than letting it resolve outside it.
+                expect(url.path.hasPrefix(plugIns.path), "the name \"\(bad)\" must not resolve outside the PlugIns folder, got \(url.path)")
             } catch {
                 expect("\(error)".contains("\"\(bad)\""), "the error quotes the bad name, got: \(error)")
             }
@@ -577,7 +581,7 @@ struct SystemBarPluginTests {
         let cases: [(String, String)] = [
             ("Missing.bundle", "nothing at"),
             ("Broken.bundle", "dyld says no"),
-            ("Empty.bundle", "NSPrincipalClass"),
+            ("Empty.bundle", "no principal class"),
             ("Plain.bundle", "does not adopt TabPlugin"),
         ]
         for (name, expected) in cases {
@@ -613,7 +617,40 @@ struct SystemBarPluginTests {
         } catch {
             expect("\(error)".contains("Weather.bundle"), "the error names the entry, got: \(error)")
         }
-        expect((try? source.resolve(pathEntry("/nowhere/X.bundle"))) == nil, "a path entry never falls back to the compiled-in table")
+        do {
+            _ = try source.resolve(pathEntry("/nowhere/X.bundle"))
+            expect(false, "a path entry never falls back to the compiled-in table")
+        } catch {
+            expect("\(error)".contains("nothing at"), "the path went to the bundle source, got: \(error)")
+        }
+    }
+
+    private static func testFoundationLoaderReportsAFolderWithNoExecutable() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let bundleURL = folder.appendingPathComponent("X.bundle")
+        expect((try? FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)) != nil, "setup: create X.bundle")
+        do {
+            _ = try FoundationBundleLoader().principalClass(at: bundleURL)
+            expect(false, "a bundle folder with no executable must fail to load")
+        } catch {
+            expect("\(error)".contains("X.bundle"), "the error names the bundle, got: \(error)")
+        }
+    }
+
+    private static func testFoundationLoaderRefusesAPlainFile() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let fileURL = folder.appendingPathComponent("Y.bundle")
+        expect(FileManager.default.createFile(atPath: fileURL.path, contents: Data()), "setup: create Y.bundle as a plain file")
+        do {
+            // Bundle(url:) returns nil for a plain file rather than a bundle it fails to load,
+            // so this is refused at the same step a non-bundle path would be.
+            _ = try FoundationBundleLoader().principalClass(at: fileURL)
+            expect(false, "a plain file named Y.bundle must fail to load")
+        } catch {
+            expect("\(error)".contains("is not a bundle"), "expected the reason to say it is not a bundle, got: \(error)")
+        }
     }
 
     // MARK: - Relaunch
@@ -775,10 +812,13 @@ struct FakeBundleLoader: BundleLoading {
     var classes: [String: AnyClass] = [:]
     var failures: [String: String] = [:]
 
-    func principalClass(at url: URL) throws -> AnyClass? {
+    func principalClass(at url: URL) throws -> AnyClass {
         if let reason = failures[url.lastPathComponent] {
             throw TabLoadError(description: reason)
         }
-        return classes[url.lastPathComponent]
+        guard let cls = classes[url.lastPathComponent] else {
+            throw TabLoadError(description: "no principal class")
+        }
+        return cls
     }
 }

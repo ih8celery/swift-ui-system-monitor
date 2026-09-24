@@ -10,7 +10,7 @@ enum PluginPath {
         return try resolvePath(entry.path ?? "", homeDirectory: homeDirectory)
     }
 
-    private static func resolveName(_ name: String, builtInPlugInsURL: URL?) throws -> URL {
+    static func resolveName(_ name: String, builtInPlugInsURL: URL?) throws -> URL {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else {
             throw TabLoadError(description: "the name \"\(name)\" is not a single file name; a name is a bundle inside the app's PlugIns folder, and anything else needs \"path\"")
         }
