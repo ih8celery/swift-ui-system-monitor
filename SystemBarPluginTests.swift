@@ -320,21 +320,21 @@ struct SystemBarPluginTests {
 
     // MARK: - Catalog
 
-    private static let fakeSource = MapTabSource(types: ["fake": FakeTab.self, "fake-copy": FakeTab.self, "other": OtherFakeTab.self])
+    private static let fakeSource = MapTabSource(types: ["fake-first": FakeTab.self, "fake-copy": FakeTab.self, "other": OtherFakeTab.self])
 
     private static func entry(_ name: String, enabled: Bool = true) -> PluginEntry {
         PluginEntry(name: name, path: nil, isEnabled: enabled)
     }
 
     private static func testCatalogKeepsOrderAndSkipsDisabledEntries() {
-        let config = PluginConfig(plugins: [entry("other"), entry("fake", enabled: false), entry("fake")])
+        let config = PluginConfig(plugins: [entry("other"), entry("fake-first", enabled: false), entry("fake-first")])
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
         expect(tabs.count == 2, "a disabled entry produces no tab at all, got \(tabs.count)")
         expect(tabs.map(\.title) == ["Other", "Fake"], "tabs come out in file order, got \(tabs.map(\.title))")
     }
 
     private static func testCatalogShowsAFailedEntryInItsPlace() {
-        let config = PluginConfig(plugins: [entry("fake"), entry("nope")])
+        let config = PluginConfig(plugins: [entry("fake-first"), entry("nope")])
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
         guard tabs.count == 2, case let .failed(location, reason) = tabs[1] else {
             expect(false, "an entry the source cannot load is a failed tab at its own position, got \(tabs)")
@@ -345,14 +345,14 @@ struct SystemBarPluginTests {
     }
 
     private static func testCatalogRefusesADuplicateIdentifier() {
-        let config = PluginConfig(plugins: [entry("fake"), entry("fake-copy")])
+        let config = PluginConfig(plugins: [entry("fake-first"), entry("fake-copy")])
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
         guard tabs.count == 2, case .loaded = tabs[0], case let .failed(location, reason) = tabs[1] else {
             expect(false, "the first of two plugins with one id loads and the second fails, got \(tabs)")
             return
         }
         expect(location == "fake-copy", "the failure sits at the second entry's own location, got \(location)")
-        expect(reason.contains("\"fake\"") && reason.contains("earlier in the list"),
+        expect(reason.contains("\"fake\"") && reason.contains("\"fake-first\"") && reason.contains("earlier in the list"),
                "the duplicate failure names the clashing id and the earlier entry, got: \(reason)")
     }
 
@@ -363,9 +363,9 @@ struct SystemBarPluginTests {
     }
 
     private static func testListReportPrintsOneLinePerEntry() {
-        let config = PluginConfig(plugins: [entry("fake"), entry("nope")])
+        let config = PluginConfig(plugins: [entry("fake-first"), entry("nope")])
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
-        expect(PluginListReport.lines(for: tabs) == ["ok fake Fake fake", "error nope: no tab for nope"],
+        expect(PluginListReport.lines(for: tabs) == ["ok fake Fake fake-first", "error nope: no tab for nope"],
                "--list-plugins prints ok/error lines in order, got \(PluginListReport.lines(for: tabs))")
     }
 
@@ -376,6 +376,7 @@ struct SystemBarPluginTests {
         expect(names.count == BuiltinTabSource.types.count, "the default file lists every built-in exactly once")
         expect(names.allSatisfy { BuiltinTabSource.types[$0] != nil }, "every default name resolves to a built-in type")
         expect(names.allSatisfy { $0.hasSuffix(".bundle") }, "names are the bundle names each tab will have once it is a real bundle")
+        expect(Set(names) == Set(BuiltinTabSource.types.keys), "the default names and the known names are the same set")
     }
 
     private static func testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode() {
@@ -388,18 +389,19 @@ struct SystemBarPluginTests {
         for plugin in plugins {
             guard let backed = plugin as? MonitorBackedTab else {
                 expect(false, "\(plugin.title) must say which MonitorMode drives its sampling until it owns a collector")
-                return
+                continue
             }
             expect(backed.monitorMode.icon == plugin.systemImage, "\(plugin.title) keeps the icon its MonitorMode had")
             expect(backed.monitorMode.rawValue == plugin.title, "\(plugin.title) keeps the title its MonitorMode had")
         }
+        expect(plugins.compactMap { ($0 as? MonitorBackedTab)?.monitorMode } == MonitorMode.allCases,
+               "the default order is today's tab order, got \(plugins.map(\.title))")
     }
 
     private static func testBuiltinSourceNamesTheUnknownTab() {
-        let didThrow = (try? BuiltinTabSource().makeTab(for: entry("Weather.bundle"), host: makeHost())) == nil
-        expect(didThrow, "an unknown name throws")
         do {
             _ = try BuiltinTabSource().makeTab(for: entry("Weather.bundle"), host: makeHost())
+            expect(false, "an unknown name throws")
         } catch {
             expect("\(error)".contains("Weather.bundle") && "\(error)".contains("CPU.bundle"),
                    "the error names the bad name and lists the real ones, got: \(error)")

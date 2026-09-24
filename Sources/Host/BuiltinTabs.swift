@@ -10,19 +10,21 @@ protocol MonitorBackedTab: TabPlugin {
 }
 
 struct BuiltinTabSource: TabSource {
-    /// Keyed by the bundle name each tab will have once it is a real bundle, so a plugins.json
-    /// written today is still right then.
-    static let types: [String: TabPlugin.Type] = [
-        "CPU.bundle": CPUTab.self,
-        "Memory.bundle": MemoryTab.self,
-        "Disk.bundle": DiskTab.self,
-        "Network.bundle": NetworkTab.self,
-        "Power.bundle": PowerTab.self,
-        "Dev.bundle": DevTab.self,
+    /// One row per built-in, in today's tab order, keyed by the bundle name each tab will have
+    /// once it is a real bundle, so a plugins.json written today is still right then.
+    static let builtins: [(name: String, type: TabPlugin.Type)] = [
+        ("Power.bundle", PowerTab.self),
+        ("Dev.bundle", DevTab.self),
+        ("Memory.bundle", MemoryTab.self),
+        ("Disk.bundle", DiskTab.self),
+        ("Network.bundle", NetworkTab.self),
+        ("CPU.bundle", CPUTab.self),
     ]
 
-    /// The order a fresh plugins.json lists them in: today's tab order.
-    static let defaultNames = ["Power.bundle", "Dev.bundle", "Memory.bundle", "Disk.bundle", "Network.bundle", "CPU.bundle"]
+    /// The order a fresh plugins.json lists them in.
+    static let defaultNames = builtins.map(\.name)
+
+    static let types = Dictionary(uniqueKeysWithValues: builtins.map { ($0.name, $0.type) })
 
     func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin {
         guard let name = entry.name else {
@@ -37,7 +39,9 @@ struct BuiltinTabSource: TabSource {
 }
 
 // Each adapter's refreshInterval and sharedFeeds restate what MonitorSamplingPlan says about
-// that tab today. Nothing reads them yet; the host scheduler that will arrives in Stage 2.
+// that tab today, plus the 1-second fast feed wherever the panel reads it (today that feed runs
+// for every visible tab, so the plan never lists it). Nothing reads them yet; the host scheduler
+// that will arrives in Stage 2.
 
 final class PowerTab: MonitorBackedTab {
     static let identifier = "power"
@@ -47,11 +51,10 @@ final class PowerTab: MonitorBackedTab {
     let refreshInterval = MonitorSamplingPlan.powerRefreshInterval
     let sharedFeeds: Set<SharedFeed> = [.processes]
     let monitorMode = MonitorMode.power
-    private let monitor = UnifiedMonitor.shared
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(PowerPanel(monitor: monitor)) }
+    func makeView() -> AnyView { AnyView(PowerPanel(monitor: .shared)) }
 }
 
 final class DevTab: MonitorBackedTab {
@@ -62,11 +65,10 @@ final class DevTab: MonitorBackedTab {
     let refreshInterval = MonitorSamplingPlan.capacityRefreshInterval
     let sharedFeeds: Set<SharedFeed> = []
     let monitorMode = MonitorMode.developer
-    private let monitor = UnifiedMonitor.shared
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(DeveloperPanel(monitor: monitor)) }
+    func makeView() -> AnyView { AnyView(DeveloperPanel(monitor: .shared)) }
 }
 
 final class MemoryTab: MonitorBackedTab {
@@ -77,11 +79,10 @@ final class MemoryTab: MonitorBackedTab {
     let refreshInterval = MonitorSamplingPlan.memoryRefreshInterval
     let sharedFeeds: Set<SharedFeed> = [.processes]
     let monitorMode = MonitorMode.memory
-    private let monitor = UnifiedMonitor.shared
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(MemoryPanel(monitor: monitor)) }
+    func makeView() -> AnyView { AnyView(MemoryPanel(monitor: .shared)) }
 }
 
 final class DiskTab: MonitorBackedTab {
@@ -92,11 +93,10 @@ final class DiskTab: MonitorBackedTab {
     let refreshInterval = MonitorSamplingPlan.diskRefreshInterval
     let sharedFeeds: Set<SharedFeed> = []
     let monitorMode = MonitorMode.disk
-    private let monitor = UnifiedMonitor.shared
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(DiskPanel(monitor: monitor)) }
+    func makeView() -> AnyView { AnyView(DiskPanel(monitor: .shared)) }
 }
 
 final class NetworkTab: MonitorBackedTab {
@@ -105,13 +105,12 @@ final class NetworkTab: MonitorBackedTab {
     let systemImage = "arrow.up.arrow.down"
     let accent = Palette.blue
     let refreshInterval = MonitorSamplingPlan.networkRefreshInterval
-    let sharedFeeds: Set<SharedFeed> = []
+    let sharedFeeds: Set<SharedFeed> = [.fastStats]
     let monitorMode = MonitorMode.network
-    private let monitor = UnifiedMonitor.shared
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(NetworkPanel(monitor: monitor)) }
+    func makeView() -> AnyView { AnyView(NetworkPanel(monitor: .shared)) }
 }
 
 final class CPUTab: MonitorBackedTab {
@@ -120,11 +119,10 @@ final class CPUTab: MonitorBackedTab {
     let systemImage = "cpu"
     let accent = Palette.warning
     let refreshInterval = MonitorSamplingPlan.processRefreshInterval
-    let sharedFeeds: Set<SharedFeed> = [.processes]
+    let sharedFeeds: Set<SharedFeed> = [.processes, .fastStats]
     let monitorMode = MonitorMode.cpu
-    private let monitor = UnifiedMonitor.shared
 
     init(host: HostServices) {}
     func collect() {}
-    func makeView() -> AnyView { AnyView(CPUPanel(monitor: monitor)) }
+    func makeView() -> AnyView { AnyView(CPUPanel(monitor: .shared)) }
 }
