@@ -1,6 +1,6 @@
 # Local Swift build products
-SystemBar
-SystemBar.app/
+/SystemBar
+/SystemBar.app/
 build/
 
 # macOS

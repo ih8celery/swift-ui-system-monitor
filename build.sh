@@ -2,13 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-
-# One toolchain setting for every part, so the SDK's stable interface and the plugins built
-# against it agree on the language mode and the oldest macOS they run on.
-target=arm64-apple-macos14
-swift_version=5
-# `package` members (the host's side of a Feed) are visible to the app and the tests, never to a plugin.
-package_name=SystemBar
+source "$(dirname "$0")/toolchain.env"
 
 rm -rf build SystemBar.app
 mkdir -p build/Frameworks build/SDK
@@ -37,13 +31,16 @@ swiftc \
   $(find Sources/Host -name '*.swift' | sort)
 
 # 3. The bundle layout. Plugins find the SDK through @executable_path/../Frameworks, and a
-#    person building one points build-plugin.sh at this app to find Resources/SDK.
+#    person building one points build-plugin.sh at this app to find Resources/SDK. Only the
+#    textual interface ships: a plugin compiles against the public interface only, the way it
+#    will on any other compiler version; the binary .swiftmodule would expose package members
+#    to anyone passing -package-name, and .swiftsourceinfo carries this machine's source paths.
 mkdir -p SystemBar.app/Contents/MacOS SystemBar.app/Contents/Frameworks \
          SystemBar.app/Contents/Resources/SDK SystemBar.app/Contents/PlugIns
 cp -f Info.plist SystemBar.app/Contents/Info.plist
 cp -f build/SystemBar SystemBar.app/Contents/MacOS/SystemBar
 chmod 755 SystemBar.app/Contents/MacOS/SystemBar
 cp -f build/Frameworks/libSystemBarKit.dylib SystemBar.app/Contents/Frameworks/
-cp -f build/SDK/SystemBarKit.* SystemBar.app/Contents/Resources/SDK/
+cp -f build/SDK/SystemBarKit.swiftinterface SystemBar.app/Contents/Resources/SDK/
 
 echo "Built $(pwd)/SystemBar.app"
