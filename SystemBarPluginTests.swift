@@ -9,6 +9,16 @@ struct SystemBarPluginTests {
         testHostServicesForwardsToTheRunner()
         testRunnerPassesAnExplicitEnvironment()
         testRunnerInheritsTheEnvironmentByDefault()
+        testParserReadsEveryEntryShape()
+        testParserDefaultsEnabledToTrue()
+        testParserRejectsUnknownTopLevelKey()
+        testParserRejectsUnknownEntryKey()
+        testParserRejectsBothNameAndPath()
+        testParserRejectsNeitherNameNorPath()
+        testParserRejectsNonBooleanEnabled()
+        testParserRejectsNonListPlugins()
+        testParserReportsMalformedJSON()
+        testEncodeThenParseRoundTrips()
     }
 
     static func makeHost(
@@ -61,6 +71,92 @@ struct SystemBarPluginTests {
             return
         }
         expect(output.output.contains("\(key)="), "with no environment given, the child inherits this process's; expected \(key) in: \(output.output.prefix(200))")
+    }
+
+    // MARK: - Config parsing
+
+    private static func parse(_ json: String) -> Result<PluginConfig, PluginConfigError> {
+        PluginConfigParser.parse(Data(json.utf8))
+    }
+
+    private static func failure(_ result: Result<PluginConfig, PluginConfigError>) -> PluginConfigError? {
+        if case .failure(let error) = result { return error }
+        return nil
+    }
+
+    private static func testParserReadsEveryEntryShape() {
+        let result = parse("""
+        { "plugins": [
+            { "name": "CPU.bundle" },
+            { "path": "~/Library/Application Support/SystemBar/PlugIns/Leases.bundle", "enabled": true },
+            { "name": "Power.bundle", "enabled": false }
+        ] }
+        """)
+        let expected = PluginConfig(plugins: [
+            PluginEntry(name: "CPU.bundle", path: nil, isEnabled: true),
+            PluginEntry(name: nil, path: "~/Library/Application Support/SystemBar/PlugIns/Leases.bundle", isEnabled: true),
+            PluginEntry(name: "Power.bundle", path: nil, isEnabled: false),
+        ])
+        expect((try? result.get()) == expected, "name, path and enabled entries parse in order: \(result)")
+    }
+
+    private static func testParserDefaultsEnabledToTrue() {
+        let config = try? parse(#"{ "plugins": [ { "name": "CPU.bundle" } ] }"#).get()
+        expect(config?.plugins.first?.isEnabled == true, "an entry without \"enabled\" is enabled")
+    }
+
+    private static func testParserRejectsUnknownTopLevelKey() {
+        let error = failure(parse(#"{ "plugin": [] }"#))
+        expect(error == .unknownKey("plugin", where: "the top level"), "a misspelt top-level key is an error, got \(String(describing: error))")
+    }
+
+    private static func testParserRejectsUnknownEntryKey() {
+        let error = failure(parse(#"{ "plugins": [ { "name": "CPU.bundle", "enable": false } ] }"#))
+        expect(error == .unknownKey("enable", where: "plugins[0]"), "a misspelt entry key cannot silently do nothing, got \(String(describing: error))")
+    }
+
+    private static func testParserRejectsBothNameAndPath() {
+        let error = failure(parse(#"{ "plugins": [ { "name": "A.bundle", "path": "/x/A.bundle" } ] }"#))
+        expect(error == .entryHasBoth(where: "plugins[0]"), "an entry says where it is exactly one way, got \(String(describing: error))")
+    }
+
+    private static func testParserRejectsNeitherNameNorPath() {
+        let error = failure(parse(#"{ "plugins": [ { "name": "A.bundle" }, { "enabled": true } ] }"#))
+        expect(error == .entryNeedsNameOrPath(where: "plugins[1]"), "an entry with no location is an error at its own index, got \(String(describing: error))")
+    }
+
+    private static func testParserRejectsNonBooleanEnabled() {
+        let error = failure(parse(#"{ "plugins": [ { "name": "A.bundle", "enabled": 1 } ] }"#))
+        expect(error == .wrongType(key: "enabled", expected: "true or false", where: "plugins[0]"),
+               "JSON 1 is not a boolean even though NSNumber would let it through, got \(String(describing: error))")
+    }
+
+    private static func testParserRejectsNonListPlugins() {
+        let error = failure(parse(#"{ "plugins": { "name": "A.bundle" } }"#))
+        expect(error == .wrongType(key: "plugins", expected: "a list", where: "the top level"), "plugins must be a list, got \(String(describing: error))")
+    }
+
+    private static func testParserReportsMalformedJSON() {
+        guard case .malformedJSON(let detail)? = failure(parse(#"{ "plugins": [ "#)) else {
+            expect(false, "truncated JSON must be reported as malformed")
+            return
+        }
+        expect(!detail.isEmpty, "the malformed-JSON error carries Foundation's description of where it went wrong")
+    }
+
+    private static func testEncodeThenParseRoundTrips() {
+        let config = PluginConfig(plugins: [
+            PluginEntry(name: "CPU.bundle", path: nil, isEnabled: true),
+            PluginEntry(name: nil, path: "/tmp/Leases.bundle", isEnabled: false),
+        ])
+        guard let data = try? PluginConfigParser.encode(config) else {
+            expect(false, "encoding a config must not throw")
+            return
+        }
+        let text = String(decoding: data, as: UTF8.self)
+        expect(text.contains("\"enabled\" : false"), "a disabled entry writes enabled: false")
+        expect(!text.contains("\"enabled\" : true"), "an enabled entry leaves enabled out, since true is the default")
+        expect((try? PluginConfigParser.parse(data).get()) == config, "what encode writes, parse reads back unchanged")
     }
 }
 
