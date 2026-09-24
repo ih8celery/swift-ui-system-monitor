@@ -12,6 +12,7 @@ swiftc \
   $(find Sources -name '*.swift' | sort) \
   TestSupport.swift \
   SystemBarCapacityTests.swift \
+  SystemBarPluginTests.swift \
   SystemBarPerformanceTests.swift
 
 /tmp/SystemBarPerformanceTests
