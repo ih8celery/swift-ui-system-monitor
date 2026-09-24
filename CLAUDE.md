@@ -25,4 +25,4 @@ Subprocesses go through `UnifiedMonitor.runProcess`, which launches an explicit 
 
 Sampling intervals live together in `MonitorSamplingPlan` in `Sources/Models.swift`. The README documents them, so changing one means updating both.
 
-The config parser is deliberately strict: a key it does not recognize, or a value of the wrong type, is an error that names its place in the file. So adding a new config key needs a parser change and a test for it, not just a new field on the struct. Tests must never touch the real `~/Library/Application Support/SystemBar/` — the store takes a directory as a parameter, and tests point it at a temporary one instead.
+The config parser is deliberately strict: a key it does not recognize, or a value of the wrong type, is an error that names its place in the file. So adding a new config key needs a parser change and a test for it, not just a new field on the struct. Tests must never touch the real `~/Library/Application Support/SystemBar/`: `PluginConfigStore` takes the full file URL, `standard()` derives it from `SYSTEMBAR_PLUGINS_FILE` or Application Support, and the tests build their own path inside a temporary folder.
