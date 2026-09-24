@@ -15,6 +15,12 @@ struct FoundationBundleLoader: BundleLoading {
         guard let bundle = Bundle(url: url) else {
             throw TabLoadError(description: "\(url.lastPathComponent) is not a bundle")
         }
+        // loadAndReturnError() overwrites NSPrincipalClass in the bundle's info dictionary with
+        // whatever class Foundation falls back to, so the real value has to be read before that
+        // call, not after it. A bundle with no principal class is refused here and never loaded.
+        guard let name = bundle.object(forInfoDictionaryKey: "NSPrincipalClass") as? String, !name.isEmpty else {
+            throw TabLoadError(description: "\(url.lastPathComponent)'s Info.plist has no NSPrincipalClass")
+        }
         do {
             try bundle.loadAndReturnError()
         } catch {
@@ -29,12 +35,10 @@ struct FoundationBundleLoader: BundleLoading {
             }
             throw TabLoadError(description: reason)
         }
-        guard let name = bundle.object(forInfoDictionaryKey: "NSPrincipalClass") as? String, !name.isEmpty else {
-            throw TabLoadError(description: "\(url.lastPathComponent)'s Info.plist has no NSPrincipalClass")
-        }
-        // Bundle.classNamed looks the name up in the ObjC runtime, not in this bundle's own
-        // image: two bundles exporting the same @objc class name collide there and the first
-        // loaded wins, so a plugin's class name should be unique to it.
+        // Bundle.classNamed only finds a class in this bundle's own code: when two bundles export
+        // the same @objc class name, the ObjC runtime keeps whichever loaded first, and the
+        // second bundle is refused right here with "its code has no class by that name" — so a
+        // plugin's class name must be unique to it.
         guard let cls = bundle.classNamed(name) else {
             throw TabLoadError(description: "\(url.lastPathComponent) names the class \"\(name)\" in NSPrincipalClass, but its code has no class by that name")
         }

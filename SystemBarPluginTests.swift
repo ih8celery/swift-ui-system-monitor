@@ -54,6 +54,7 @@ struct SystemBarPluginTests {
         testBuiltinSourceDoesNotTakePaths()
         testPluginPathResolvesNamesInsideThePlugInsFolder()
         testPluginPathRejectsNamesThatLeaveTheFolder()
+        testPluginPathKeepsAStrangeNameInsideTheFolder()
         testPluginPathResolvesAbsoluteAndTildePaths()
         testPluginPathRejectsRelativeAndEmptyPaths()
         testBundleSourceReportsEachFailureStep()
@@ -61,6 +62,7 @@ struct SystemBarPluginTests {
         testHostSourcePrefersABundleOverTheCompiledInTab()
         testFoundationLoaderReportsAFolderWithNoExecutable()
         testFoundationLoaderRefusesAPlainFile()
+        testFoundationLoaderRefusesABundleWithNoPrincipalClass()
         testRelauncherBuildsLaunchctlArguments()
         testRelauncherReadsThePidFromLaunchctlPrint()
         testFeedHoldsTheLatestValueAndPublishesTheNext()
@@ -537,16 +539,23 @@ struct SystemBarPluginTests {
     }
 
     private static func testPluginPathRejectsNamesThatLeaveTheFolder() {
-        for bad in ["", "..", "../Other.bundle", "a/b.bundle", "/etc/passwd", ".", "..\u{0}x"] {
+        for bad in ["", ".", "..", "../Other.bundle", "a/b.bundle", "/etc/passwd"] {
             do {
-                let url = try PluginPath.resolve(entry(bad), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
-                // A name with a NUL byte is not refused outright, but URL escaping keeps it
-                // inside the PlugIns folder rather than letting it resolve outside it.
-                expect(url.path.hasPrefix(plugIns.path), "the name \"\(bad)\" must not resolve outside the PlugIns folder, got \(url.path)")
+                _ = try PluginPath.resolve(entry(bad), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
+                expect(false, "the name \"\(bad)\" must be refused")
             } catch {
                 expect("\(error)".contains("\"\(bad)\""), "the error quotes the bad name, got: \(error)")
             }
         }
+    }
+
+    private static func testPluginPathKeepsAStrangeNameInsideTheFolder() {
+        // appendingPathComponent does not collapse ".." on its own, but a NUL byte is not a
+        // legal path character, so it is percent-encoded rather than letting the name walk out
+        // of the folder: the resolved URL's parent is still PlugIns.
+        let url = try? PluginPath.resolve(entry("..\u{0}x"), builtInPlugInsURL: plugIns, homeDirectory: "/Users/x")
+        expect(url?.standardizedFileURL.deletingLastPathComponent().path == plugIns.path,
+               "a name with a NUL byte stays inside the PlugIns folder, got \(String(describing: url?.path))")
     }
 
     private static func testPluginPathResolvesAbsoluteAndTildePaths() {
@@ -650,6 +659,33 @@ struct SystemBarPluginTests {
             expect(false, "a plain file named Y.bundle must fail to load")
         } catch {
             expect("\(error)".contains("is not a bundle"), "expected the reason to say it is not a bundle, got: \(error)")
+        }
+    }
+
+    private static func testFoundationLoaderRefusesABundleWithNoPrincipalClass() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let bundleURL = folder.appendingPathComponent("Z.bundle")
+        let contentsURL = bundleURL.appendingPathComponent("Contents")
+        expect((try? FileManager.default.createDirectory(at: contentsURL, withIntermediateDirectories: true)) != nil, "setup: create Z.bundle/Contents")
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleExecutable</key>
+            <string>Z</string>
+        </dict>
+        </plist>
+        """
+        expect((try? Data(plist.utf8).write(to: contentsURL.appendingPathComponent("Info.plist"))) != nil, "setup: write Z.bundle's Info.plist")
+        do {
+            // No NSPrincipalClass, and no binary either: this must be refused before Foundation
+            // ever tries to load it.
+            _ = try FoundationBundleLoader().principalClass(at: bundleURL)
+            expect(false, "a bundle with no NSPrincipalClass must be refused")
+        } catch {
+            expect("\(error)".contains("NSPrincipalClass"), "the error names the missing key, got: \(error)")
         }
     }
 
