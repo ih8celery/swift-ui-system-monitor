@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 import SystemBarKit
@@ -58,7 +59,8 @@ final class UnifiedMonitor: ObservableObject {
     var hostnameCache: [String: HostnameCacheEntry] = [:]
     var hostnameLookupsInFlight = Set<String>()
     private var isWindowVisible = false
-    private var activeMode = MonitorMode.memory
+    private var activeMode: MonitorMode?
+    private var activeFeeds: Set<SharedFeed> = []
 
     var memory: MemorySnapshot { memoryStats.memory }
     var gpu: GPUSnapshot { memoryStats.gpu }
@@ -182,18 +184,30 @@ final class UnifiedMonitor: ObservableObject {
         self.diskTimer = diskTimer
     }
 
-    func updatePresentation(isVisible: Bool, mode: MonitorMode) {
+    func updatePresentation(isVisible: Bool, mode: MonitorMode?, feeds: Set<SharedFeed>) {
         slowQueue.async { [weak self] in
             guard let self else { return }
             let becameVisible = isVisible && !self.isWindowVisible
-            let modeChanged = mode != self.activeMode
+            let changed = mode != self.activeMode || feeds != self.activeFeeds
             self.isWindowVisible = isVisible
             self.activeMode = mode
+            self.activeFeeds = feeds
 
-            if becameVisible || modeChanged {
+            if becameVisible || changed {
                 self.collectVisibleStats()
             }
         }
+    }
+
+    private var feedSinks: [AnyCancellable] = []
+
+    /// Every process summary and fast sample this monitor publishes also goes to the host's
+    /// feeds, so a plugin from a bundle reads the same readings the compiled-in tabs do.
+    func forward(processes: Feed<ProcessSummary>, fastStats: Feed<FastStatsSnapshot>) {
+        feedSinks = [
+            $processSummary.dropFirst().sink { processes.send($0) },
+            $fastStats.dropFirst().sink { fastStats.send($0) },
+        ]
     }
 
     deinit {
@@ -207,7 +221,7 @@ final class UnifiedMonitor: ObservableObject {
     }
 
     private var visibleJobs: Set<MonitorJob> {
-        MonitorSamplingPlan.jobs(isVisible: isWindowVisible, mode: activeMode)
+        MonitorSamplingPlan.jobs(isVisible: isWindowVisible, mode: activeMode, feeds: activeFeeds)
     }
 
     // Each check hops from slowQueue to its own dedicated queue here, so a

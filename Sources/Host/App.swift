@@ -10,6 +10,7 @@ struct SystemBarApp: App {
     private let configPath: String
     private let processes = Feed(initial: ProcessSummary())
     private let fastStats = Feed(initial: FastStatsSnapshot())
+    private let scheduler = PluginScheduler()
 
     init() {
         let store = PluginConfigStore.standard()
@@ -31,12 +32,14 @@ struct SystemBarApp: App {
             PluginListReport.lines(for: loaded).forEach { print($0) }
             exit(0)
         }
+
+        UnifiedMonitor.shared.forward(processes: processes, fastStats: fastStats)
     }
 
     var body: some Scene {
         MenuBarExtra {
             // UnifiedMonitor.shared starts its timers when first created, so nothing else starts it.
-            RootView(monitor: UnifiedMonitor.shared, tabs: tabs, configPath: configPath)
+            RootView(monitor: UnifiedMonitor.shared, tabs: tabs, configPath: configPath, scheduler: scheduler)
         } label: {
             Image(systemName: "percent")
         }

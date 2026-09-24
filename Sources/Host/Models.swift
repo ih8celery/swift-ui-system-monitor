@@ -331,6 +331,18 @@ struct MonitorSamplingPlan {
     /// Whole-scan ceiling, kept well under the refresh interval so scans never overlap.
     static let diskHogScanBudget: TimeInterval = 240
 
+    /// What runs for the selected tab: the compiled-in plan for its mode, if it has one, plus
+    /// the shared samplers the plugin declares. A tab from a bundle has no mode.
+    static func jobs(isVisible: Bool, mode: MonitorMode?, feeds: Set<SharedFeed>) -> Set<MonitorJob> {
+        guard isVisible else { return [] }
+        var jobs = mode.map { Self.jobs(isVisible: true, mode: $0) } ?? []
+        if feeds.contains(.processes) {
+            jobs.insert(.processes)
+        }
+        // .fastStats is not a job here: the 1-second sampler already runs whenever the window is open.
+        return jobs
+    }
+
     static func jobs(isVisible: Bool, mode: MonitorMode) -> Set<MonitorJob> {
         guard isVisible else { return [] }
 

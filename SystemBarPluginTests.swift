@@ -67,6 +67,9 @@ struct SystemBarPluginTests {
         testRelauncherReadsThePidFromLaunchctlPrint()
         testFeedHoldsTheLatestValueAndPublishesTheNext()
         testHostServicesCarriesTheFeedsItWasBuiltWith()
+        testSchedulerCollectsOnlyWhileVisibleAndNeverOverlaps()
+        testSchedulerCollectsAtOnceWhenATabAppears()
+        testSamplingPlanAddsTheProcessesJobForAPluginThatDeclaresIt()
     }
 
     static func makeHost(
@@ -753,6 +756,39 @@ struct SystemBarPluginTests {
         feed.send(ProcessSummary(rows: [ProcessSnapshot(name: "x", count: 1, physical: 1, virtualSize: 1, cpu: 1)], limit: 1))
         expect(host.processes.value.totalCount == 1, "a reading sent to the feed is visible through the host")
     }
+
+    // MARK: - Scheduler
+
+    private static func testSchedulerCollectsOnlyWhileVisibleAndNeverOverlaps() {
+        let plugin = TickingTab(host: makeHost())
+        let scheduler = PluginScheduler()
+        scheduler.setVisible(plugin, true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        let whileVisible = plugin.count
+        expect(whileVisible >= 3, "a visible tab is collected every refreshInterval, got \(whileVisible) in 0.4s at 0.05s")
+        expect(!plugin.overlapped, "collect never runs concurrently with itself")
+        scheduler.setVisible(plugin, false)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        let afterHiding = plugin.count
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        expect(plugin.count == afterHiding, "a hidden tab is not collected, got \(plugin.count - afterHiding) more collects")
+    }
+
+    private static func testSchedulerCollectsAtOnceWhenATabAppears() {
+        let plugin = TickingTab(host: makeHost())
+        let scheduler = PluginScheduler()
+        scheduler.setVisible(plugin, true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        expect(plugin.count >= 1, "showing a tab collects immediately, not after the first interval")
+        scheduler.setVisible(plugin, false)
+    }
+
+    private static func testSamplingPlanAddsTheProcessesJobForAPluginThatDeclaresIt() {
+        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: nil, feeds: [.processes]) == [.processes], "a bundle tab that wants the process feed runs only that sampler")
+        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: nil, feeds: []).isEmpty, "a bundle tab that wants nothing runs nothing")
+        expect(MonitorSamplingPlan.jobs(isVisible: false, mode: nil, feeds: [.processes]).isEmpty, "hidden means nothing runs, whatever is declared")
+        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .disk, feeds: [.processes]) == [.disk, .processes], "a compiled-in tab's plan and its declared feeds add up")
+    }
 }
 
 /// Captures what a `@Sendable` runner closure saw. A closure of that shape cannot mutate a
@@ -857,4 +893,33 @@ struct FakeBundleLoader: BundleLoading {
         }
         return cls
     }
+}
+
+/// Counts collects and checks none overlap, with an interval short enough to observe.
+final class TickingTab: TabPlugin {
+    static let identifier = "ticking"
+    let title = "Ticking"
+    let systemImage = "metronome"
+    let accent = Color.gray
+    let refreshInterval: TimeInterval = 0.05
+    let sharedFeeds: Set<SharedFeed> = []
+    private let lock = NSLock()
+    private var inFlight = false
+    private(set) var collects = 0
+    private(set) var overlapped = false
+
+    init(host: HostServices) {}
+
+    func collect() {
+        lock.withLock {
+            if inFlight { overlapped = true }
+            inFlight = true
+            collects += 1
+        }
+        Thread.sleep(forTimeInterval: 0.02)
+        lock.withLock { inFlight = false }
+    }
+
+    var count: Int { lock.withLock { collects } }
+    @MainActor func makeView() -> AnyView { AnyView(Text("ticking")) }
 }

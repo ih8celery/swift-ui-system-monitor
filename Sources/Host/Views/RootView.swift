@@ -8,6 +8,7 @@ struct RootView: View {
     let monitor: UnifiedMonitor
     let tabs: [LoadedTab]
     let configPath: String
+    let scheduler: PluginScheduler
     /// An index, not an id: a failed tab has no id, and two failures may share a location.
     @State private var selection = 0
     @State private var isRelaunching = false
@@ -115,17 +116,19 @@ struct RootView: View {
         }
     }
 
-    /// Tells the monitor which of its samplers the selected tab needs. Until every tab is a real
-    /// plugin, that rule still lives in MonitorSamplingPlan, keyed by MonitorMode; an error tab
-    /// or an empty list needs nothing, so the monitor is told the window is effectively hidden.
+    /// Tells the scheduler and the monitor what the selected tab needs. A compiled-in tab still
+    /// keys the monitor's own samplers by MonitorMode; a tab from a bundle has no mode and gets
+    /// only the feeds it declares; an error tab or an empty list needs nothing.
     private func present(index: Int, isVisible: Bool) {
         let plugin = loadedPlugin(at: index)
         plugin?.visibilityChanged(isVisible: isVisible)
-        guard let backed = plugin as? MonitorBackedTab else {
-            // The mode is ignored while nothing is visible; .memory is just a placeholder.
-            monitor.updatePresentation(isVisible: false, mode: .memory)
-            return
+        if let plugin {
+            scheduler.setVisible(plugin, isVisible)
         }
-        monitor.updatePresentation(isVisible: isVisible, mode: backed.monitorMode)
+        monitor.updatePresentation(
+            isVisible: isVisible && plugin != nil,
+            mode: (plugin as? MonitorBackedTab)?.monitorMode,
+            feeds: plugin?.sharedFeeds ?? []
+        )
     }
 }
