@@ -4,82 +4,120 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var monitor: UnifiedMonitor
-    @State private var mode = MonitorMode.memory
+    let tabs: [LoadedTab]
+    let configPath: String
+    /// An index, not an id: a failed tab has no id, and two failures may share a location.
+    @State private var selection = 0
+    @State private var isRelaunching = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: mode.icon)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 28)
-
-                Picker("Mode", selection: $mode) {
-                    ForEach(MonitorMode.allCases) { mode in
-                        Label(mode.rawValue, systemImage: mode.icon)
-                            .help(mode.rawValue)
-                            .tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelStyle(.titleAndIcon)
-                .labelsHidden()
-
-                Button {
-                    NSApplication.shared.terminate(nil)
-                } label: {
-                    Image(systemName: "power")
-                }
-                .buttonStyle(.borderless)
-                .help("Quit SystemBar")
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            header
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
 
             Divider().background(Color.white.opacity(0.08))
 
-            Group {
-                switch mode {
-                case .power:
-                    PowerPanel(monitor: monitor)
-                case .developer:
-                    DeveloperPanel(monitor: monitor)
-                case .memory:
-                    MemoryPanel(monitor: monitor)
-                case .disk:
-                    DiskPanel(monitor: monitor)
-                case .network:
-                    NetworkPanel(monitor: monitor)
-                case .cpu:
-                    CPUPanel(monitor: monitor)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 900, height: 680)
         .background(Palette.background)
         .foregroundStyle(Palette.foreground)
         .onAppear {
-            monitor.updatePresentation(isVisible: true, mode: mode)
+            present(index: selection, isVisible: true)
         }
         .onDisappear {
-            monitor.updatePresentation(isVisible: false, mode: mode)
+            present(index: selection, isVisible: false)
         }
-        .onChange(of: mode) { _, newMode in
-            monitor.updatePresentation(isVisible: true, mode: newMode)
+        .onChange(of: selection) { previous, current in
+            loadedPlugin(at: previous)?.visibilityChanged(isVisible: false)
+            present(index: current, isVisible: true)
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: selectedTab?.systemImage ?? "questionmark")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: 28)
+
+            Picker("Tab", selection: $selection) {
+                ForEach(Array(tabs.enumerated()), id: \.offset) { offset, tab in
+                    Label(tab.title, systemImage: tab.systemImage)
+                        .help(tab.title)
+                        .tag(offset)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelStyle(.titleAndIcon)
+            .labelsHidden()
+
+            Button {
+                relaunch()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .disabled(isRelaunching)
+            .help("Relaunch SystemBar to apply plugins.json")
+
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Image(systemName: "power")
+            }
+            .buttonStyle(.borderless)
+            .help("Quit SystemBar")
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch selectedTab {
+        case .loaded(_, let plugin)?:
+            plugin.makeView()
+        case let .failed(location, reason)?:
+            ErrorTabView(location: location, reason: reason, configPath: configPath)
+        case nil:
+            NoTabsView(configPath: configPath)
+        }
+    }
+
+    private var selectedTab: LoadedTab? {
+        tabs.indices.contains(selection) ? tabs[selection] : nil
     }
 
     private var accent: Color {
-        switch mode {
-        case .power: return Palette.caution
-        case .developer: return Palette.purple
-        case .memory: return Palette.good
-        case .disk: return Palette.cyan
-        case .network: return Palette.blue
-        case .cpu: return Palette.warning
+        loadedPlugin(at: selection)?.accent ?? Palette.critical
+    }
+
+    private func loadedPlugin(at index: Int) -> TabPlugin? {
+        tabs.indices.contains(index) ? tabs[index].plugin : nil
+    }
+
+    /// The probe of launchd can take a moment, so it runs off the main thread and the button is
+    /// disabled meanwhile so a second press cannot start two copies. A relaunch that succeeds
+    /// ends this process; one that fails logs why and re-enables the button.
+    private func relaunch() {
+        isRelaunching = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            Relauncher.relaunch(log: { NSLog("%@", $0) })
+            DispatchQueue.main.async { isRelaunching = false }
         }
     }
+
+    /// Tells the monitor which of its samplers the selected tab needs. Until every tab is a real
+    /// plugin, that rule still lives in MonitorSamplingPlan, keyed by MonitorMode; an error tab
+    /// or an empty list needs nothing, so the monitor is told the window is effectively hidden.
+    private func present(index: Int, isVisible: Bool) {
+        let plugin = loadedPlugin(at: index)
+        plugin?.visibilityChanged(isVisible: isVisible)
+        guard let backed = plugin as? MonitorBackedTab else {
+            monitor.updatePresentation(isVisible: false, mode: .memory)
+            return
+        }
+        monitor.updatePresentation(isVisible: isVisible, mode: backed.monitorMode)
+    }
 }
-
-

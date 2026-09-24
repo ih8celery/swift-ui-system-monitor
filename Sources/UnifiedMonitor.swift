@@ -89,7 +89,7 @@ final class UnifiedMonitor: ObservableObject {
     /// until each owns its own collector. Deleted with the class.
     static let shared = UnifiedMonitor()
 
-    init() {
+    private init() {
         start()
     }
 
