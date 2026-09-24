@@ -441,6 +441,9 @@ struct SystemBarPluginTests {
         """
         expect(Relauncher.pid(fromLaunchctlPrint: output) == 4242, "the running pid is read from the 'pid = N' line")
         expect(Relauncher.pid(fromLaunchctlPrint: "state = not running") == nil, "no pid line means no running instance")
+        expect(Relauncher.pid(fromLaunchctlPrint: "\tpid = 4242\t") == 4242, "real launchctl output indents with tabs")
+        expect(Relauncher.pid(fromLaunchctlPrint: "pid = abc") == nil, "a pid that is not a number is no pid")
+        expect(Relauncher.pid(fromLaunchctlPrint: "pid = 99999999999") == nil, "a pid too big for Int32 is no pid")
     }
 }
 
