@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import SystemBarKit
 
 extension UnifiedMonitor {
     /// One tick of the Dev tab's sampler: find the expensive work, trace it to projects, and measure

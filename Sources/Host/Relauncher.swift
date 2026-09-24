@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SystemBarKit
 
 /// "Edit plugins.json and restart" needs a one-click restart. Under the LaunchAgent that
 /// install.sh registers, launchd owns the process and KeepAlive would restart a quit copy

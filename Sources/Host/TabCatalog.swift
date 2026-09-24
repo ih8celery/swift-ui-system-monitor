@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 /// The outcome of one enabled config entry. A failure keeps its place in the tab order so the
 /// window can show it where the tab would have been.

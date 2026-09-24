@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 /// One `proc_pid_rusage` reading for one process. Everything here is per-PID, which is exactly why
 /// it can be attributed to a project without guessing.

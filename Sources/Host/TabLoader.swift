@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 /// What the app does at launch, in one testable place: read (or create) plugins.json, then
 /// build the tab list. A file that cannot be read, parsed, or written gives one error tab

@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 /// What the Dev tab shows: how much room the machine has left, and which projects are using it.
 struct CapacitySnapshot {

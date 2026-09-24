@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import SystemBarKit
 
 struct NetworkPanel: View {
     @ObservedObject var monitor: UnifiedMonitor

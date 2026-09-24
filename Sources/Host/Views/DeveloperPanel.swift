@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import SystemBarKit
 
 /// The Dev tab: how much room the machine has left, and which projects are using it.
 struct DeveloperPanel: View {

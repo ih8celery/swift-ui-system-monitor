@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Foundation
 import SwiftUI
+import SystemBarKit
 
 extension UnifiedMonitor {
     func collectMemory() {

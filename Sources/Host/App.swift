@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import SystemBarKit
 
 #if !TESTING
 @main

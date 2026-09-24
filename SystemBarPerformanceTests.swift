@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 @main
 struct SystemBarPerformanceTests {

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import SystemBarKit
 
 /// Shown in place of a tab whose plugins.json entry could not be loaded. The point is that a
 /// typo in the file is visible in the app, not in a log nobody opens.

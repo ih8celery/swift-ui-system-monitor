@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 extension UnifiedMonitor {
     /// The collectors still call this. It is a forwarder until each collector moves into its

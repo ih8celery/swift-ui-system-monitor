@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import SwiftUI
+import SystemBarKit
 
 /// Tests for the plugin model: the contract a tab conforms to and the runner the host gives it.
 /// Later tasks add the config file and the catalog here.

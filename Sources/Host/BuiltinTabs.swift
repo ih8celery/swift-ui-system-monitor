@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import SystemBarKit
 
 /// Stage 1 of the plugin conversion: the six tabs still compile into the app and still read the
 /// one `UnifiedMonitor`, but the window only knows them through `TabPlugin`. This protocol is

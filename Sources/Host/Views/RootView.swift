@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import SystemBarKit
 
 struct RootView: View {
     // Not observed: the panels observe the monitor themselves; RootView only tells it what is visible.

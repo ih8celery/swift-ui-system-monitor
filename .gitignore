@@ -1,6 +1,7 @@
 # Local Swift build products
 SystemBar
 SystemBar.app/
+build/
 
 # macOS
 .DS_Store

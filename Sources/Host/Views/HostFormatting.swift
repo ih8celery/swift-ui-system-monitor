@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 /// Formatters used by exactly one or two built-in panels, so they stay in the app instead of
 /// the Kit's public surface.
