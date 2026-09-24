@@ -34,6 +34,11 @@ struct SystemBarPluginTests {
         testStoreReportsAnUnwritableLocation()
         testStoreExpandsTildeInTheOverride()
         testStoreSaysWhenAFolderSitsWhereTheFileShouldBe()
+        testCatalogKeepsOrderAndSkipsDisabledEntries()
+        testCatalogShowsAFailedEntryInItsPlace()
+        testCatalogRefusesADuplicateIdentifier()
+        testCatalogCarriesOnAfterAFailure()
+        testListReportPrintsOneLinePerEntry()
     }
 
     static func makeHost(
@@ -308,6 +313,55 @@ struct SystemBarPluginTests {
         }
         expect(error.description.contains("is a folder"), "the message says what is actually there, got: \(error.description)")
     }
+
+    // MARK: - Catalog
+
+    private static let fakeSource = MapTabSource(types: ["fake": FakeTab.self, "other": OtherFakeTab.self])
+
+    private static func entry(_ name: String, enabled: Bool = true) -> PluginEntry {
+        PluginEntry(name: name, path: nil, isEnabled: enabled)
+    }
+
+    private static func testCatalogKeepsOrderAndSkipsDisabledEntries() {
+        let config = PluginConfig(plugins: [entry("other"), entry("fake", enabled: false), entry("fake")])
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        expect(tabs.count == 2, "a disabled entry produces no tab at all, got \(tabs.count)")
+        expect(tabs.map(\.title) == ["Other", "Fake"], "tabs come out in file order, got \(tabs.map(\.title))")
+    }
+
+    private static func testCatalogShowsAFailedEntryInItsPlace() {
+        let config = PluginConfig(plugins: [entry("fake"), entry("nope")])
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        guard tabs.count == 2, case let .failed(location, reason) = tabs[1] else {
+            expect(false, "an entry the source cannot load is a failed tab at its own position, got \(tabs)")
+            return
+        }
+        expect(location == "nope" && reason == "no tab for nope", "the failure names the entry and repeats the source's reason")
+        expect(tabs[1].title == "Error" && tabs[1].plugin == nil, "a failed tab is titled Error and has no plugin")
+    }
+
+    private static func testCatalogRefusesADuplicateIdentifier() {
+        let config = PluginConfig(plugins: [entry("fake"), entry("fake")])
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        guard tabs.count == 2, case .loaded = tabs[0], case let .failed(_, reason) = tabs[1] else {
+            expect(false, "the first of two plugins with one id loads and the second fails, got \(tabs)")
+            return
+        }
+        expect(reason.contains("\"fake\""), "the duplicate failure names the clashing id, got: \(reason)")
+    }
+
+    private static func testCatalogCarriesOnAfterAFailure() {
+        let config = PluginConfig(plugins: [entry("nope"), entry("other")])
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        expect(tabs.map(\.title) == ["Error", "Other"], "a failure earlier in the list does not stop later entries, got \(tabs.map(\.title))")
+    }
+
+    private static func testListReportPrintsOneLinePerEntry() {
+        let config = PluginConfig(plugins: [entry("fake"), entry("nope")])
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        expect(PluginListReport.lines(for: tabs) == ["ok fake Fake fake", "error nope: no tab for nope"],
+               "--list-plugins prints ok/error lines in order, got \(PluginListReport.lines(for: tabs))")
+    }
 }
 
 /// The smallest possible plugin. Shared by every test that needs a tab.
@@ -322,4 +376,30 @@ final class FakeTab: TabPlugin {
     init(host: HostServices) {}
     func collect() {}
     func makeView() -> AnyView { AnyView(Text("fake")) }
+}
+
+/// A second plugin with its own id, for duplicate-id and ordering tests.
+final class OtherFakeTab: TabPlugin {
+    static let identifier = "other"
+    let title = "Other"
+    let systemImage = "circle"
+    let accent = Color.gray
+    let refreshInterval: TimeInterval = 5
+    let sharedFeeds: Set<SharedFeed> = []
+
+    init(host: HostServices) {}
+    func collect() {}
+    func makeView() -> AnyView { AnyView(Text("other")) }
+}
+
+/// A source that knows a fixed set of names, standing in for built-ins and, later, bundles.
+struct MapTabSource: TabSource {
+    let types: [String: TabPlugin.Type]
+
+    func makeTab(for entry: PluginEntry, host: HostServices) throws -> TabPlugin {
+        guard let name = entry.name, let type = types[name] else {
+            throw TabLoadError(description: "no tab for \(entry.location)")
+        }
+        return type.init(host: host)
+    }
 }
