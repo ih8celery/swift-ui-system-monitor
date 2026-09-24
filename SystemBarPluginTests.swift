@@ -1,12 +1,14 @@
 import Foundation
 import SwiftUI
 
-/// Tests for the plugin model: the contract a tab conforms to, the config file that lists tabs,
-/// and the catalog that turns that file into loaded tabs or visible failures.
+/// Tests for the plugin model: the contract a tab conforms to and the runner the host gives it.
+/// Later tasks add the config file and the catalog here.
 struct SystemBarPluginTests {
     static func runAll() {
         testPluginIsConstructedThroughItsMetatype()
         testHostServicesForwardsToTheRunner()
+        testRunnerPassesAnExplicitEnvironment()
+        testRunnerInheritsTheEnvironmentByDefault()
     }
 
     static func makeHost(
@@ -26,7 +28,7 @@ struct SystemBarPluginTests {
         expect(plugin.title == "Fake", "the instance carries its title")
         _ = plugin.makeView()
         plugin.visibilityChanged(isVisible: true)
-        expect(true, "visibilityChanged has a default implementation, so a plugin need not write one")
+        // FakeTab does not write visibilityChanged; compiling it proves the default exists.
     }
 
     private static func testHostServicesForwardsToTheRunner() {
@@ -39,6 +41,20 @@ struct SystemBarPluginTests {
         expect(output.output == "ran", "run returns what the runner returned")
         expect(seen?.path == "/bin/echo" && seen?.arguments == ["hi"], "path and arguments reach the runner unchanged")
         expect(seen?.environment == ["PATH": "/x"] && seen?.timeout == 3, "environment and timeout reach the runner unchanged")
+    }
+
+    // MARK: - Runner
+
+    private static func testRunnerPassesAnExplicitEnvironment() {
+        let output = ProcessRunner.run(path: "/usr/bin/env", arguments: [], environment: ["SYSTEMBAR_TEST": "yes"])
+        expect(output.status == 0, "env should exit cleanly")
+        expect(output.output.trimmingCharacters(in: .whitespacesAndNewlines) == "SYSTEMBAR_TEST=yes",
+               "an explicit environment replaces the inherited one entirely, got: \(output.output)")
+    }
+
+    private static func testRunnerInheritsTheEnvironmentByDefault() {
+        let output = ProcessRunner.run(path: "/usr/bin/env", arguments: [])
+        expect(output.output.contains("HOME="), "with no environment given, the child inherits this process's")
     }
 }
 
