@@ -1659,6 +1659,8 @@ and change `TabLoader` (and any other user of `BuiltinTabSource.defaultNames`) t
 
 - [ ] **Step 5: build-plugin.sh and the build scripts**
 
+Note: since Task 4's review, the app ships only `Contents/Resources/SDK/SystemBarKit.swiftinterface` (no binary module), `build/SDK/` still holds everything, and `build.sh`/`test.sh` source `toolchain.env` for `target`, `swift_version`, `package_name`; the test binary is `build/SystemBarTests`. Read the current scripts before editing them.
+
 Create `build-plugin.sh`:
 
 ```zsh
@@ -1691,14 +1693,27 @@ fi
 
 name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$src/Info.plist")
 
+# The interface header records the target and language mode the SDK was built with; building
+# the plugin with the same two means the two always agree, whatever toolchain.env says today.
+flags=$(grep -m1 '^// swift-module-flags:' "$sdk/SystemBarKit.swiftinterface")
+target=$(sed -E 's/.*-target ([^ ]+).*/\1/' <<< "$flags")
+swift_version=$(sed -E 's/.*-swift-version ([^ ]+).*/\1/' <<< "$flags")
+if [[ -z "$target" || -z "$swift_version" ]]; then
+  echo "build-plugin.sh: could not read -target and -swift-version from $sdk/SystemBarKit.swiftinterface" >&2
+  exit 65
+fi
+
 rm -rf "$out"
 mkdir -p "$out/Contents/MacOS"
 
+# An app ships only the textual interface, which the compiler turns into a module on first use;
+# it gets its own cache so that never depends on, or pollutes, the system one.
 # @executable_path is the app that loads the bundle, so the SDK is found wherever the bundle lives.
 # No -package-name here: a plugin sees only the SDK's public interface.
 swiftc \
   -emit-library -parse-as-library -module-name "$name" \
-  -swift-version 5 -target arm64-apple-macos14 \
+  -swift-version "$swift_version" -target "$target" \
+  -module-cache-path "${TMPDIR:-/tmp}/systembar-plugin-module-cache" \
   -I "$sdk" -L "$libs" -lSystemBarKit \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
   -framework SwiftUI -framework AppKit \
@@ -1719,7 +1734,7 @@ for dir in Plugins/*/; do
 done
 ```
 
-In `test.sh`, the source list gains every plugin's sources and tests: after `$(find Sources/Host -name '*.swift' | sort) \` add `$(find Plugins -path '*/Sources/*.swift' -o -path '*/Tests/*.swift' | sort) \`.
+In `test.sh`, the source list gains every plugin's sources and tests: after `$(find Sources/Host -name '*.swift' | sort) \` add `$(find Plugins -path '*/Sources/*.swift' -o -path '*/Tests/*.swift' | sort) \`. In `build.sh`, the plugin loop passes `build` as the SDK location (it has the interface and the dylib), so the shipped Power.bundle is built with the same flags a user's bundle gets.
 
 - [ ] **Step 6: Run the tests to see them pass, then the real thing**
 
@@ -1848,7 +1863,7 @@ struct HelloTabView: View {
 
 - [ ] **Step 2: The boundary check**
 
-Append to `test.sh`, after the test binary runs:
+Append to `test.sh`, after `build/SystemBarTests` runs:
 
 ```zsh
 # The one test that crosses a real dylib boundary: a plugin built from the example, against the
