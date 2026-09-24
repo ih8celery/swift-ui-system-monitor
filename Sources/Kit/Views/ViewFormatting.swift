@@ -74,3 +74,14 @@ func machineCPUPercent(_ summedPcpu: Double) -> Double {
     )
 }
 
+/// The four coarse levels macOS reports, as words. No number exists without root.
+func thermalStateLabel(_ state: ProcessInfo.ThermalState) -> String {
+    switch state {
+    case .nominal: return "Nominal"
+    case .fair: return "Fair"
+    case .serious: return "Serious"
+    case .critical: return "Critical"
+    @unknown default: return "Unknown"
+    }
+}
+

@@ -96,11 +96,4 @@ extension UnifiedMonitor {
             .map { String($0) }
     }
 
-    // Every displayed row groups by process name; only the groups that land in
-    // that display need a per-PID proc_pid_rusage syscall, so both the
-    // snapshot pass and ProcessSummary's slice share these limits.
-    static let processMemoryDisplayLimit = 18
-    static let processCPUDisplayLimit = 28
-
-
 }

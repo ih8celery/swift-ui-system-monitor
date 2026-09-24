@@ -19,8 +19,8 @@ extension UnifiedMonitor {
 
 
     private static func collectProcessSnapshots(
-        memoryLimit: Int = processMemoryDisplayLimit,
-        cpuLimit: Int = processCPUDisplayLimit
+        memoryLimit: Int = ProcessSummary.memoryDisplayLimit,
+        cpuLimit: Int = ProcessSummary.cpuDisplayLimit
     ) -> [ProcessSnapshot] {
         let samples = runPS().filter { $0.rss >= 1_048_576 }
         guard !samples.isEmpty else { return [] }

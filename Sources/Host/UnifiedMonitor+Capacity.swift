@@ -96,7 +96,7 @@ extension UnifiedMonitor {
                 rows: rows,
                 ports: attributedPorts,
                 cpuBusyPercent: cpuBusy,
-                thermalState: Self.thermalStateLabel(thermalState),
+                thermalState: thermalStateLabel(thermalState),
                 status: Self.statusText(failures: failures, notes: notes),
                 health: SampleHealth(isOK: failures.isEmpty),
                 lastUpdated: sampleDate
@@ -260,16 +260,6 @@ extension UnifiedMonitor {
             diskBytesRead: info.ri_diskio_bytesread,
             diskBytesWritten: info.ri_diskio_byteswritten
         )
-    }
-
-    static func thermalStateLabel(_ state: ProcessInfo.ThermalState) -> String {
-        switch state {
-        case .nominal: return "Nominal"
-        case .fair: return "Fair"
-        case .serious: return "Serious"
-        case .critical: return "Critical"
-        @unknown default: return "Unknown"
-        }
     }
 
     static func parseListeningPorts(_ output: String) -> [DeveloperPort] {
