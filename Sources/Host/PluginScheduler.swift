@@ -15,11 +15,29 @@ final class PluginScheduler {
 
     private var slots: [ObjectIdentifier: Slot] = [:]
     private var shown: TabPlugin?
+    private let minimumRefreshInterval: TimeInterval
+    private let log: (String) -> Void
 
-    /// A declared interval clamped to a sane minimum: zero would spin its queue's thread, and a
-    /// negative, NaN, or infinite value would trap the timer, so either is floored instead.
-    static func effectiveInterval(_ declared: TimeInterval) -> TimeInterval {
-        declared.isFinite ? max(declared, MonitorSamplingPlan.minimumRefreshInterval) : MonitorSamplingPlan.minimumRefreshInterval
+    /// `minimumRefreshInterval` and `log` default to the real app's floor and NSLog, but a test
+    /// can override either — a short floor so its fakes run at their own declared interval, and
+    /// a capturing closure instead of NSLog — without either leaking into the real app.
+    init(
+        minimumRefreshInterval: TimeInterval = MonitorSamplingPlan.minimumRefreshInterval,
+        log: @escaping (String) -> Void = { NSLog("%@", $0) }
+    ) {
+        self.minimumRefreshInterval = minimumRefreshInterval
+        self.log = log
+    }
+
+    /// A declared interval clamped to this scheduler's minimum: zero would spin its queue's
+    /// thread, and a negative, NaN, or infinite value would trap the timer, so either is floored
+    /// instead, and the substitution is logged once.
+    func effectiveInterval(_ declared: TimeInterval, identifier: String) -> TimeInterval {
+        let clamped = declared.isFinite ? max(declared, minimumRefreshInterval) : minimumRefreshInterval
+        if clamped != declared {
+            log("SystemBar: \(identifier) asked for a refreshInterval of \(declared); using \(clamped)")
+        }
+        return clamped
     }
 
     /// Shows `plugin`: stops whichever plugin was previously shown, if it is a different one,
@@ -37,11 +55,7 @@ final class PluginScheduler {
         var slot = slots[key] ?? Slot(queue: DispatchQueue(label: "systembar.plugin.\(type(of: plugin).identifier)", qos: .utility), timer: nil)
         slot.timer?.cancel()
 
-        let declared = plugin.refreshInterval
-        let interval = Self.effectiveInterval(declared)
-        if interval != declared {
-            NSLog("SystemBar: %@ asked for a refreshInterval of %g; using %g", type(of: plugin).identifier, declared, interval)
-        }
+        let interval = effectiveInterval(plugin.refreshInterval, identifier: type(of: plugin).identifier)
 
         let timer = DispatchSource.makeTimerSource(queue: slot.queue)
         timer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(Int(interval * 100)))

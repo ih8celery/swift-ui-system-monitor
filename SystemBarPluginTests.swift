@@ -772,13 +772,19 @@ struct SystemBarPluginTests {
 
     // MARK: - Scheduler
 
+    /// A scheduler for the timing tests: a minimum far below any fake's declared interval, so
+    /// none of them are clamped, and a silent log, so a run of test.sh never prints a clamp line.
+    private static func makeTestScheduler() -> PluginScheduler {
+        PluginScheduler(minimumRefreshInterval: 0.01, log: { _ in })
+    }
+
     private static func testSchedulerCollectsOnlyWhileVisibleAndNeverOverlaps() {
         let plugin = TickingTab(host: makeHost())
-        let scheduler = PluginScheduler()
+        let scheduler = makeTestScheduler()
         scheduler.show(plugin)
         waitUntil { plugin.count >= 3 }
         let whileVisible = plugin.count
-        expect(whileVisible >= 3, "a visible tab is collected every refreshInterval, got \(whileVisible) collects")
+        expect(whileVisible >= 3, "a visible tab is collected every refreshInterval, got \(whileVisible) collects at 0.05s")
         expect(!plugin.overlapped, "collect never runs concurrently with itself")
         scheduler.hide()
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
@@ -789,7 +795,7 @@ struct SystemBarPluginTests {
 
     private static func testSchedulerCollectsAtOnceWhenATabAppears() {
         let plugin = TickingTab(host: makeHost())
-        let scheduler = PluginScheduler()
+        let scheduler = makeTestScheduler()
         scheduler.show(plugin)
         waitUntil { plugin.count >= 1 }
         expect(plugin.count >= 1, "showing a tab collects immediately, not after the first interval")
@@ -799,7 +805,7 @@ struct SystemBarPluginTests {
     private static func testSchedulerStopsThePreviousPluginWhenAnotherIsShown() {
         let a = TickingTab(host: makeHost())
         let b = TickingTab(host: makeHost())
-        let scheduler = PluginScheduler()
+        let scheduler = makeTestScheduler()
         scheduler.show(a)
         waitUntil { a.count >= 1 }
         scheduler.show(b)
@@ -813,7 +819,7 @@ struct SystemBarPluginTests {
 
     private static func testSchedulerNeverOverlapsACollectInterruptedByHideAndShow() {
         let plugin = SlowTickingTab(host: makeHost())
-        let scheduler = PluginScheduler()
+        let scheduler = makeTestScheduler()
         scheduler.show(plugin)
         waitUntil { plugin.count >= 1 }
         scheduler.hide()
@@ -824,12 +830,20 @@ struct SystemBarPluginTests {
     }
 
     private static func testSchedulerClampsABadRefreshInterval() {
+        let log = LogRecorder()
+        let scheduler = PluginScheduler(log: { log.record($0) })
         for bad in [0, -1, .nan, .infinity, 0.1] as [TimeInterval] {
-            expect(PluginScheduler.effectiveInterval(bad) == MonitorSamplingPlan.minimumRefreshInterval,
-                   "a refreshInterval of \(bad) must be clamped to the minimum, got \(PluginScheduler.effectiveInterval(bad))")
+            let before = log.count
+            let effective = scheduler.effectiveInterval(bad, identifier: "test")
+            expect(effective == MonitorSamplingPlan.minimumRefreshInterval,
+                   "a refreshInterval of \(bad) must be clamped to the minimum, got \(effective)")
+            expect(log.count == before + 1, "clamping a refreshInterval of \(bad) must log exactly once, got \(log.count - before) messages")
         }
         for ok in [5, 60] as [TimeInterval] {
-            expect(PluginScheduler.effectiveInterval(ok) == ok, "a sane refreshInterval of \(ok) must pass through unchanged")
+            let before = log.count
+            let effective = scheduler.effectiveInterval(ok, identifier: "test")
+            expect(effective == ok, "a sane refreshInterval of \(ok) must pass through unchanged")
+            expect(log.count == before, "a sane refreshInterval of \(ok) must not log a clamp, got \(log.count - before) messages")
         }
     }
 
@@ -854,6 +868,18 @@ final class Recorder: @unchecked Sendable {
     var seen: (path: String, arguments: [String], environment: [String: String]?, timeout: TimeInterval)? {
         lock.withLock { stored }
     }
+}
+
+/// Captures every message a scheduler's log closure was given, under a lock, mirroring `Recorder`.
+final class LogRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var messages: [String] = []
+
+    func record(_ message: String) {
+        lock.withLock { messages.append(message) }
+    }
+
+    var count: Int { lock.withLock { messages.count } }
 }
 
 /// The smallest possible plugin. Shared by every test that needs a tab.
