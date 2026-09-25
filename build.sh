@@ -35,13 +35,16 @@ swiftc \
 #    textual interface ships: a plugin compiles against the public interface only, the way it
 #    will on any other compiler version; the binary .swiftmodule would expose package members
 #    to anyone passing -package-name, and .swiftsourceinfo carries this machine's source paths.
+#    The .swiftdoc ships beside it: the interface carries no doc comments, and the compiler
+#    reads a module's comments from a .swiftdoc next to its interface. It holds only the public
+#    declarations' comments, no package members and no source paths.
 mkdir -p SystemBar.app/Contents/MacOS SystemBar.app/Contents/Frameworks \
          SystemBar.app/Contents/Resources/SDK SystemBar.app/Contents/PlugIns
 cp -f Info.plist SystemBar.app/Contents/Info.plist
 cp -f build/SystemBar SystemBar.app/Contents/MacOS/SystemBar
 chmod 755 SystemBar.app/Contents/MacOS/SystemBar
 cp -f build/Frameworks/libSystemBarKit.dylib SystemBar.app/Contents/Frameworks/
-cp -f build/SDK/SystemBarKit.swiftinterface SystemBar.app/Contents/Resources/SDK/
+cp -f build/SDK/SystemBarKit.swiftinterface build/SDK/SystemBarKit.swiftdoc SystemBar.app/Contents/Resources/SDK/
 
 # 4. Every plugin directory, into the app's PlugIns folder, the way a user's would be built.
 # The (N) glob qualifier means zero matches is an empty list, not the literal pattern, so a
