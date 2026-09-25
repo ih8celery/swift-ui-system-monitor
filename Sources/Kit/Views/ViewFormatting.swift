@@ -31,10 +31,6 @@ public func percentString(_ value: Double) -> String {
     String(format: "%.1f%%", max(0, value))
 }
 
-public func batteryStatLabel(percent: Int, isCharging: Bool?) -> String {
-    isCharging == true ? "\(percent)% Charging" : "\(percent)%"
-}
-
 /// Compact "how long ago" for status lines: seconds, then minutes, then hours.
 public func relativeTimeString(_ date: Date, now: Date = Date()) -> String {
     let seconds = max(0, Int(now.timeIntervalSince(date)))

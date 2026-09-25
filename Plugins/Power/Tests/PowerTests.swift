@@ -6,6 +6,7 @@ import SystemBarKit
 enum PowerTests {
     static func runAll() {
         testBatteryParsing()
+        testBatteryStatLabel()
         testParseSleepAssertions()
         testContributorsComeFromTheProcessFeed()
         testCollectRunsPmsetTwiceAndReadsTheAnswers()
@@ -23,6 +24,12 @@ enum PowerTests {
         expect(parsed.powerSource == "AC Power", "battery parser should extract power source")
         expect(parsed.percent == 92, "battery parser should extract percentage")
         expect(parsed.isCharging == true, "battery parser should identify charging state")
+    }
+
+    private static func testBatteryStatLabel() {
+        expect(batteryStatLabel(percent: 82, isCharging: true) == "82% Charging", "charging battery should say so")
+        expect(batteryStatLabel(percent: 82, isCharging: false) == "82%", "non-charging battery should just show the percent")
+        expect(batteryStatLabel(percent: 82, isCharging: nil) == "82%", "unknown charging state should not be asserted")
     }
 
     private static func testParseSleepAssertions() {
