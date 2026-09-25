@@ -851,14 +851,21 @@ struct SystemBarPluginTests {
     private static func testSchedulerClampsABadRefreshInterval() {
         let log = LogRecorder()
         let scheduler = PluginScheduler(log: { log.record($0) })
-        for bad in [0, -1, .nan, .infinity, 0.1] as [TimeInterval] {
+        for tooShort in [0, -1, .nan, 0.1] as [TimeInterval] {
             let before = log.count
-            let effective = scheduler.effectiveInterval(bad, identifier: "test")
+            let effective = scheduler.effectiveInterval(tooShort, identifier: "test")
             expect(effective == MonitorSamplingPlan.minimumRefreshInterval,
-                   "a refreshInterval of \(bad) must be clamped to the minimum, got \(effective)")
-            expect(log.count == before + 1, "clamping a refreshInterval of \(bad) must log exactly once, got \(log.count - before) messages")
+                   "a refreshInterval of \(tooShort) must be clamped to the minimum, got \(effective)")
+            expect(log.count == before + 1, "clamping a refreshInterval of \(tooShort) must log exactly once, got \(log.count - before) messages")
         }
-        for ok in [5, 60] as [TimeInterval] {
+        for tooLong in [.infinity, 1e12, 86_401] as [TimeInterval] {
+            let before = log.count
+            let effective = scheduler.effectiveInterval(tooLong, identifier: "test")
+            expect(effective == MonitorSamplingPlan.maximumRefreshInterval,
+                   "a refreshInterval of \(tooLong) must be clamped to the maximum, got \(effective)")
+            expect(log.count == before + 1, "clamping a refreshInterval of \(tooLong) must log exactly once, got \(log.count - before) messages")
+        }
+        for ok in [5, 60, 86_400] as [TimeInterval] {
             let before = log.count
             let effective = scheduler.effectiveInterval(ok, identifier: "test")
             expect(effective == ok, "a sane refreshInterval of \(ok) must pass through unchanged")

@@ -16,28 +16,38 @@ final class PluginScheduler {
     private var slots: [ObjectIdentifier: Slot] = [:]
     private var shown: TabPlugin?
     private let minimumRefreshInterval: TimeInterval
+    private let maximumRefreshInterval: TimeInterval
     private let log: (String) -> Void
 
-    /// `minimumRefreshInterval` and `log` default to the real app's floor and NSLog, but a test
-    /// can override either — a short floor so its fakes run at their own declared interval, and
-    /// a capturing closure instead of NSLog — without either leaking into the real app.
+    /// The bounds and `log` default to the real app's floor, ceiling and NSLog, but a test can
+    /// override any of them — a short floor so its fakes run at their own declared interval, and
+    /// a capturing closure instead of NSLog — without any of it leaking into the real app.
     init(
         minimumRefreshInterval: TimeInterval = MonitorSamplingPlan.minimumRefreshInterval,
+        maximumRefreshInterval: TimeInterval = MonitorSamplingPlan.maximumRefreshInterval,
         log: @escaping (String) -> Void = { NSLog("%@", $0) }
     ) {
         self.minimumRefreshInterval = minimumRefreshInterval
+        self.maximumRefreshInterval = maximumRefreshInterval
         self.log = log
     }
 
-    /// A declared interval clamped to this scheduler's minimum: zero would spin its queue's
-    /// thread, and a negative, NaN, or infinite value would trap the timer, so either is floored
-    /// instead, and the substitution is logged each time it is applied.
+    /// A declared interval clamped between this scheduler's minimum and maximum. Zero would spin
+    /// its queue's thread and a negative or NaN value would trap the timer, so those take the
+    /// minimum. Dispatch counts the interval in nanoseconds in a UInt64 and traps on a huge one,
+    /// so anything above the maximum takes the maximum — including infinity, which reads as
+    /// "hardly ever", not "as fast as possible". The substitution is logged each time.
     func effectiveInterval(_ declared: TimeInterval, identifier: String) -> TimeInterval {
-        let clamped = declared.isFinite ? max(declared, minimumRefreshInterval) : minimumRefreshInterval
+        let clamped = clamp(declared)
         if clamped != declared {
             log("SystemBar: \(identifier) asked for a refreshInterval of \(declared); using \(clamped)")
         }
         return clamped
+    }
+
+    private func clamp(_ declared: TimeInterval) -> TimeInterval {
+        if declared.isNaN { return minimumRefreshInterval }
+        return min(max(declared, minimumRefreshInterval), maximumRefreshInterval)
     }
 
     /// Shows `plugin`: stops whichever plugin was previously shown, if it is a different one,

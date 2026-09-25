@@ -310,6 +310,8 @@ struct MonitorSamplingPlan {
     static let diskHogScanBudget: TimeInterval = 240
     /// The floor under any plugin's declared refreshInterval, so a bad bundle cannot spin a core or trap.
     static let minimumRefreshInterval: TimeInterval = 0.25
+    /// The ceiling: a day is the longest a tab can sensibly wait, and Dispatch traps far above it.
+    static let maximumRefreshInterval: TimeInterval = 86_400
 
     /// What runs for the selected tab: the compiled-in plan for its mode, if it has one, plus
     /// the shared samplers the plugin declares. A tab from a bundle has no mode.
