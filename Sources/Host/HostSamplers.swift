@@ -8,9 +8,9 @@ import SystemBarKit
 /// The 10-second process sampler runs only while the visible tab lists `.processes`, because a
 /// `ps` of every process is the heavy one. With the window closed, neither runs.
 ///
-/// Main thread only. Both timers fire on one serial queue, so a slow `ps` delays the next
-/// 1-second tick rather than running beside it, and each sampler's own state is only ever
-/// touched from that queue.
+/// Main thread only. Each sampler has its own serial queue, so a slow `ps` (it can take up to
+/// its 15-second timeout) cannot stall the 1-second ticks and leave a gap in their history.
+/// Each sampler's own state is only ever touched from its own queue.
 @MainActor
 final class HostSamplers {
     nonisolated static let fastInterval: TimeInterval = 1
@@ -22,7 +22,8 @@ final class HostSamplers {
     private let sampleProcesses: @Sendable () -> ProcessSummary
     private let fastInterval: TimeInterval
     private let processInterval: TimeInterval
-    private let queue = DispatchQueue(label: "systembar.host.samplers", qos: .utility)
+    private let fastQueue = DispatchQueue(label: "systembar.host.fast", qos: .utility)
+    private let processQueue = DispatchQueue(label: "systembar.host.processes", qos: .utility)
     private var fastTimer: DispatchSourceTimer?
     private var processTimer: DispatchSourceTimer?
 
@@ -73,12 +74,12 @@ final class HostSamplers {
         let wanted = Self.wanted(isVisible: isVisible, feeds: feeds)
         let fastStats = self.fastStats
         let sampleFast = self.sampleFast
-        fastTimer = reconciled(fastTimer, isWanted: wanted.contains(.fastStats), interval: fastInterval) {
+        fastTimer = reconciled(fastTimer, isWanted: wanted.contains(.fastStats), interval: fastInterval, on: fastQueue) {
             fastStats.send(sampleFast())
         }
         let processes = self.processes
         let sampleProcesses = self.sampleProcesses
-        processTimer = reconciled(processTimer, isWanted: wanted.contains(.processes), interval: processInterval) {
+        processTimer = reconciled(processTimer, isWanted: wanted.contains(.processes), interval: processInterval, on: processQueue) {
             processes.send(sampleProcesses())
         }
     }
@@ -87,6 +88,7 @@ final class HostSamplers {
         _ timer: DispatchSourceTimer?,
         isWanted: Bool,
         interval: TimeInterval,
+        on queue: DispatchQueue,
         tick: @escaping @Sendable () -> Void
     ) -> DispatchSourceTimer? {
         switch (timer, isWanted) {
@@ -96,7 +98,7 @@ final class HostSamplers {
             running.cancel()
             return nil
         case (nil, true):
-            return started(interval: interval, tick: tick)
+            return started(interval: interval, on: queue, tick: tick)
         case (nil, false):
             return nil
         }
@@ -106,7 +108,7 @@ final class HostSamplers {
     /// allowance PluginScheduler gives a plugin's timer. The first reading is queued directly
     /// rather than left to the timer, whose leeway would let the system defer it by up to a
     /// second on the 10-second sampler.
-    private func started(interval: TimeInterval, tick: @escaping @Sendable () -> Void) -> DispatchSourceTimer {
+    private func started(interval: TimeInterval, on queue: DispatchQueue, tick: @escaping @Sendable () -> Void) -> DispatchSourceTimer {
         queue.async(execute: tick)
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(Int(interval * 100)))
