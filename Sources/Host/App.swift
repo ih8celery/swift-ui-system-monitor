@@ -31,7 +31,7 @@ struct SystemBarApp: App {
         configPath = store.fileURL.path
 
         // `SystemBar --list-plugins` is the loader as a command: it reports what the window
-        // would show, then exits without one. test.sh will use it to check the real loader.
+        // would show, then exits without one. test.sh uses it to check the real loader.
         if CommandLine.arguments.contains("--list-plugins") {
             PluginListReport.lines(for: loaded).forEach { print($0) }
             exit(0)
