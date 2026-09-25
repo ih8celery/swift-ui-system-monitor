@@ -80,14 +80,6 @@ struct BundleTabSource: TabSource {
         BundleTabSource(builtInPlugInsURL: Bundle.main.builtInPlugInsURL, homeDirectory: NSHomeDirectory(), loader: FoundationBundleLoader())
     }
 
-    /// True when a bundle by this name sits in the app's PlugIns folder.
-    func hasBundle(named name: String) -> Bool {
-        guard let url = try? PluginPath.resolveName(name, builtInPlugInsURL: builtInPlugInsURL) else {
-            return false
-        }
-        return FileManager.default.fileExists(atPath: url.path)
-    }
-
     func resolve(_ entry: PluginEntry) throws -> TabPlugin.Type {
         let url = try PluginPath.resolve(entry, builtInPlugInsURL: builtInPlugInsURL, homeDirectory: homeDirectory)
         guard FileManager.default.fileExists(atPath: url.path) else {
