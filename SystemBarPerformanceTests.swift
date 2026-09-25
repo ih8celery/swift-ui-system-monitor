@@ -46,7 +46,7 @@ struct SystemBarPerformanceTests {
             ProcessSnapshot(name: "cpu", count: 2, physical: 30, virtualSize: 40, cpu: 8),
             ProcessSnapshot(name: "memory", count: 1, physical: 50, virtualSize: 60, cpu: 3)
         ]
-        let summary = ProcessSummary(rows: rows, limit: 2)
+        let summary = ProcessSummary(rows: rows, memoryLimit: 2, cpuLimit: 2)
         expect(summary.totalCount == 3, "summary should preserve total row count")
         expect(summary.topMemory.map(\.name) == ["memory", "cpu"], "summary should pre-sort memory rows")
         expect(summary.topCPU.map(\.name) == ["cpu", "memory"], "summary should pre-sort cpu rows")

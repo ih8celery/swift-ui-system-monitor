@@ -485,3 +485,10 @@ leaving a working, buildable, tested app:
   adapter said nothing: its capacity grade reads the 1-second CPU figure. It
   changes nothing at run time, but the declaration is now true — Claude, from
   the Stage 3 plan.
+- 2026-09-24 — `ProcessSummary` keeps one row-taking init,
+  `init(rows:memoryLimit:cpuLimit:)`, with the display limits as its defaults;
+  `init(rows:limit:)` is removed, since it was a convenience only tests used.
+  Removing a public symbol breaks bundles built against the earlier interface,
+  which is allowed only because that interface was never pushed and every
+  shipped bundle rebuilds with the app. From here on, public SDK symbols are
+  only added — Claude, from 2ik.6, for Adam to confirm.

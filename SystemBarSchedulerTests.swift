@@ -69,7 +69,7 @@ struct SystemBarSchedulerTests {
         )
         expect(host.processes.value.totalCount == 0, "the feed a host is built with is the one plugins read")
         expect(host.fastStats.value.cpuUsagePercent == 0, "the 1-second feed is there too, starting empty")
-        feed.send(ProcessSummary(rows: [ProcessSnapshot(name: "x", count: 1, physical: 1, virtualSize: 1, cpu: 1)], limit: 1))
+        feed.send(ProcessSummary(rows: [ProcessSnapshot(name: "x", count: 1, physical: 1, virtualSize: 1, cpu: 1)], memoryLimit: 1, cpuLimit: 1))
         expect(host.processes.value.totalCount == 1, "a reading sent to the feed is visible through the host")
     }
 
@@ -273,7 +273,7 @@ struct SystemBarSchedulerTests {
             processFeed: processFeed,
             fastFeed: fastFeed,
             fastReading: reading,
-            processReading: ProcessSummary(rows: [row], limit: 1)
+            processReading: ProcessSummary(rows: [row], memoryLimit: 1, cpuLimit: 1)
         )
         samplers.update(isVisible: true, feeds: [.processes])
         waitUntil { fastFeed.value.cpuUsagePercent == 42 && processFeed.value.totalCount == 1 }

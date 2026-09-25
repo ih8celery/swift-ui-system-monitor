@@ -149,7 +149,7 @@ enum CPUTests {
         busy.cpuHistory = [10, 73]
         fastStats.send(busy)
         let row = ProcessSnapshot(name: "swift-frontend", count: 3, physical: 1, virtualSize: 0, cpu: 250)
-        processes.send(ProcessSummary(rows: [row], limit: 1))
+        processes.send(ProcessSummary(rows: [row], memoryLimit: 1, cpuLimit: 1))
 
         waitUntil { plugin.fastStats.cpuUsagePercent == 73 && !plugin.processes.topCPU.isEmpty }
         expect(plugin.fastStats.cpuHistory == [10, 73], "the headline and graph follow the 1-second feed, got \(plugin.fastStats.cpuHistory)")

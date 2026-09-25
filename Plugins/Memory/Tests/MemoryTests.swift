@@ -117,12 +117,12 @@ enum MemoryTests {
 
     private static func testProcessesFollowTheFeed() {
         let first = ProcessSnapshot(name: "Safari", count: 1, physical: 2_000, virtualSize: 0, cpu: 1)
-        let feed = Feed(initial: ProcessSummary(rows: [first], limit: 1))
+        let feed = Feed(initial: ProcessSummary(rows: [first], memoryLimit: 1, cpuLimit: 1))
         let plugin = MemoryPlugin(host: makeHost(processes: feed))
         expect(plugin.processes.topMemory.map(\.name) == ["Safari"], "a new plugin starts from the feed's latest reading")
 
         let next = ProcessSnapshot(name: "Xcode", count: 1, physical: 4_000, virtualSize: 0, cpu: 1)
-        feed.send(ProcessSummary(rows: [next], limit: 1))
+        feed.send(ProcessSummary(rows: [next], memoryLimit: 1, cpuLimit: 1))
         waitUntil { plugin.processes.topMemory.first?.name == "Xcode" }
         expect(plugin.processes.topMemory.map(\.name) == ["Xcode"], "and follows every reading after, got \(plugin.processes.topMemory.map(\.name))")
     }

@@ -78,10 +78,7 @@ public struct ProcessSummary: Sendable {
 
     public init() {}
 
-    public init(rows: [ProcessSnapshot], limit: Int) {
-        self.init(rows: rows, memoryLimit: limit, cpuLimit: limit)
-    }
-
+    /// Defaults to the display limits the host samples to.
     public init(
         rows: [ProcessSnapshot],
         memoryLimit: Int = ProcessSummary.memoryDisplayLimit,
