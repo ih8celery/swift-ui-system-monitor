@@ -4,7 +4,7 @@ import SwiftUI
 import SystemBarKit
 
 /// Tests for what runs a tab once it is loaded: the feeds it reads, the scheduler that calls
-/// its collect(), and the sampling plan.
+/// its collect(), and the host's two shared samplers.
 @MainActor
 struct SystemBarSchedulerTests {
     static func runAll() {
@@ -15,17 +15,17 @@ struct SystemBarSchedulerTests {
         testSchedulerStopsThePreviousPluginWhenAnotherIsShown()
         testSchedulerNeverOverlapsACollectInterruptedByHideAndShow()
         testSchedulerClampsABadRefreshInterval()
-        testSamplingPlanAddsTheProcessesJobForAPluginThatDeclaresIt()
-    }
-
-    /// Spins the run loop until `condition` holds or `timeout` elapses, so a scheduler test
-    /// waits only as long as the machine actually needs rather than a fixed guess that either
-    /// flakes under load or wastes time when the machine is fast.
-    private static func waitUntil(_ timeout: TimeInterval = 1, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() && Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        }
+        testSamplersWantNothingWhileTheWindowIsClosed()
+        testSamplersRunNothingWhileTheWindowIsClosed()
+        testSamplersRunTheFastSamplerForEveryVisibleTab()
+        testSamplersRunTheProcessSamplerOnlyWhileATabDeclaresIt()
+        testSamplersSampleAtOnceWhenStartedAndKeepTheirRhythm()
+        testSamplersFillTheFeeds()
+        testFastStatsSamplerTurnsCountersIntoRates()
+        testFastStatsSamplerKeepsNinetySeconds()
+        testProcessSamplerGroupsRowsAndDropsTinyOnes()
+        testProcessSamplerUsesTheFootprintOnlyForShownGroups()
+        testProcessSamplerRunsPsThroughTheRunner()
     }
 
     // MARK: - Feed
@@ -132,14 +132,14 @@ struct SystemBarSchedulerTests {
         for tooShort in [0, -1, .nan, 0.1] as [TimeInterval] {
             let before = log.count
             let effective = scheduler.effectiveInterval(tooShort, identifier: "test")
-            expect(effective == MonitorSamplingPlan.minimumRefreshInterval,
+            expect(effective == PluginScheduler.minimumRefreshInterval,
                    "a refreshInterval of \(tooShort) must be clamped to the minimum, got \(effective)")
             expect(log.count == before + 1, "clamping a refreshInterval of \(tooShort) must log exactly once, got \(log.count - before) messages")
         }
         for tooLong in [.infinity, 1e12, 86_401] as [TimeInterval] {
             let before = log.count
             let effective = scheduler.effectiveInterval(tooLong, identifier: "test")
-            expect(effective == MonitorSamplingPlan.maximumRefreshInterval,
+            expect(effective == PluginScheduler.maximumRefreshInterval,
                    "a refreshInterval of \(tooLong) must be clamped to the maximum, got \(effective)")
             expect(log.count == before + 1, "clamping a refreshInterval of \(tooLong) must log exactly once, got \(log.count - before) messages")
         }
@@ -151,25 +151,209 @@ struct SystemBarSchedulerTests {
         }
     }
 
-    private static func testSamplingPlanAddsTheProcessesJobForAPluginThatDeclaresIt() {
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: nil, feeds: [.processes]) == [.processes], "a bundle tab that wants the process feed runs only that sampler")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: nil, feeds: []).isEmpty, "a bundle tab that wants nothing runs nothing")
-        expect(MonitorSamplingPlan.jobs(isVisible: false, mode: nil, feeds: [.processes]).isEmpty, "hidden means nothing runs, whatever is declared")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .disk, feeds: [.processes]) == [.disk, .processes], "a compiled-in tab's plan and its declared feeds add up")
+    // MARK: - Host samplers
+
+    /// Samplers whose collectors only count calls and hand back fixed readings, with intervals
+    /// short enough to watch several ticks in a fraction of a second.
+    private static func makeTestSamplers(
+        fast: CallCounter,
+        processes: CallCounter,
+        processFeed: Feed<ProcessSummary> = Feed(initial: ProcessSummary()),
+        fastFeed: Feed<FastStatsSnapshot> = Feed(initial: FastStatsSnapshot()),
+        fastReading: FastStatsSnapshot = FastStatsSnapshot(),
+        processReading: ProcessSummary = ProcessSummary(),
+        interval: TimeInterval = 0.05
+    ) -> HostSamplers {
+        HostSamplers(
+            processes: processFeed,
+            fastStats: fastFeed,
+            sampleFast: { fast.increment(); return fastReading },
+            sampleProcesses: { processes.increment(); return processReading },
+            fastInterval: interval,
+            processInterval: interval
+        )
     }
-}
 
-/// Captures every message a log closure was given, under a lock, mirroring `Recorder`.
-final class LogRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: [String] = []
-
-    func record(_ message: String) {
-        lock.withLock { stored.append(message) }
+    private static func testSamplersWantNothingWhileTheWindowIsClosed() {
+        expect(HostSamplers.wanted(isVisible: false, feeds: [.processes, .fastStats]).isEmpty, "a closed window wants no sampler, whatever the tab declares")
+        expect(HostSamplers.wanted(isVisible: true, feeds: []) == [.fastStats], "an open window always wants the 1-second sampler, so the histories have no gaps")
+        expect(HostSamplers.wanted(isVisible: true, feeds: [.processes]) == [.fastStats, .processes], "a tab that declares the process feed adds the process sampler")
     }
 
-    var count: Int { lock.withLock { stored.count } }
-    var messages: [String] { lock.withLock { stored } }
+    private static func testSamplersRunNothingWhileTheWindowIsClosed() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let samplers = makeTestSamplers(fast: fast, processes: processes)
+        samplers.update(isVisible: false, feeds: [.processes, .fastStats])
+        spinRunLoop(for: 0.2)
+        expect(fast.count == 0 && processes.count == 0, "a closed window runs no sampler, got fast \(fast.count) processes \(processes.count)")
+        expect(samplers.running.isEmpty, "and reports none running, got \(samplers.running)")
+    }
+
+    private static func testSamplersRunTheFastSamplerForEveryVisibleTab() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let samplers = makeTestSamplers(fast: fast, processes: processes)
+        samplers.update(isVisible: true, feeds: [])
+        waitUntil { fast.count >= 3 }
+        expect(fast.count >= 3, "the 1-second sampler ticks for a tab that declares nothing, got \(fast.count)")
+        expect(processes.count == 0, "but ps never runs for it, got \(processes.count)")
+        samplers.update(isVisible: false, feeds: [])
+    }
+
+    private static func testSamplersRunTheProcessSamplerOnlyWhileATabDeclaresIt() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let samplers = makeTestSamplers(fast: fast, processes: processes)
+
+        samplers.update(isVisible: true, feeds: [.processes])
+        waitUntil { processes.count >= 2 }
+        expect(processes.count >= 2, "the process sampler ticks while the tab declares .processes, got \(processes.count)")
+
+        samplers.update(isVisible: true, feeds: [])
+        let afterSwitch = processes.count
+        spinRunLoop(for: 0.2)
+        // One tick may already have been handed to the queue when the timer was cancelled.
+        expect(processes.count <= afterSwitch + 1, "switching to a tab without .processes stops ps, went \(afterSwitch) -> \(processes.count)")
+        expect(samplers.running == [.fastStats], "only the 1-second sampler is left, got \(samplers.running)")
+
+        samplers.update(isVisible: false, feeds: [])
+        let afterClose = fast.count
+        spinRunLoop(for: 0.2)
+        expect(fast.count <= afterClose + 1, "closing the window stops the 1-second sampler too, went \(afterClose) -> \(fast.count)")
+    }
+
+    private static func testSamplersSampleAtOnceWhenStartedAndKeepTheirRhythm() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        // A minute between ticks: anything seen within the test is the at-once sample on start.
+        let samplers = makeTestSamplers(fast: fast, processes: processes, interval: 60)
+
+        samplers.update(isVisible: true, feeds: [])
+        waitUntil { fast.count >= 1 }
+        expect(fast.count == 1, "a starting sampler reads at once instead of a minute later, got \(fast.count)")
+
+        samplers.update(isVisible: true, feeds: [.processes])
+        waitUntil { processes.count >= 1 }
+        spinRunLoop(for: 0.1)
+        expect(processes.count == 1, "the process sampler reads at once when a tab starts wanting it, got \(processes.count)")
+        expect(fast.count == 1, "a sampler that keeps running is not restarted by a tab switch, so it keeps its rhythm, got \(fast.count)")
+        samplers.update(isVisible: false, feeds: [])
+    }
+
+    private static func testSamplersFillTheFeeds() {
+        let processFeed = Feed(initial: ProcessSummary())
+        let fastFeed = Feed(initial: FastStatsSnapshot())
+        var reading = FastStatsSnapshot()
+        reading.cpuUsagePercent = 42
+        let row = ProcessSnapshot(name: "clang", count: 1, physical: 1, virtualSize: 1, cpu: 1)
+        let samplers = makeTestSamplers(
+            fast: CallCounter(),
+            processes: CallCounter(),
+            processFeed: processFeed,
+            fastFeed: fastFeed,
+            fastReading: reading,
+            processReading: ProcessSummary(rows: [row], limit: 1)
+        )
+        samplers.update(isVisible: true, feeds: [.processes])
+        waitUntil { fastFeed.value.cpuUsagePercent == 42 && processFeed.value.totalCount == 1 }
+        expect(fastFeed.value.cpuUsagePercent == 42, "the 1-second reading lands in the fastStats feed plugins read")
+        expect(processFeed.value.topCPU.map(\.name) == ["clang"], "the process reading lands in the processes feed plugins read")
+        samplers.update(isVisible: false, feeds: [])
+    }
+
+    // MARK: - Fast stats
+
+    private static func testFastStatsSamplerTurnsCountersIntoRates() {
+        let sampler = FastStatsSampler()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        let first = sampler.sample(
+            cpu: CPUCounters(user: 100, system: 50, idle: 850, nice: 0),
+            network: NetworkCounters(received: 1_000, sent: 500),
+            at: start
+        )
+        expect(first.cpuUsagePercent == 0 && first.currentDownloadRate == 0, "a first sample has nothing to compare with, so it reports zero rather than a lifetime average")
+
+        let second = sampler.sample(
+            cpu: CPUCounters(user: 130, system: 60, idle: 910, nice: 0),
+            network: NetworkCounters(received: 3_000, sent: 1_500),
+            at: start.addingTimeInterval(2)
+        )
+        expect(second.cpuUsagePercent == 40, "40 busy ticks out of 100 is 40%, got \(second.cpuUsagePercent)")
+        expect(second.currentDownloadRate == 1_000, "2000 bytes received over 2 seconds is 1000 B/s, got \(second.currentDownloadRate)")
+        expect(second.currentUploadRate == 500, "1000 bytes sent over 2 seconds is 500 B/s, got \(second.currentUploadRate)")
+        expect(second.cpuHistory == [0, 40], "each sample appends to the history, got \(second.cpuHistory)")
+
+        let reset = sampler.sample(
+            cpu: CPUCounters(user: 0, system: 0, idle: 0, nice: 0),
+            network: NetworkCounters(received: 0, sent: 0),
+            at: start.addingTimeInterval(3)
+        )
+        expect(reset.currentDownloadRate == 0, "a counter that went backwards (an interface reset) reads as no traffic, not a huge wrapped number")
+        expect(reset.cpuUsagePercent == 40, "with no CPU time elapsed the last percent stands, got \(reset.cpuUsagePercent)")
+    }
+
+    private static func testFastStatsSamplerKeepsNinetySeconds() {
+        let sampler = FastStatsSampler()
+        let start = Date(timeIntervalSince1970: 1_000)
+        let last = (0..<100).reduce(FastStatsSnapshot()) { _, second in
+            sampler.sample(
+                cpu: CPUCounters(user: UInt64(second) * 10, system: 0, idle: UInt64(second) * 90, nice: 0),
+                network: NetworkCounters(received: UInt64(second) * 100, sent: 0),
+                at: start.addingTimeInterval(TimeInterval(second))
+            )
+        }
+        expect(last.cpuHistory.count == FastStatsSampler.historyLimit, "the CPU history keeps the last \(FastStatsSampler.historyLimit) samples, got \(last.cpuHistory.count)")
+        expect(last.downloadHistory.count == FastStatsSampler.historyLimit && last.uploadHistory.count == FastStatsSampler.historyLimit, "and so do both network histories")
+        expect(FastStatsSampler.historyLimit == 90, "90 one-second samples is the 'last 90s' the graphs are labelled with")
+    }
+
+    // MARK: - Process sampler
+
+    /// `ps -eo pid,rss,vsz,pcpu,comm -r` output: rss and vsz in kilobytes.
+    private static let psRows = """
+      PID    RSS      VSZ  %CPU COMM
+      101   2048   400000  10.0 /usr/bin/clang
+      102   4096   400000  30.0 /usr/bin/clang
+      103    512   100000  90.0 /usr/libexec/tiny
+      104   3072   200000   5.0 /Applications/Safari.app/Contents/MacOS/Safari
+    """
+
+    private static func testProcessSamplerGroupsRowsAndDropsTinyOnes() {
+        let samples = ProcessSampler.parsePS(psRows)
+        expect(samples.count == 4, "every row but the header is read, got \(samples.count)")
+
+        let rows = ProcessSampler.snapshots(samples: samples, footprint: { _ in nil })
+        let byName = Dictionary(uniqueKeysWithValues: rows.map { ($0.name, $0) })
+        expect(byName["tiny"] == nil, "a process under a megabyte resident is noise in a top-N list and is dropped")
+        expect(byName["clang"]?.count == 2, "processes with one name are one group")
+        expect(byName["clang"]?.physical == 6_144 * 1_024, "a group's memory is the sum of its members', in bytes")
+        expect(byName["clang"]?.cpu == 40, "and so is its CPU")
+        expect(byName["Safari"]?.physical == 3_072 * 1_024, "the name is the executable's basename")
+    }
+
+    private static func testProcessSamplerUsesTheFootprintOnlyForShownGroups() {
+        let samples = ProcessSampler.parsePS(psRows)
+        let asked = LogRecorder()
+        let rows = ProcessSampler.snapshots(samples: samples, memoryLimit: 1, cpuLimit: 1) { pid in
+            asked.record("\(pid)")
+            return 1
+        }
+        let byName = Dictionary(uniqueKeysWithValues: rows.map { ($0.name, $0) })
+        expect(Set(asked.messages) == ["101", "102"], "only the group that would be shown (clang, top by memory and by CPU) pays for the footprint syscall, got \(asked.messages)")
+        expect(byName["clang"]?.physical == 2, "a refined group's memory is the sum of its footprints")
+        expect(byName["Safari"]?.physical == 3_072 * 1_024, "an unrefined group keeps ps's resident size")
+    }
+
+    private static func testProcessSamplerRunsPsThroughTheRunner() {
+        let recorder = LogRecorder()
+        let runner = recordingRunner(recorder, answers: ["/bin/ps -eo pid,rss,vsz,pcpu,comm -r": psRows])
+        let summary = ProcessSampler.summary(runner: runner, footprint: { _ in nil })
+        expect(recorder.messages == ["/bin/ps -eo pid,rss,vsz,pcpu,comm -r"], "one ps, by explicit path, with an argument array, got \(recorder.messages)")
+        expect(summary.totalCount == 2, "the summary counts groups after the tiny one is dropped, got \(summary.totalCount)")
+        expect(summary.topCPU.first?.name == "clang", "and ranks them by CPU")
+    }
 }
 
 /// Counts collects and checks none overlap, with an interval short enough to observe.
@@ -230,4 +414,16 @@ final class SlowTickingTab: TabPlugin {
 
     var count: Int { lock.withLock { collects } }
     @MainActor func makeView() -> AnyView { AnyView(Text("slow-ticking")) }
+}
+
+/// Counts calls from any thread, for the samplers' fake collectors.
+final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+
+    func increment() {
+        lock.withLock { calls += 1 }
+    }
+
+    var count: Int { lock.withLock { calls } }
 }

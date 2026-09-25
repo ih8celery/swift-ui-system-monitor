@@ -9,6 +9,7 @@ struct RootView: View {
     let tabs: [LoadedTab]
     let configPath: String
     let scheduler: PluginScheduler
+    let samplers: HostSamplers
     /// An index, not an id: a failed tab has no id, and two failures may share a location.
     @State private var selection = 0
     @State private var isRelaunching = false
@@ -116,9 +117,9 @@ struct RootView: View {
         }
     }
 
-    /// Tells the scheduler and the monitor what the selected tab needs. A compiled-in tab still
-    /// keys the monitor's own samplers by MonitorMode; a tab from a bundle has no mode and gets
-    /// only the feeds it declares; an error tab or an empty list needs nothing.
+    /// Tells the scheduler, the host samplers and the monitor what the selected tab needs. A
+    /// compiled-in tab still keys the monitor's own samplers by MonitorMode; every tab gets the
+    /// shared samplers it declares; an error tab or an empty list needs nothing.
     private func present(index: Int, isVisible: Bool) {
         let plugin = loadedPlugin(at: index)
         plugin?.visibilityChanged(isVisible: isVisible)
@@ -127,10 +128,10 @@ struct RootView: View {
         } else {
             scheduler.hide()
         }
+        samplers.update(isVisible: isVisible && plugin != nil, feeds: plugin?.sharedFeeds ?? [])
         monitor.updatePresentation(
             isVisible: isVisible && plugin != nil,
-            mode: (plugin as? MonitorBackedTab)?.monitorMode,
-            feeds: plugin?.sharedFeeds ?? []
+            mode: (plugin as? MonitorBackedTab)?.monitorMode
         )
     }
 }

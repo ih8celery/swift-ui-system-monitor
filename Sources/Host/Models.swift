@@ -271,16 +271,13 @@ struct DiskHogCandidate {
 
 enum MonitorJob: Hashable {
     case memory
-    case processes
     case network
     case capacity
     case disk
 }
 
 struct MonitorSamplingPlan {
-    static let fastRefreshInterval: TimeInterval = 1
     static let memoryRefreshInterval: TimeInterval = 3
-    static let processRefreshInterval: TimeInterval = 10
     static let networkRefreshInterval: TimeInterval = 30
     static let capacityRefreshInterval: TimeInterval = 60
     /// How far apart the two rusage reads sit. Per-project CPU and disk figures are deltas, so this
@@ -296,22 +293,6 @@ struct MonitorSamplingPlan {
     static let diskHogPathTimeout: TimeInterval = 45
     /// Whole-scan ceiling, kept well under the refresh interval so scans never overlap.
     static let diskHogScanBudget: TimeInterval = 240
-    /// The floor under any plugin's declared refreshInterval, so a bad bundle cannot spin a core or trap.
-    static let minimumRefreshInterval: TimeInterval = 0.25
-    /// The ceiling: a day is the longest a tab can sensibly wait, and Dispatch traps far above it.
-    static let maximumRefreshInterval: TimeInterval = 86_400
-
-    /// What runs for the selected tab: the compiled-in plan for its mode, if it has one, plus
-    /// the shared samplers the plugin declares. A tab from a bundle has no mode.
-    static func jobs(isVisible: Bool, mode: MonitorMode?, feeds: Set<SharedFeed>) -> Set<MonitorJob> {
-        guard isVisible else { return [] }
-        var jobs = mode.map { Self.jobs(isVisible: true, mode: $0) } ?? []
-        if feeds.contains(.processes) {
-            jobs.insert(.processes)
-        }
-        // .fastStats is not a job here: the 1-second sampler already runs whenever the window is open.
-        return jobs
-    }
 
     static func jobs(isVisible: Bool, mode: MonitorMode) -> Set<MonitorJob> {
         guard isVisible else { return [] }
@@ -322,13 +303,13 @@ struct MonitorSamplingPlan {
             // shared process or network samplers to be running alongside it.
             return [.capacity]
         case .memory:
-            return [.memory, .processes]
+            return [.memory]
         case .disk:
             return [.disk]
         case .network:
             return [.network]
         case .cpu:
-            return [.processes]
+            return []
         }
     }
 }
@@ -378,34 +359,6 @@ struct SpeedTestResult {
     let endpoint: String
     let measuredAt: Date
     let duration: TimeInterval
-}
-
-struct RawProcessSample {
-    let pid: Int32
-    let rss: UInt64
-    let virtualSize: UInt64
-    let cpu: Double
-    let name: String
-}
-
-struct CPUCounters {
-    let user: UInt64
-    let system: UInt64
-    let idle: UInt64
-    let nice: UInt64
-
-    var active: UInt64 {
-        user + system + nice
-    }
-
-    var total: UInt64 {
-        active + idle
-    }
-}
-
-struct NetworkCounters {
-    let received: UInt64
-    let sent: UInt64
 }
 
 struct TCPConnection {

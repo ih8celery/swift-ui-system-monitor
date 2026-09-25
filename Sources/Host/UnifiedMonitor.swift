@@ -4,6 +4,9 @@ import Foundation
 import SwiftUI
 import SystemBarKit
 
+/// What is left of the one monitor while the tabs move into bundles: the samplers the
+/// compiled-in tabs still need, keyed by MonitorMode. The 1-second and process readings are the
+/// host's now (HostSamplers); this class only mirrors those feeds for the panels still compiled in.
 final class UnifiedMonitor: ObservableObject {
     @Published var fastStats = FastStatsSnapshot()
     @Published var memoryStats = MemoryStatsSnapshot()
@@ -16,7 +19,6 @@ final class UnifiedMonitor: ObservableObject {
     @Published var speedTestHealth = SampleHealth.ok
     @Published var speedTestResult: SpeedTestResult?
 
-    private let fastQueue = DispatchQueue(label: "systembar.monitor.fast", qos: .utility)
     // slowQueue is the sole owner of isWindowVisible/activeMode: every read or
     // write of that pair happens here, so the per-collector queues below can
     // run each check's own syscalls concurrently without racing on it.
@@ -24,22 +26,16 @@ final class UnifiedMonitor: ObservableObject {
     let dnsQueue = DispatchQueue(label: "systembar.monitor.dns", qos: .utility)
     let speedTestQueue = DispatchQueue(label: "systembar.monitor.speedtest", qos: .utility)
     private let memoryQueue = DispatchQueue(label: "systembar.monitor.memory", qos: .utility)
-    private let processQueue = DispatchQueue(label: "systembar.monitor.process", qos: .utility)
     private let networkQueue = DispatchQueue(label: "systembar.monitor.network", qos: .utility)
     private let developerQueue = DispatchQueue(label: "systembar.monitor.developer", qos: .utility)
-    private var memoryTimer: DispatchSourceTimer?
-    private var processTimer: DispatchSourceTimer?
-    private var networkTimer: DispatchSourceTimer?
-    private var developerTimer: DispatchSourceTimer?
-    private var diskTimer: DispatchSourceTimer?
-    private var fastTimer: DispatchSourceTimer?
     let diskQueue = DispatchQueue(label: "systembar.monitor.disk", qos: .utility)
     /// The hog scan gets its own queue: it can run for minutes, and sharing diskQueue would
     /// stall the 30s capacity read behind it — freezing the rest of the Disk tab. It also
     /// owns `isScanningDiskHogs` and `lastDiskHogScan`, which are touched from nowhere else.
     let diskHogQueue = DispatchQueue(label: "systembar.monitor.diskhogs", qos: .utility)
+    private var timers: [DispatchSourceTimer] = []
+    private var feedSinks: [AnyCancellable] = []
     var isCollectingMemory = false
-    var isCollectingProcesses = false
     var isCollectingNetwork = false
     var isCollectingCapacity = false
     var isCollectingDisk = false
@@ -48,15 +44,10 @@ final class UnifiedMonitor: ObservableObject {
     var lastPressureRefresh = Date.distantPast
     var cachedPressure: Double?
     var cachedGPU = GPUSnapshot()
-    var lastFastStats = FastStatsSnapshot()
-    var previousCPUCounters: CPUCounters?
-    var previousNetworkCounters: NetworkCounters?
-    var previousNetworkDate: Date?
     var hostnameCache: [String: HostnameCacheEntry] = [:]
     var hostnameLookupsInFlight = Set<String>()
     private var isWindowVisible = false
     private var activeMode: MonitorMode?
-    private var activeFeeds: Set<SharedFeed> = []
 
     var memory: MemorySnapshot { memoryStats.memory }
     var gpu: GPUSnapshot { memoryStats.gpu }
@@ -83,182 +74,75 @@ final class UnifiedMonitor: ObservableObject {
     var capacity: CapacitySnapshot { capacitySnapshot }
     var disk: DiskSnapshot { diskSnapshot }
 
-    /// Stage 1 of the plugin conversion: the built-in tabs reach the one monitor through this
-    /// until each owns its own collector. Deleted with the class.
+    /// The compiled-in tabs reach the one monitor through this until each owns its own
+    /// collector. Deleted with the class.
     static let shared = UnifiedMonitor()
 
     private init() {
-        start()
-    }
-
-    func start() {
-        guard fastTimer == nil else { return }
-
-        let fastTimer = DispatchSource.makeTimerSource(queue: slowQueue)
-        fastTimer.schedule(
-            deadline: .now() + MonitorSamplingPlan.fastRefreshInterval,
-            repeating: MonitorSamplingPlan.fastRefreshInterval,
-            leeway: .milliseconds(200)
-        )
-        fastTimer.setEventHandler { [weak self] in
-            self?.collectFastStatsIfVisible()
-        }
-        fastTimer.resume()
-        self.fastTimer = fastTimer
-
-        let memoryTimer = DispatchSource.makeTimerSource(queue: slowQueue)
-        memoryTimer.schedule(
-            deadline: .now() + MonitorSamplingPlan.memoryRefreshInterval,
-            repeating: MonitorSamplingPlan.memoryRefreshInterval,
-            leeway: .seconds(1)
-        )
-        memoryTimer.setEventHandler { [weak self] in
-            self?.collectMemoryIfVisible()
-        }
-        memoryTimer.resume()
-        self.memoryTimer = memoryTimer
-
-        let processTimer = DispatchSource.makeTimerSource(queue: slowQueue)
-        processTimer.schedule(
-            deadline: .now() + MonitorSamplingPlan.processRefreshInterval,
-            repeating: MonitorSamplingPlan.processRefreshInterval,
-            leeway: .seconds(2)
-        )
-        processTimer.setEventHandler { [weak self] in
-            self?.collectProcessesIfVisible()
-        }
-        processTimer.resume()
-        self.processTimer = processTimer
-
-        let networkTimer = DispatchSource.makeTimerSource(queue: slowQueue)
-        networkTimer.schedule(
-            deadline: .now() + MonitorSamplingPlan.networkRefreshInterval,
-            repeating: MonitorSamplingPlan.networkRefreshInterval,
-            leeway: .seconds(5)
-        )
-        networkTimer.setEventHandler { [weak self] in
-            self?.collectNetworkIfVisible()
-        }
-        networkTimer.resume()
-        self.networkTimer = networkTimer
-
-        let developerTimer = DispatchSource.makeTimerSource(queue: slowQueue)
-        developerTimer.schedule(
-            deadline: .now() + MonitorSamplingPlan.capacityRefreshInterval,
-            repeating: MonitorSamplingPlan.capacityRefreshInterval,
-            leeway: .seconds(10)
-        )
-        developerTimer.setEventHandler { [weak self] in
-            self?.collectCapacityIfVisible()
-        }
-        developerTimer.resume()
-        self.developerTimer = developerTimer
-
-        let diskTimer = DispatchSource.makeTimerSource(queue: slowQueue)
-        diskTimer.schedule(
-            deadline: .now() + MonitorSamplingPlan.diskRefreshInterval,
-            repeating: MonitorSamplingPlan.diskRefreshInterval,
-            leeway: .seconds(5)
-        )
-        diskTimer.setEventHandler { [weak self] in
-            self?.collectDiskIfVisible()
-        }
-        diskTimer.resume()
-        self.diskTimer = diskTimer
-    }
-
-    func updatePresentation(isVisible: Bool, mode: MonitorMode?, feeds: Set<SharedFeed>) {
-        slowQueue.async { [weak self] in
-            guard let self else { return }
-            let becameVisible = isVisible && !self.isWindowVisible
-            let changed = mode != self.activeMode || feeds != self.activeFeeds
-            self.isWindowVisible = isVisible
-            self.activeMode = mode
-            self.activeFeeds = feeds
-
-            if becameVisible || changed {
-                self.collectVisibleStats()
-            }
-        }
-    }
-
-    private var feedSinks: [AnyCancellable] = []
-
-    /// Every process summary and fast sample this monitor publishes also goes to the host's
-    /// feeds, so a plugin from a bundle reads the same readings the compiled-in tabs do.
-    func forward(processes: Feed<ProcessSummary>, fastStats: Feed<FastStatsSnapshot>) {
-        feedSinks = [
-            $processSummary.dropFirst().sink { processes.send($0) },
-            $fastStats.dropFirst().sink { fastStats.send($0) },
+        timers = [
+            makeTimer(every: MonitorSamplingPlan.memoryRefreshInterval, leeway: .seconds(1), job: .memory),
+            makeTimer(every: MonitorSamplingPlan.networkRefreshInterval, leeway: .seconds(5), job: .network),
+            makeTimer(every: MonitorSamplingPlan.capacityRefreshInterval, leeway: .seconds(10), job: .capacity),
+            makeTimer(every: MonitorSamplingPlan.diskRefreshInterval, leeway: .seconds(5), job: .disk),
         ]
     }
 
     deinit {
-        fastTimer?.cancel()
-        memoryTimer?.cancel()
-        processTimer?.cancel()
-        networkTimer?.cancel()
-        developerTimer?.cancel()
-        diskTimer?.cancel()
+        timers.forEach { $0.cancel() }
+    }
+
+    private func makeTimer(every interval: TimeInterval, leeway: DispatchTimeInterval, job: MonitorJob) -> DispatchSourceTimer {
+        let timer = DispatchSource.makeTimerSource(queue: slowQueue)
+        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: leeway)
+        timer.setEventHandler { [weak self] in self?.collectIfVisible(job) }
+        timer.resume()
+        return timer
+    }
+
+    func updatePresentation(isVisible: Bool, mode: MonitorMode?) {
+        slowQueue.async { [weak self] in
+            guard let self else { return }
+            let becameVisible = isVisible && !self.isWindowVisible
+            let changed = mode != self.activeMode
+            self.isWindowVisible = isVisible
+            self.activeMode = mode
+
+            if becameVisible || changed {
+                self.visibleJobs.forEach { self.run($0) }
+            }
+        }
+    }
+
+    /// The panels still compiled in read the host's feeds through here until each moves into
+    /// its bundle and reads the feed itself.
+    func follow(processes: Feed<ProcessSummary>, fastStats: Feed<FastStatsSnapshot>) {
+        processSummary = processes.value
+        self.fastStats = fastStats.value
+        feedSinks = [
+            processes.publisher.sink { [weak self] in self?.processSummary = $0 },
+            fastStats.publisher.sink { [weak self] in self?.fastStats = $0 },
+        ]
     }
 
     private var visibleJobs: Set<MonitorJob> {
-        MonitorSamplingPlan.jobs(isVisible: isWindowVisible, mode: activeMode, feeds: activeFeeds)
+        guard isWindowVisible, let activeMode else { return [] }
+        return MonitorSamplingPlan.jobs(isVisible: true, mode: activeMode)
+    }
+
+    private func collectIfVisible(_ job: MonitorJob) {
+        guard visibleJobs.contains(job) else { return }
+        run(job)
     }
 
     // Each check hops from slowQueue to its own dedicated queue here, so a
     // slow one (network's nettop alone takes ~1s by design) can't hold up
-    // the others: they no longer share a single serial queue.
-    private func collectVisibleStats() {
-        if isWindowVisible {
-            fastQueue.async { [weak self] in self?.collectFastStats() }
-        }
-        let jobs = visibleJobs
-        if jobs.contains(.memory) {
-            memoryQueue.async { [weak self] in self?.collectMemory() }
-        }
-        if jobs.contains(.processes) {
-            processQueue.async { [weak self] in self?.collectProcesses() }
-        }
-        if jobs.contains(.network) {
-            networkQueue.async { [weak self] in self?.collectNetwork() }
-        }
-        if jobs.contains(.capacity) {
-            developerQueue.async { [weak self] in self?.collectCapacity() }
-        }
-        if jobs.contains(.disk) {
-            diskQueue.async { [weak self] in self?.collectDisk() }
+    // the others.
+    private func run(_ job: MonitorJob) {
+        switch job {
+        case .memory: memoryQueue.async { [weak self] in self?.collectMemory() }
+        case .network: networkQueue.async { [weak self] in self?.collectNetwork() }
+        case .capacity: developerQueue.async { [weak self] in self?.collectCapacity() }
+        case .disk: diskQueue.async { [weak self] in self?.collectDisk() }
         }
     }
-
-    private func collectMemoryIfVisible() {
-        guard visibleJobs.contains(.memory) else { return }
-        memoryQueue.async { [weak self] in self?.collectMemory() }
-    }
-
-    private func collectProcessesIfVisible() {
-        guard visibleJobs.contains(.processes) else { return }
-        processQueue.async { [weak self] in self?.collectProcesses() }
-    }
-
-    private func collectNetworkIfVisible() {
-        guard visibleJobs.contains(.network) else { return }
-        networkQueue.async { [weak self] in self?.collectNetwork() }
-    }
-
-    private func collectCapacityIfVisible() {
-        guard visibleJobs.contains(.capacity) else { return }
-        developerQueue.async { [weak self] in self?.collectCapacity() }
-    }
-
-    private func collectDiskIfVisible() {
-        guard visibleJobs.contains(.disk) else { return }
-        diskQueue.async { [weak self] in self?.collectDisk() }
-    }
-
-    private func collectFastStatsIfVisible() {
-        guard isWindowVisible else { return }
-        fastQueue.async { [weak self] in self?.collectFastStats() }
-    }
-
 }

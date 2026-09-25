@@ -13,6 +13,11 @@ final class PluginScheduler {
         var timer: DispatchSourceTimer?
     }
 
+    /// The floor under any plugin's declared refreshInterval, so a bad bundle cannot spin a core or trap.
+    nonisolated static let minimumRefreshInterval: TimeInterval = 0.25
+    /// The ceiling: a day is the longest a tab can sensibly wait, and Dispatch traps far above it.
+    nonisolated static let maximumRefreshInterval: TimeInterval = 86_400
+
     private var slots: [ObjectIdentifier: Slot] = [:]
     private var shown: TabPlugin?
     private let minimumRefreshInterval: TimeInterval
@@ -23,8 +28,8 @@ final class PluginScheduler {
     /// override any of them — a short floor so its fakes run at their own declared interval, and
     /// a capturing closure instead of NSLog — without any of it leaking into the real app.
     init(
-        minimumRefreshInterval: TimeInterval = MonitorSamplingPlan.minimumRefreshInterval,
-        maximumRefreshInterval: TimeInterval = MonitorSamplingPlan.maximumRefreshInterval,
+        minimumRefreshInterval: TimeInterval = PluginScheduler.minimumRefreshInterval,
+        maximumRefreshInterval: TimeInterval = PluginScheduler.maximumRefreshInterval,
         log: @escaping (String) -> Void = { NSLog("%@", $0) }
     ) {
         self.minimumRefreshInterval = minimumRefreshInterval

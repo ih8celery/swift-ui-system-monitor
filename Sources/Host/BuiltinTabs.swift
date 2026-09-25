@@ -112,7 +112,7 @@ final class CPUTab: MonitorBackedTab {
     let title = "CPU"
     let systemImage = "cpu"
     let accent = Palette.warning
-    let refreshInterval = MonitorSamplingPlan.processRefreshInterval
+    let refreshInterval = HostSamplers.processInterval
     let sharedFeeds: Set<SharedFeed> = [.processes, .fastStats]
     let monitorMode = MonitorMode.cpu
 

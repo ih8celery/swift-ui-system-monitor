@@ -11,6 +11,7 @@ struct SystemBarApp: App {
     private let processes = Feed(initial: ProcessSummary())
     private let fastStats = Feed(initial: FastStatsSnapshot())
     private let scheduler = PluginScheduler()
+    private let samplers: HostSamplers
 
     init() {
         let store = PluginConfigStore.standard()
@@ -21,6 +22,7 @@ struct SystemBarApp: App {
             runner: ProcessRunner.run,
             log: { NSLog("%@", $0) }
         )
+        samplers = HostSamplers.standard(processes: processes, fastStats: fastStats)
         let source = HostTabSource(bundles: .standard(), builtins: BuiltinTabSource())
         let loaded = TabLoader.load(store: store, source: source, host: host)
         tabs = loaded
@@ -33,13 +35,13 @@ struct SystemBarApp: App {
             exit(0)
         }
 
-        UnifiedMonitor.shared.forward(processes: processes, fastStats: fastStats)
+        UnifiedMonitor.shared.follow(processes: processes, fastStats: fastStats)
     }
 
     var body: some Scene {
         MenuBarExtra {
             // UnifiedMonitor.shared starts its timers when first created, so nothing else starts it.
-            RootView(monitor: UnifiedMonitor.shared, tabs: tabs, configPath: configPath, scheduler: scheduler)
+            RootView(monitor: UnifiedMonitor.shared, tabs: tabs, configPath: configPath, scheduler: scheduler, samplers: samplers)
         } label: {
             Image(systemName: "percent")
         }

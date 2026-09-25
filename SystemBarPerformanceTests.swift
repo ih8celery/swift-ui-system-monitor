@@ -52,8 +52,8 @@ struct SystemBarPerformanceTests {
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .network).isEmpty, "hidden window should not run heavy samplers")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .network) == [.network], "network mode should only run network heavy sampler")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .developer) == [.capacity], "the Dev tab runs only the capacity sampler, which does its own ps and lsof")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .memory) == [.memory, .processes], "memory mode should refresh memory and processes")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .cpu) == [.processes], "cpu mode should refresh processes only")
+        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .memory) == [.memory], "memory mode runs the memory sampler; the process feed comes from the host samplers now")
+        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .cpu).isEmpty, "cpu mode needs nothing of the monitor; both its feeds come from the host samplers")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .disk) == [.disk], "disk mode should only run the disk sampler")
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .disk).isEmpty, "hidden window should not scan disks")
         expect(MonitorSamplingPlan.networkRefreshInterval >= 30, "network refresh interval should protect idle CPU")
@@ -525,7 +525,7 @@ struct SystemBarPerformanceTests {
         _ = mach_port_get_refs(mach_task_self_, probePort, mach_port_right_t(MACH_PORT_RIGHT_SEND), &before)
 
         for _ in 0..<50 {
-            _ = UnifiedMonitor.collectCPUCounters()
+            _ = FastStatsSampler.collectCPUCounters()
             _ = UnifiedMonitor.collectMemorySnapshot()
         }
 
@@ -549,10 +549,10 @@ struct SystemBarPerformanceTests {
             ("small", 1_048_576, 1)
         ]
 
-        let refined = UnifiedMonitor.groupsNeedingRefinement(samples: samples, memoryLimit: 1, cpuLimit: 1)
+        let refined = ProcessSampler.groupsNeedingRefinement(samples: samples, memoryLimit: 1, cpuLimit: 1)
         expect(refined == ["big-mem", "big-cpu"], "only the top memory group and top CPU group should need refinement")
 
-        let refinedAll = UnifiedMonitor.groupsNeedingRefinement(samples: samples, memoryLimit: 10, cpuLimit: 10)
+        let refinedAll = ProcessSampler.groupsNeedingRefinement(samples: samples, memoryLimit: 10, cpuLimit: 10)
         expect(refinedAll == ["big-mem", "big-cpu", "small"], "a generous limit should cover every group")
     }
 
