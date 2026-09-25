@@ -3,7 +3,9 @@ import SystemBarKit
 
 /// Tests for the per-project capacity ledger: what kind of work a process is, whose project it
 /// belongs to, what its load actually measures, and how the machine is graded overall.
-struct SystemBarCapacityTests {
+/// Main-actor to match the other plugin suites, which construct plugins.
+@MainActor
+enum CapacityTests {
     static func runAll() {
         testWorkCategoryClassification()
         testWorkCategoryLabelsMatchTheCapacityScript()
@@ -29,6 +31,18 @@ struct SystemBarCapacityTests {
         testWorkingDirectoryLookupIsBoundedAndOnlyForUnnamedWork()
         testWorkingDirectoryAttributionNamesBuilds()
         testEvidenceReattributionPreservesTheSplit()
+        testListeningPortParsing()
+    }
+
+    private static func testListeningPortParsing() {
+        let sample = """
+        COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+        node    1234 adam   21u  IPv6 0xabc      0t0  TCP *:3000 (LISTEN)
+        Python  2345 adam    7u  IPv4 0xdef      0t0  TCP 127.0.0.1:8000 (LISTEN)
+        """
+        let ports = CapacityCollector.parseListeningPorts(sample)
+        expect(ports.map(\.port) == ["3000", "8000"], "listening port parser should extract port numbers")
+        expect(ports.first?.process == "node", "listening port parser should preserve process name")
     }
 
     // MARK: - Working directory fallback
@@ -46,13 +60,13 @@ struct SystemBarCapacityTests {
         p999
         fcwd
         """
-        let directories = UnifiedMonitor.parseWorkingDirectories(output)
+        let directories = CapacityCollector.parseWorkingDirectories(output)
 
         expect(directories.count == 2, "a process with no path line contributes nothing")
         expect(directories[864] == "/Users/tester/code/app", "the path should attach to the pid above it")
         expect(directories[3782] == "/Users/tester/code/other", "each process set should be read independently")
         expect(directories[999] == nil, "a pid whose cwd could not be read must be absent, not empty")
-        expect(UnifiedMonitor.parseWorkingDirectories("garbage\nn/no/pid/yet").isEmpty, "a path before any pid is ignored")
+        expect(CapacityCollector.parseWorkingDirectories("garbage\nn/no/pid/yet").isEmpty, "a path before any pid is ignored")
     }
 
     private static func testWorkingDirectoryLookupIsBoundedAndOnlyForUnnamedWork() {
@@ -64,11 +78,11 @@ struct SystemBarCapacityTests {
         ]
 
         expect(
-            UnifiedMonitor.workingDirectoryLookupPIDs(for: processes, limit: 10) == [2, 3, 4],
+            CapacityCollector.workingDirectoryLookupPIDs(for: processes, limit: 10) == [2, 3, 4],
             "only work that is not already named needs a lookup"
         )
         expect(
-            UnifiedMonitor.workingDirectoryLookupPIDs(for: processes, limit: 2) == [2, 3],
+            CapacityCollector.workingDirectoryLookupPIDs(for: processes, limit: 2) == [2, 3],
             "the lookup list is capped so one pathological tick cannot grow unbounded"
         )
     }
@@ -81,7 +95,7 @@ struct SystemBarCapacityTests {
         let alreadyNamed = CategorizedProcess(pid: 1, project: app, category: .bundler)
         let strayJob = CategorizedProcess(pid: 3, project: nil, category: .testRunner)
 
-        let attributed = UnifiedMonitor.attributed(
+        let attributed = CapacityCollector.attributed(
             [alreadyNamed, compileJob, strayJob],
             workingDirectories: [
                 1: "/Users/tester/somewhere/else",
@@ -253,7 +267,7 @@ struct SystemBarCapacityTests {
           415     1   12.0    32768 00:20 /usr/local/bin/node /Users/tester/elsewhere/serve.js
         """
         let records = ProcessTable.parse(table)
-        let work = UnifiedMonitor.categorizedProcesses(
+        let work = CapacityCollector.categorizedProcesses(
             in: records,
             resolver: resolver(repositories: ["/Users/tester/code/app"])
         )
@@ -283,7 +297,7 @@ struct SystemBarCapacityTests {
             DeveloperPort(process: "ghost", pid: 4242, port: "9000", localAddress: "*:9000")
         ]
 
-        let attributed = UnifiedMonitor.attributedPorts(
+        let attributed = CapacityCollector.attributedPorts(
             ports,
             records: records,
             resolver: resolver(repositories: ["/Users/tester/code/app"])
@@ -297,15 +311,15 @@ struct SystemBarCapacityTests {
 
     /// Ported from parseThermal in machine-capacity.js: the negated forms must not read as warnings.
     private static func testThermalWarningParsing() {
-        let quiet = UnifiedMonitor.parseThermalWarnings("No thermal warning level has been recorded\nNo performance warning level has been recorded")
+        let quiet = CapacityCollector.parseThermalWarnings("No thermal warning level has been recorded\nNo performance warning level has been recorded")
         expect(!quiet.hasThermalWarning, "a 'no thermal warning' line must not be read as a warning")
         expect(!quiet.hasPerformanceWarning, "a 'no performance warning' line must not be read as a warning")
 
-        let hot = UnifiedMonitor.parseThermalWarnings("Thermal warning level has changed to 1")
+        let hot = CapacityCollector.parseThermalWarnings("Thermal warning level has changed to 1")
         expect(hot.hasThermalWarning, "a recorded thermal warning should be detected")
         expect(!hot.hasPerformanceWarning, "a thermal warning alone should not imply a performance warning")
 
-        let throttled = UnifiedMonitor.parseThermalWarnings("Performance warning level has changed to 2")
+        let throttled = CapacityCollector.parseThermalWarnings("Performance warning level has changed to 2")
         expect(throttled.hasPerformanceWarning, "a recorded performance warning should be detected")
     }
 

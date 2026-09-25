@@ -20,7 +20,6 @@ struct BuiltinTabSource: TabSource {
     /// One row per built-in, in today's tab order, keyed by the bundle name each tab will have
     /// once it is a real bundle, so a plugins.json written today is still right then.
     static let builtins: [(name: String, type: TabPlugin.Type)] = [
-        ("Dev.bundle", DevTab.self),
         ("Memory.bundle", MemoryTab.self),
         ("Network.bundle", NetworkTab.self),
         ("CPU.bundle", CPUTab.self),
@@ -48,20 +47,6 @@ struct BuiltinTabSource: TabSource {
 // Each adapter's refreshInterval restates MonitorSamplingPlan's interval for that tab; its
 // sharedFeeds are what HostSamplers reads to decide which shared samplers run while it is
 // visible, exactly as for a bundle.
-
-final class DevTab: MonitorBackedTab {
-    static let identifier = "dev"
-    let title = "Dev"
-    let systemImage = "terminal"
-    let accent = Palette.purple
-    let refreshInterval = MonitorSamplingPlan.capacityRefreshInterval
-    let sharedFeeds: Set<SharedFeed> = []
-    let monitorMode = MonitorMode.developer
-
-    init(host: HostServices) {}
-    func collect() {}
-    @MainActor func makeView() -> AnyView { AnyView(DeveloperPanel(monitor: .shared)) }
-}
 
 final class MemoryTab: MonitorBackedTab {
     static let identifier = "memory"

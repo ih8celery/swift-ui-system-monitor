@@ -12,7 +12,6 @@ final class UnifiedMonitor: ObservableObject {
     @Published var memoryStats = MemoryStatsSnapshot()
     @Published var processSummary = ProcessSummary()
     @Published var networkSummary = NetworkSummary()
-    @Published var capacitySnapshot = CapacitySnapshot()
     @Published var isSpeedTestRunning = false
     @Published var speedTestStatus = "Ready"
     @Published var speedTestHealth = SampleHealth.ok
@@ -26,12 +25,10 @@ final class UnifiedMonitor: ObservableObject {
     let speedTestQueue = DispatchQueue(label: "systembar.monitor.speedtest", qos: .utility)
     private let memoryQueue = DispatchQueue(label: "systembar.monitor.memory", qos: .utility)
     private let networkQueue = DispatchQueue(label: "systembar.monitor.network", qos: .utility)
-    private let developerQueue = DispatchQueue(label: "systembar.monitor.developer", qos: .utility)
     private var timers: [DispatchSourceTimer] = []
     private var feedSinks: [AnyCancellable] = []
     var isCollectingMemory = false
     var isCollectingNetwork = false
-    var isCollectingCapacity = false
     var lastPressureRefresh = Date.distantPast
     var cachedPressure: Double?
     var cachedGPU = GPUSnapshot()
@@ -62,7 +59,6 @@ final class UnifiedMonitor: ObservableObject {
     var resolvedHostnames: [String: String] { networkSummary.resolvedHostnames }
     var networkStatus: String { networkSummary.status }
     var networkHealth: SampleHealth { networkSummary.health }
-    var capacity: CapacitySnapshot { capacitySnapshot }
 
     /// The compiled-in tabs reach the one monitor through this until each owns its own
     /// collector. Deleted with the class.
@@ -72,7 +68,6 @@ final class UnifiedMonitor: ObservableObject {
         timers = [
             makeTimer(every: MonitorSamplingPlan.memoryRefreshInterval, leeway: .seconds(1), job: .memory),
             makeTimer(every: MonitorSamplingPlan.networkRefreshInterval, leeway: .seconds(5), job: .network),
-            makeTimer(every: MonitorSamplingPlan.capacityRefreshInterval, leeway: .seconds(10), job: .capacity),
         ]
     }
 
@@ -130,7 +125,6 @@ final class UnifiedMonitor: ObservableObject {
         switch job {
         case .memory: memoryQueue.async { [weak self] in self?.collectMemory() }
         case .network: networkQueue.async { [weak self] in self?.collectNetwork() }
-        case .capacity: developerQueue.async { [weak self] in self?.collectCapacity() }
         }
     }
 }

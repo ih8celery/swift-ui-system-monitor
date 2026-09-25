@@ -5,7 +5,6 @@ import SwiftUI
 import SystemBarKit
 
 enum MonitorMode: String, CaseIterable, Identifiable {
-    case developer = "Dev"
     case memory = "Memory"
     case network = "Network"
     case cpu = "CPU"
@@ -14,7 +13,6 @@ enum MonitorMode: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .developer: return "terminal"
         case .memory: return "memorychip"
         case .network: return "arrow.up.arrow.down"
         case .cpu: return "cpu"
@@ -162,42 +160,20 @@ struct HostnameCacheEntry {
     let cachedAt: Date
 }
 
-struct DeveloperPort: Identifiable {
-    var id: String { "\(process)|\(pid)|\(port)|\(localAddress)" }
-    let process: String
-    let pid: Int
-    let port: String
-    let localAddress: String
-    /// Filled in once the listening process is traced to a repository. Nil for system daemons and
-    /// for processes that exited between the `lsof` and `ps` reads. Attribution builds new ports
-    /// rather than mutating parsed ones; this is `var` only so the memberwise init can default it.
-    var projectName: String? = nil
-}
-
 enum MonitorJob: Hashable {
     case memory
     case network
-    case capacity
 }
 
 struct MonitorSamplingPlan {
     static let memoryRefreshInterval: TimeInterval = 3
     static let networkRefreshInterval: TimeInterval = 30
-    static let capacityRefreshInterval: TimeInterval = 60
-    /// How far apart the two rusage reads sit. Per-project CPU and disk figures are deltas, so this
-    /// is the interval they are measured over — long enough to be meaningful, short enough that the
-    /// Dev collector's own queue is the only thing waiting on it.
-    static let capacitySampleWindow: TimeInterval = 1
     static let pressureRefreshInterval: TimeInterval = 30
 
     static func jobs(isVisible: Bool, mode: MonitorMode) -> Set<MonitorJob> {
         guard isVisible else { return [] }
 
         switch mode {
-        case .developer:
-            // The capacity collector runs its own ps and lsof, so the Dev tab no longer needs the
-            // shared process or network samplers to be running alongside it.
-            return [.capacity]
         case .memory:
             return [.memory]
         case .network:

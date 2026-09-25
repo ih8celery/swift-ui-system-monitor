@@ -13,7 +13,6 @@ struct SystemBarPerformanceTests {
         testParentChainWalk()
         testGroupDetailRows()
         testProcessClassifier()
-        testListeningPortParsing()
         MainActor.assumeIsolated { PowerTests.runAll() }
         MainActor.assumeIsolated { DiskTests.runAll() }
         testRunProcessDrainsLargeStderrConcurrently()
@@ -31,7 +30,8 @@ struct SystemBarPerformanceTests {
         testParseNetworkQualityJSON()
         testParseNetworkQualitySummary()
         testSampleHealthFromIsOK()
-        SystemBarCapacityTests.runAll()
+        MainActor.assumeIsolated { CapacityTests.runAll() }
+        MainActor.assumeIsolated { DevPluginTests.runAll() }
         MainActor.assumeIsolated { SystemBarConfigTests.runAll() }
         MainActor.assumeIsolated { SystemBarLoaderTests.runAll() }
         MainActor.assumeIsolated { SystemBarSchedulerTests.runAll() }
@@ -41,15 +41,9 @@ struct SystemBarPerformanceTests {
     private static func testSamplingPlan() {
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .network).isEmpty, "hidden window should not run heavy samplers")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .network) == [.network], "network mode should only run network heavy sampler")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .developer) == [.capacity], "the Dev tab runs only the capacity sampler, which does its own ps and lsof")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .memory) == [.memory], "memory mode runs the memory sampler; the process feed comes from the host samplers now")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .cpu).isEmpty, "cpu mode needs nothing of the monitor; both its feeds come from the host samplers")
         expect(MonitorSamplingPlan.networkRefreshInterval >= 30, "network refresh interval should protect idle CPU")
-        expect(MonitorSamplingPlan.capacityRefreshInterval >= 60, "capacity collector should be conservative")
-        expect(
-            MonitorSamplingPlan.capacitySampleWindow < MonitorSamplingPlan.capacityRefreshInterval,
-            "the rusage sample window must fit inside the refresh interval so ticks never overlap"
-        )
     }
 
     private static func testBoundedHistory() {
@@ -211,17 +205,6 @@ struct SystemBarPerformanceTests {
         expect(ProcessClassifier.likelyLabel(for: unknown) == "Started by supervisord — /opt/weird/thing", "unmatched input degrades to the honest fallback")
 
         expect(ProcessClassifier.likelyLabel(for: []) == "No live processes", "an empty group must not crash")
-    }
-
-    private static func testListeningPortParsing() {
-        let sample = """
-        COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
-        node    1234 adam   21u  IPv6 0xabc      0t0  TCP *:3000 (LISTEN)
-        Python  2345 adam    7u  IPv4 0xdef      0t0  TCP 127.0.0.1:8000 (LISTEN)
-        """
-        let ports = UnifiedMonitor.parseListeningPorts(sample)
-        expect(ports.map(\.port) == ["3000", "8000"], "listening port parser should extract port numbers")
-        expect(ports.first?.process == "node", "listening port parser should preserve process name")
     }
 
     private static func testRunProcessDrainsLargeStderrConcurrently() {

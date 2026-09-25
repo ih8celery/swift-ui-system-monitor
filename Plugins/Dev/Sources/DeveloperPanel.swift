@@ -1,13 +1,12 @@
-import AppKit
 import Foundation
 import SwiftUI
 import SystemBarKit
 
 /// The Dev tab: how much room the machine has left, and which projects are using it.
 struct DeveloperPanel: View {
-    @ObservedObject var monitor: UnifiedMonitor
+    @ObservedObject var plugin: DevPlugin
 
-    private var capacity: CapacitySnapshot { monitor.capacity }
+    private var capacity: CapacitySnapshot { plugin.capacity }
 
     var body: some View {
         HStack(spacing: 0) {
