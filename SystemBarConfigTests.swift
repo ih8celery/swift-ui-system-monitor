@@ -227,7 +227,7 @@ struct SystemBarConfigTests {
 
     // MARK: - Config store
 
-    private static let sampleDefault = PluginConfig.builtins(named: ["CPU.bundle", "Memory.bundle"])
+    private static let sampleDefault = PluginConfig.defaults(named: ["CPU.bundle", "Memory.bundle"])
 
     private static func testStoreUsesApplicationSupportByDefault() {
         let support = URL(fileURLWithPath: "/Users/someone/Library/Application Support")
@@ -252,7 +252,7 @@ struct SystemBarConfigTests {
         expect((try? result.get()) == sampleDefault, "a missing file yields the default, got \(result)")
         expect(FileManager.default.fileExists(atPath: store.fileURL.path), "and the default is written, creating its directory")
         let written = try? Data(contentsOf: store.fileURL)
-        expect((try? store.loadOrCreate(default: .builtins(named: ["ignored.bundle"])).get()) == sampleDefault,
+        expect((try? store.loadOrCreate(default: .defaults(named: ["ignored.bundle"])).get()) == sampleDefault,
                "what was written reads back as the same config, and the default passed here is never used")
         expect((try? Data(contentsOf: store.fileURL)) == written, "the file exists, so this call never writes to it")
     }
@@ -271,7 +271,7 @@ struct SystemBarConfigTests {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
-        let existing = PluginConfig.builtins(named: ["Disk.bundle"])
+        let existing = PluginConfig.defaults(named: ["Disk.bundle"])
         expect((try? store.write(existing)) != nil, "setup: the sample file could be written")
         let result = store.loadOrCreate(default: sampleDefault)
         expect((try? result.get()) == existing, "an existing file wins over the default, got \(result)")

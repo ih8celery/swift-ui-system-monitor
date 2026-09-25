@@ -49,7 +49,7 @@ struct SystemBarLoaderTests {
         }
         expect(FileManager.default.fileExists(atPath: store.fileURL.path), "and the default file is written")
         if case .success(let written) = store.loadOrCreate(default: PluginConfig(plugins: [])) {
-            expect(written == .builtins(named: DefaultPlugins.names), "the file written is the default list, got \(written)")
+            expect(written == .defaults(named: DefaultPlugins.names), "the file written is the default list, got \(written)")
         } else {
             expect(false, "the file written must read back")
         }

@@ -16,7 +16,7 @@ struct PluginConfig: Equatable {
     let plugins: [PluginEntry]
 
     /// The file the app writes when there is none: every default bundle, enabled, in the given order.
-    static func builtins(named names: [String]) -> PluginConfig {
+    static func defaults(named names: [String]) -> PluginConfig {
         PluginConfig(plugins: names.map { PluginEntry(name: $0, path: nil, isEnabled: true) })
     }
 }
