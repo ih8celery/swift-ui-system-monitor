@@ -23,7 +23,7 @@ extension UnifiedMonitor {
         if listen.status != 0 { failures.append("lsof listen unavailable") }
         if therm.status != 0 { failures.append("thermal warnings unavailable") }
 
-        let records = table.status == 0 ? Self.parseProcessTable(table.output) : [:]
+        let records = table.status == 0 ? ProcessTable.parse(table.output) : [:]
         let ports = listen.status == 0 ? Self.parseListeningPorts(listen.output) : []
         let warnings = therm.status == 0
             ? Self.parseThermalWarnings(therm.output)

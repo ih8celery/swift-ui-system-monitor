@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 /// Tests for the per-project capacity ledger: what kind of work a process is, whose project it
 /// belongs to, what its load actually measures, and how the machine is graded overall.
@@ -251,7 +252,7 @@ struct SystemBarCapacityTests {
           414     1    0.1     2048 04:00 -zsh
           415     1   12.0    32768 00:20 /usr/local/bin/node /Users/tester/elsewhere/serve.js
         """
-        let records = UnifiedMonitor.parseProcessTable(table)
+        let records = ProcessTable.parse(table)
         let work = UnifiedMonitor.categorizedProcesses(
             in: records,
             resolver: resolver(repositories: ["/Users/tester/code/app"])
@@ -275,7 +276,7 @@ struct SystemBarCapacityTests {
           413     1    4.0    51200 00:44 /usr/local/bin/node /Users/tester/code/app/node_modules/.bin/metro serve
           999     1    0.0     1024 00:10 /usr/sbin/cupsd -l
         """
-        let records = UnifiedMonitor.parseProcessTable(table)
+        let records = ProcessTable.parse(table)
         let ports = [
             DeveloperPort(process: "node", pid: 413, port: "8081", localAddress: "127.0.0.1:8081"),
             DeveloperPort(process: "cupsd", pid: 999, port: "631", localAddress: "*:631"),

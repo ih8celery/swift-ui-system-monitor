@@ -38,18 +38,6 @@ struct MemorySnapshot {
     var swapUsed: UInt64 = 0
 }
 
-/// One row of the on-demand `ps` snapshot taken when a process group is tapped.
-struct PidRecord {
-    let pid: Int32
-    let ppid: Int32
-    let cpu: Double        // raw `ps` pcpu (percent of a single core)
-    let memory: UInt64     // bytes
-    let etime: String      // ps ELAPSED, e.g. "00:10:00" or "3-04:05:06"
-    let path: String       // executable path (first token of args)
-    let args: String       // full command line
-    var name: String { URL(fileURLWithPath: path).lastPathComponent }
-}
-
 /// Per-PID facts shown in the drill-in panel for a tapped process group.
 struct ProcessDetail: Identifiable {
     var id: Int32 { pid }

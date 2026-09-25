@@ -9,6 +9,7 @@ struct SystemBarPerformanceTests {
         testProcessSummary()
         testProcessCPUScale()
         testProcessTableParsing()
+        testProcessTableCarriesTheColumnsItParses()
         testParentChainWalk()
         testGroupDetailRows()
         testProcessClassifier()
@@ -359,7 +360,7 @@ struct SystemBarPerformanceTests {
     """
 
     private static func testProcessTableParsing() {
-        let map = UnifiedMonitor.parseProcessTable(psSample)
+        let map = ProcessTable.parse(psSample)
         expect(map.count == 4, "parser should read every process row and skip the header")
 
         let clang = map[200]
@@ -371,8 +372,27 @@ struct SystemBarPerformanceTests {
         expect(map[100]?.args == "/usr/bin/ssh-agent -l", "args with flags stays intact")
     }
 
+    private static func testProcessTableCarriesTheColumnsItParses() {
+        expect(ProcessTable.executable == "/bin/ps", "the table is read from ps by explicit path")
+        expect(ProcessTable.arguments == ["-eo", "pid,ppid,pcpu,rss,etime,args"], "the columns the parser depends on, in its order, got \(ProcessTable.arguments)")
+
+        // What `ps -eo pid,ppid,pcpu,rss,etime,args` prints: a header, then the five space-free
+        // fields and the whole command line, spaces and all.
+        let sample = """
+          PID  PPID  %CPU    RSS     ELAPSED ARGS
+            1     0   0.0  20000 10-00:00:00 /sbin/launchd
+          412     1  12.5  81920    01:02:03 /Applications/Some App.app/Contents/MacOS/Some App --flag value
+        """
+        let table = ProcessTable.parse(sample)
+        expect(table.count == 2, "the header is skipped and both rows are read, got \(table.count)")
+        expect(table[412]?.ppid == 1 && table[412]?.cpu == 12.5, "pid, ppid and pcpu come from the first three columns")
+        expect(table[412]?.memory == 81_920 * 1024, "rss is in kilobytes and becomes bytes, got \(String(describing: table[412]?.memory))")
+        expect(table[412]?.etime == "01:02:03", "etime is the fifth column, got \(String(describing: table[412]?.etime))")
+        expect(table[412]?.args == "/Applications/Some App.app/Contents/MacOS/Some App --flag value", "args is the whole remainder, spaces included")
+    }
+
     private static func testParentChainWalk() {
-        let map = UnifiedMonitor.parseProcessTable(psSample)
+        let map = ProcessTable.parse(psSample)
 
         let twoHops = UnifiedMonitor.parentChain(of: 201, in: map, hops: 2)
         expect(twoHops == ["clang", "ssh-agent"], "2-hop walk resolves parent then grandparent names")
@@ -386,7 +406,7 @@ struct SystemBarPerformanceTests {
     }
 
     private static func testGroupDetailRows() {
-        let map = UnifiedMonitor.parseProcessTable(psSample)
+        let map = ProcessTable.parse(psSample)
         let rows = UnifiedMonitor.groupDetail(name: "clang", in: map, coreCount: 8)
         expect(rows.count == 2, "group detail returns one row per PID in the named group")
 
@@ -474,7 +494,7 @@ struct SystemBarPerformanceTests {
         for i in $(seq 1 2000); do echo "stderr line $i measuring pipe pressure for the deadlock regression test case here"; done 1>&2
         echo "stdout marker"
         """
-        let result = UnifiedMonitor.runProcess(path: "/bin/sh", arguments: ["-c", script], timeout: 5)
+        let result = ProcessRunner.run(path: "/bin/sh", arguments: ["-c", script], timeout: 5)
         expect(result.status == 0, "large-stderr command should exit cleanly rather than deadlock")
         expect(result.error.utf8.count > 64 * 1024, "stderr should be fully drained past one pipe buffer")
         expect(result.output.contains("stdout marker"), "stdout should still be captured while stderr is heavy")
@@ -483,13 +503,13 @@ struct SystemBarPerformanceTests {
     private static func testRunProcessTimesOutHungCommand() {
         // A command that never exits must not block the caller forever.
         let start = Date()
-        let result = UnifiedMonitor.runProcess(path: "/bin/sh", arguments: ["-c", "sleep 30"], timeout: 0.5)
+        let result = ProcessRunner.run(path: "/bin/sh", arguments: ["-c", "sleep 30"], timeout: 0.5)
         let elapsed = Date().timeIntervalSince(start)
         expect(elapsed < 5, "a hung command should be terminated near the timeout, not run to completion")
         expect(result.status != 0, "a timed-out command should not report a clean exit status")
         expect(result.didTimeout, "a terminated command should be distinguishable from one that failed on its own")
 
-        let clean = UnifiedMonitor.runProcess(path: "/bin/echo", arguments: ["hi"], timeout: 5)
+        let clean = ProcessRunner.run(path: "/bin/echo", arguments: ["hi"], timeout: 5)
         expect(!clean.didTimeout, "a command that exits on its own must not be reported as timed out")
     }
 
