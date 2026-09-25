@@ -11,6 +11,15 @@ protocol BundleLoading {
 }
 
 struct FoundationBundleLoader: BundleLoading {
+    /// Two bundle URLs name the same bundle when they resolve to the same real path.
+    /// `standardizedFileURL` alone does not follow symlinks, but `Bundle(for:)` always reports a
+    /// class's bundle by its real, resolved path — so a plugin reached through a symlinked copy
+    /// of its own bundle must be resolved the same way before the two are compared, or it reads
+    /// as a clash with itself.
+    static func isSameBundle(_ a: URL, _ b: URL) -> Bool {
+        a.resolvingSymlinksInPath().standardizedFileURL == b.resolvingSymlinksInPath().standardizedFileURL
+    }
+
     func principalClass(at url: URL) throws -> AnyClass {
         guard let bundle = Bundle(url: url) else {
             throw TabLoadError(description: "\(url.lastPathComponent) is not a bundle")
@@ -48,7 +57,7 @@ struct FoundationBundleLoader: BundleLoading {
             TabLoadError(description: "\(url.lastPathComponent) names the class \"\(name)\", but that class is already defined by \(Bundle(for: other).bundlePath); give this plugin a unique @objc name")
         }
         if let cls = bundle.classNamed(name) {
-            guard Bundle(for: cls).bundleURL.standardizedFileURL == url.standardizedFileURL else {
+            guard Self.isSameBundle(Bundle(for: cls).bundleURL, url) else {
                 throw alreadyDefinedError(by: cls)
             }
             return cls

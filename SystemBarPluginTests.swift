@@ -63,6 +63,7 @@ struct SystemBarPluginTests {
         testFoundationLoaderRefusesABareFolder()
         testFoundationLoaderRefusesAPlainFile()
         testFoundationLoaderRefusesABundleWithNoPrincipalClass()
+        testSameBundleCheckFollowsSymlinks()
         testRelauncherBuildsLaunchctlArguments()
         testRelauncherReadsThePidFromLaunchctlPrint()
         testFeedHoldsTheLatestValueAndPublishesTheNext()
@@ -705,6 +706,22 @@ struct SystemBarPluginTests {
         } catch {
             expect("\(error)".contains("NSPrincipalClass"), "the error names the missing key, got: \(error)")
         }
+    }
+
+    private static func testSameBundleCheckFollowsSymlinks() {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let real = root.appendingPathComponent("Real.bundle")
+        expect((try? FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)) != nil, "setup: create Real.bundle")
+        let link = root.appendingPathComponent("Link.bundle")
+        expect((try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)) != nil, "setup: symlink Link.bundle to Real.bundle")
+        let otherFolder = root.appendingPathComponent("Other.bundle")
+        expect((try? FileManager.default.createDirectory(at: otherFolder, withIntermediateDirectories: true)) != nil, "setup: create Other.bundle")
+
+        expect(FoundationBundleLoader.isSameBundle(link, real),
+               "a symlink to a bundle and the bundle itself are the same bundle")
+        expect(!FoundationBundleLoader.isSameBundle(real, otherFolder),
+               "two genuinely distinct folders are not the same bundle")
     }
 
     // MARK: - Relaunch
