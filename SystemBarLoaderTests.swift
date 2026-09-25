@@ -15,6 +15,8 @@ struct SystemBarLoaderTests {
         testCatalogRefusesADuplicateIdentifier()
         testCatalogCarriesOnAfterAFailure()
         testCatalogRefusesADuplicateBeforeConstructingIt()
+        testCatalogLogsWhenInitPassesTheSlowThreshold()
+        testCatalogLogsNothingForAFastInit()
         testListReportPrintsOneLinePerEntry()
         testEveryCompiledInTabIsInTheDefaultList()
         testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode()
@@ -126,6 +128,28 @@ struct SystemBarLoaderTests {
         let tabs = TabCatalog.build(config: config, source: source, host: makeHost())
         expect(tabs.compactMap(\.plugin).count == 1, "one of the two loads")
         expect(CountingTab.constructed == 1, "the duplicate is refused before its init runs, got \(CountingTab.constructed) constructions")
+    }
+
+    private static func testCatalogLogsWhenInitPassesTheSlowThreshold() {
+        let log = LogRecorder()
+        let host = makeHost(log: { log.record($0) })
+        let source = MapTabSource(types: ["slow-init": SlowInitTab.self])
+        let config = PluginConfig(plugins: [entry("slow-init")])
+        let tabs = TabCatalog.build(config: config, source: source, host: host)
+        expect(tabs.compactMap(\.plugin).count == 1, "a slow init(host:) still loads the plugin, got \(tabs)")
+        expect(log.count == 1, "a slow init(host:) logs exactly one line, got \(log.count): \(log.messages)")
+        let message = log.messages.first ?? ""
+        expect(message.contains(SlowInitTab.identifier) && message.contains("init(host:)"),
+               "the log line names the plugin id and init(host:), got: \(message)")
+    }
+
+    private static func testCatalogLogsNothingForAFastInit() {
+        let log = LogRecorder()
+        let host = makeHost(log: { log.record($0) })
+        let config = PluginConfig(plugins: [entry("fake-first")])
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: host)
+        expect(tabs.compactMap(\.plugin).count == 1, "the fast plugin loads, got \(tabs)")
+        expect(log.count == 0, "a fast init(host:) logs nothing, got \(log.count): \(log.messages)")
     }
 
     private static func testListReportPrintsOneLinePerEntry() {
@@ -434,6 +458,21 @@ final class CountingTab: TabPlugin {
     init(host: HostServices) { Self.constructed += 1 }
     func collect() {}
     @MainActor func makeView() -> AnyView { AnyView(Text("counting")) }
+}
+
+/// A plugin whose init(host:) sleeps past TabCatalog.slowInitThreshold, for the catalog's own
+/// slow-init logging test.
+final class SlowInitTab: TabPlugin {
+    static let identifier = "slow-init"
+    let title = "Slow Init"
+    let systemImage = "tortoise"
+    let accent = Color.gray
+    let refreshInterval: TimeInterval = 5
+    let sharedFeeds: Set<SharedFeed> = []
+
+    init(host: HostServices) { Thread.sleep(forTimeInterval: 0.15) }
+    func collect() {}
+    @MainActor func makeView() -> AnyView { AnyView(Text("slow-init")) }
 }
 
 /// An NSObject subclass with an @objc name, the shape a real bundle's principal class has.

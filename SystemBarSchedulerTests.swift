@@ -159,16 +159,17 @@ struct SystemBarSchedulerTests {
     }
 }
 
-/// Captures every message a scheduler's log closure was given, under a lock, mirroring `Recorder`.
+/// Captures every message a log closure was given, under a lock, mirroring `Recorder`.
 final class LogRecorder: @unchecked Sendable {
     private let lock = NSLock()
-    private var messages: [String] = []
+    private var stored: [String] = []
 
     func record(_ message: String) {
-        lock.withLock { messages.append(message) }
+        lock.withLock { stored.append(message) }
     }
 
-    var count: Int { lock.withLock { messages.count } }
+    var count: Int { lock.withLock { stored.count } }
+    var messages: [String] { lock.withLock { stored } }
 }
 
 /// Counts collects and checks none overlap, with an interval short enough to observe.

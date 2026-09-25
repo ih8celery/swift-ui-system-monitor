@@ -12,14 +12,15 @@ func makeHost(
     processes: Feed<ProcessSummary> = Feed(initial: ProcessSummary()),
     runner: @escaping CommandRunner = { _, _, _, _ in
         CommandOutput(output: "", error: "", status: 0, didTimeout: false)
-    }
+    },
+    log: @escaping @Sendable (String) -> Void = { _ in }
 ) -> HostServices {
     HostServices(
         homeDirectory: "/tmp/systembar-tests",
         processes: processes,
         fastStats: Feed(initial: FastStatsSnapshot()),
         runner: runner,
-        log: { _ in }
+        log: log
     )
 }
 

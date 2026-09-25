@@ -39,6 +39,11 @@ protocol TabSource {
 }
 
 enum TabCatalog {
+    /// The SDK promises `init(host:)` runs on the main thread and does no slow work, because
+    /// slow work there freezes the menu bar while the window opens. This is how long an init
+    /// may take before the host warns that the work belongs in `collect()` instead.
+    static let slowInitThreshold: TimeInterval = 0.1
+
     /// Every enabled entry, in order, as a loaded tab or a failure. Nothing here stops on error.
     @MainActor static func build(config: PluginConfig, source: TabSource, host: HostServices) -> [LoadedTab] {
         var tabs: [LoadedTab] = []
@@ -74,6 +79,20 @@ enum TabCatalog {
         if let earlier = alreadyLoaded[id] {
             return .failed(location: entry.location, reason: "the id \"\(id)\" is already used by \"\(earlier)\", which comes earlier in the list")
         }
-        return .loaded(location: entry.location, plugin: type.init(host: host))
+        return .loaded(location: entry.location, plugin: timedInit(of: type, host: host))
+    }
+
+    /// Constructs one plugin, timing its init(host:) and warning through the host's log when it
+    /// passes `slowInitThreshold`. The plugin loads either way; this only names where the time went.
+    @MainActor private static func timedInit(of type: TabPlugin.Type, host: HostServices) -> TabPlugin {
+        let start = DispatchTime.now()
+        let plugin = type.init(host: host)
+        let elapsedSeconds = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
+        if elapsedSeconds > slowInitThreshold {
+            let milliseconds = Int((elapsedSeconds * 1000).rounded())
+            let limitMilliseconds = Int(slowInitThreshold * 1000)
+            host.log("SystemBar: \(type.identifier) took \(milliseconds) ms in init(host:); the limit is \(limitMilliseconds) ms, so do slow work in collect() instead")
+        }
+        return plugin
     }
 }
