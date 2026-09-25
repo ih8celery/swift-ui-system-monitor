@@ -6,11 +6,19 @@ import Foundation
 public struct PidRecord: Sendable {
     public let pid: Int32
     public let ppid: Int32
-    public let cpu: Double        // raw `ps` pcpu (percent of a single core)
-    public let memory: UInt64     // bytes
-    public let etime: String      // ps ELAPSED, e.g. "00:10:00" or "3-04:05:06"
-    public let path: String       // executable path (first token of args)
-    public let args: String       // full command line
+    /// Raw ps pcpu: percent of a single core, so a busy multi-threaded process can exceed 100.
+    public let cpu: Double
+    /// Resident memory in bytes (ps reports KB; the parser multiplies by 1024).
+    public let memory: UInt64
+    /// ps ELAPSED, e.g. "00:10:00" or "3-04:05:06".
+    public let etime: String
+    /// Everything in args before the first space. Wrong for an executable whose path contains
+    /// a space; read args when that matters.
+    public let path: String
+    /// The full command line, unparsed.
+    public let args: String
+    /// The basename of `path`. Inherits the same limit: wrong when the executable's path
+    /// contains a space, since `path` is only the text before the first one.
     public var name: String { URL(fileURLWithPath: path).lastPathComponent }
 
     public init(pid: Int32, ppid: Int32, cpu: Double, memory: UInt64, etime: String, path: String, args: String) {
@@ -28,6 +36,7 @@ public struct PidRecord: Sendable {
 /// through `HostServices.run(path: ProcessTable.executable, arguments: ProcessTable.arguments)`,
 /// so the SDK never starts a process a plugin did not ask for.
 public enum ProcessTable {
+    /// Run by explicit path, never through a shell.
     public static let executable = "/bin/ps"
     /// `parse` depends on exactly this column order; change the two together or not at all.
     public static let arguments = ["-eo", "pid,ppid,pcpu,rss,etime,args"]

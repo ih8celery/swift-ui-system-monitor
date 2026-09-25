@@ -13,6 +13,11 @@ public struct ProcessList: View {
     /// When set, each row becomes a tap target that drills into that group.
     let onTap: ((ProcessSnapshot) -> Void)?
 
+    /// - Parameters:
+    ///   - value: The bold text on the right of the name, e.g. a CPU percent or a byte count.
+    ///   - subvalue: The short text beside the bar, about 86 points wide, right-aligned.
+    ///   - fraction: How full the bar is, from 0 to 1.
+    ///   - onTap: Nil means rows are not tappable and show no chevron.
     public init(
         title: String,
         rows: [ProcessSnapshot],
