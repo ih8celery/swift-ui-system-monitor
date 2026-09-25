@@ -1,10 +1,21 @@
-import AppKit
-import Darwin
 import Foundation
-import SwiftUI
 import SystemBarKit
 
-extension UnifiedMonitor {
+/// Per-PID facts shown in the drill-in panel for a tapped process group.
+struct ProcessDetail: Identifiable {
+    var id: Int32 { pid }
+    let pid: Int32
+    let command: String        // full args
+    let path: String           // executable path
+    let name: String
+    let parentName: String
+    let grandparentName: String
+    let cpuPercent: Double     // whole-machine 0-100
+    let memory: UInt64
+    let uptime: String
+}
+
+extension ProcessDetail {
     // MARK: - On-demand process drill-in (runs only when a row is tapped)
 
     /// Walk up the ppid chain, returning up to `hops` ancestor names. Stops early
@@ -45,10 +56,10 @@ extension UnifiedMonitor {
             .sorted { $0.cpuPercent > $1.cpuPercent }
     }
 
-    /// Run the on-demand `ps` snapshot and return the tapped group's detail rows.
+    /// Runs the on-demand `ps` snapshot through the host and returns the tapped group's rows.
     /// Called on tap only — no cost to the idle sampling loop.
-    static func fetchGroupDetail(name: String) -> [ProcessDetail] {
-        let result = runProcess(path: "/bin/ps", arguments: ["-eo", "pid,ppid,pcpu,rss,etime,args"])
+    static func fetchGroupDetail(name: String, using host: HostServices) -> [ProcessDetail] {
+        let result = host.run(path: ProcessTable.executable, arguments: ProcessTable.arguments)
         guard result.status == 0 else { return [] }
         let map = ProcessTable.parse(result.output)
         return groupDetail(name: name, in: map, coreCount: ProcessInfo.processInfo.activeProcessorCount)

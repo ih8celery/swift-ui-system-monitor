@@ -6,10 +6,10 @@ import SystemBarKit
 
 /// What is left of the one monitor while the tabs move into bundles: the samplers the
 /// compiled-in tabs still need, keyed by MonitorMode. The 1-second and process readings are the
-/// host's now (HostSamplers); this class only mirrors those feeds for the panels still compiled in.
+/// host's now (HostSamplers); this class only mirrors the 1-second feed for the panel still
+/// compiled in.
 final class UnifiedMonitor: ObservableObject {
     @Published var fastStats = FastStatsSnapshot()
-    @Published var processSummary = ProcessSummary()
     @Published var networkSummary = NetworkSummary()
     @Published var isSpeedTestRunning = false
     @Published var speedTestStatus = "Ready"
@@ -33,12 +33,8 @@ final class UnifiedMonitor: ObservableObject {
 
     var currentDownloadRate: Double { fastStats.currentDownloadRate }
     var currentUploadRate: Double { fastStats.currentUploadRate }
-    var cpuUsagePercent: Double { fastStats.cpuUsagePercent }
-    var cpuHistory: [Double] { fastStats.cpuHistory }
     var downloadHistory: [Double] { fastStats.downloadHistory }
     var uploadHistory: [Double] { fastStats.uploadHistory }
-    var topCPUProcesses: [ProcessSnapshot] { processSummary.topCPU }
-    var totalProcessCount: Int { processSummary.totalCount }
     var networkProcesses: [NetworkProcessSnapshot] { networkSummary.processes }
     var networkProcessCount: Int { networkSummary.totalProcessCount }
     var networkMaxCombinedRate: Double { networkSummary.maxCombinedRate }
@@ -83,15 +79,11 @@ final class UnifiedMonitor: ObservableObject {
         }
     }
 
-    /// The panels still compiled in read the host's feeds through here until each moves into
-    /// its bundle and reads the feed itself.
-    func follow(processes: Feed<ProcessSummary>, fastStats: Feed<FastStatsSnapshot>) {
-        processSummary = processes.value
+    /// The Network panel, the last one compiled in, reads the host's 1-second feed through here
+    /// until it moves into its bundle.
+    func follow(fastStats: Feed<FastStatsSnapshot>) {
         self.fastStats = fastStats.value
-        feedSinks = [
-            processes.publisher.sink { [weak self] in self?.processSummary = $0 },
-            fastStats.publisher.sink { [weak self] in self?.fastStats = $0 },
-        ]
+        feedSinks = [fastStats.publisher.sink { [weak self] in self?.fastStats = $0 }]
     }
 
     private var visibleJobs: Set<MonitorJob> {

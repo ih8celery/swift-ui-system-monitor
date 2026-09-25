@@ -1,10 +1,9 @@
-import AppKit
 import Foundation
 import SwiftUI
 import SystemBarKit
 
 struct CPUPanel: View {
-    @ObservedObject var monitor: UnifiedMonitor
+    @ObservedObject var plugin: CPUPlugin
     @State private var drillGroup: String?
     @State private var drillRows: [ProcessDetail] = []
     @State private var isDrillLoading = false
@@ -12,19 +11,19 @@ struct CPUPanel: View {
     private let accentColor = Palette.warning
 
     private var cpuRows: [ProcessSnapshot] {
-        monitor.topCPUProcesses
+        plugin.processes.topCPU
     }
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("\(percentString(monitor.cpuUsagePercent)) CPU")
+                Text("\(percentString(plugin.fastStats.cpuUsagePercent)) CPU")
                     .font(.system(size: 42, weight: .bold, design: .rounded))
                     .foregroundStyle(headlineColor)
                     .lineLimit(1)
 
                 HStack(spacing: 10) {
-                    StatPill(label: "Processes", value: "\(monitor.totalProcessCount)")
+                    StatPill(label: "Processes", value: "\(plugin.processes.totalCount)")
                 }
 
                 HStack {
@@ -32,7 +31,7 @@ struct CPUPanel: View {
                     Spacer()
                     ChartUnitLabel("% CPU - last 90s")
                 }
-                Sparkline(values: monitor.cpuHistory, maxValue: 100, color: accentColor, fill: true)
+                Sparkline(values: plugin.fastStats.cpuHistory, maxValue: 100, color: accentColor, fill: true)
                     .frame(height: 120)
 
                 Spacer(minLength: 0)
@@ -86,7 +85,7 @@ struct CPUPanel: View {
         drillRows = []
         isDrillLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let rows = UnifiedMonitor.fetchGroupDetail(name: row.name)
+            let rows = plugin.groupDetail(named: row.name)
             DispatchQueue.main.async {
                 guard drillGroup == row.name else { return }
                 drillRows = rows
@@ -96,7 +95,7 @@ struct CPUPanel: View {
     }
 
     private var cpuNeedsAction: Bool {
-        monitor.cpuUsagePercent > 70 || machineCPUPercent(cpuRows.first?.cpu ?? 0) > 60
+        plugin.fastStats.cpuUsagePercent > 70 || machineCPUPercent(cpuRows.first?.cpu ?? 0) > 60
     }
 
     private var headlineColor: Color {
@@ -108,7 +107,7 @@ struct CPUPanel: View {
 
 /// Drill-in detail for a tapped process group. Replaces the list region inside
 /// the popover; a back control returns to the list. Data is a snapshot taken at
-/// tap time (see UnifiedMonitor.fetchGroupDetail), so it does not live-refresh.
+/// tap time (see ProcessDetail.fetchGroupDetail), so it does not live-refresh.
 struct ProcessDetailView: View {
     let groupName: String
     let rows: [ProcessDetail]

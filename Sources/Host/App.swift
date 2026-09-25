@@ -35,7 +35,7 @@ struct SystemBarApp: App {
             exit(0)
         }
 
-        UnifiedMonitor.shared.follow(processes: processes, fastStats: fastStats)
+        UnifiedMonitor.shared.follow(fastStats: fastStats)
     }
 
     var body: some Scene {

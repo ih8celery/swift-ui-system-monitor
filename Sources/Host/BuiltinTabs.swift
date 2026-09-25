@@ -21,7 +21,6 @@ struct BuiltinTabSource: TabSource {
     /// once it is a real bundle, so a plugins.json written today is still right then.
     static let builtins: [(name: String, type: TabPlugin.Type)] = [
         ("Network.bundle", NetworkTab.self),
-        ("CPU.bundle", CPUTab.self),
     ]
 
     static let types = Dictionary(uniqueKeysWithValues: builtins.map { ($0.name, $0.type) })
@@ -59,18 +58,4 @@ final class NetworkTab: MonitorBackedTab {
     init(host: HostServices) {}
     func collect() {}
     @MainActor func makeView() -> AnyView { AnyView(NetworkPanel(monitor: .shared)) }
-}
-
-final class CPUTab: MonitorBackedTab {
-    static let identifier = "cpu"
-    let title = "CPU"
-    let systemImage = "cpu"
-    let accent = Palette.warning
-    let refreshInterval = HostSamplers.processInterval
-    let sharedFeeds: Set<SharedFeed> = [.processes, .fastStats]
-    let monitorMode = MonitorMode.cpu
-
-    init(host: HostServices) {}
-    func collect() {}
-    @MainActor func makeView() -> AnyView { AnyView(CPUPanel(monitor: .shared)) }
 }

@@ -10,9 +10,7 @@ struct SystemBarPerformanceTests {
         testProcessCPUScale()
         testProcessTableParsing()
         testProcessTableCarriesTheColumnsItParses()
-        testParentChainWalk()
-        testGroupDetailRows()
-        testProcessClassifier()
+        MainActor.assumeIsolated { CPUTests.runAll() }
         MainActor.assumeIsolated { PowerTests.runAll() }
         MainActor.assumeIsolated { DiskTests.runAll() }
         testRunProcessDrainsLargeStderrConcurrently()
@@ -40,7 +38,6 @@ struct SystemBarPerformanceTests {
     private static func testSamplingPlan() {
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .network).isEmpty, "hidden window should not run heavy samplers")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .network) == [.network], "network mode should only run network heavy sampler")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .cpu).isEmpty, "cpu mode needs nothing of the monitor; both its feeds come from the host samplers")
         expect(MonitorSamplingPlan.networkRefreshInterval >= 30, "network refresh interval should protect idle CPU")
     }
 
@@ -121,88 +118,6 @@ struct SystemBarPerformanceTests {
         expect(table[412]?.memory == 81_920 * 1024, "rss is in kilobytes and becomes bytes, got \(String(describing: table[412]?.memory))")
         expect(table[412]?.etime == "01:02:03", "etime is the fifth column, got \(String(describing: table[412]?.etime))")
         expect(table[412]?.args == "/Applications/Some App.app/Contents/MacOS/Some App --flag value", "args is the whole remainder, spaces included")
-    }
-
-    private static func testParentChainWalk() {
-        let map = ProcessTable.parse(psSample)
-
-        let twoHops = UnifiedMonitor.parentChain(of: 201, in: map, hops: 2)
-        expect(twoHops == ["clang", "ssh-agent"], "2-hop walk resolves parent then grandparent names")
-
-        // A chain that runs out before 2 hops must not crash or invent names.
-        let short = UnifiedMonitor.parentChain(of: 100, in: map, hops: 2)
-        expect(short == ["launchd"], "walk stops when the chain is shorter than the hop count")
-
-        let none = UnifiedMonitor.parentChain(of: 1, in: map, hops: 2)
-        expect(none.isEmpty, "a process whose parent is not in the map yields no ancestors")
-    }
-
-    private static func testGroupDetailRows() {
-        let map = ProcessTable.parse(psSample)
-        let rows = UnifiedMonitor.groupDetail(name: "clang", in: map, coreCount: 8)
-        expect(rows.count == 2, "group detail returns one row per PID in the named group")
-
-        let sorted = rows.sorted { $0.pid < $1.pid }
-        let first = sorted[0]
-        expect(first.pid == 200, "detail rows carry their PID")
-        expect(first.parentName == "ssh-agent", "parent name comes from the ppid walk")
-        expect(abs(first.cpuPercent - 50.0 / 8.0) < 0.001, "per-PID cpu is normalized to the whole machine")
-        expect(first.uptime == "00:10:00", "uptime is the ps ELAPSED field")
-        expect(first.command == "/Applications/Xcode.app/Contents/Developer/usr/bin/clang -x c foo.c", "command is the full args")
-    }
-
-    private static func detail(
-        pid: Int32 = 1,
-        command: String,
-        path: String,
-        parent: String = "unknown",
-        grandparent: String = ""
-    ) -> ProcessDetail {
-        ProcessDetail(
-            pid: pid,
-            command: command,
-            path: path,
-            name: (path as NSString).lastPathComponent,
-            parentName: parent,
-            grandparentName: grandparent,
-            cpuPercent: 0,
-            memory: 0,
-            uptime: "00:00:00"
-        )
-    }
-
-    private static func testProcessClassifier() {
-        // Xcode build: exe lives under Xcode.app; label counts the jobs.
-        let xcode = (0..<3).map { i in
-            detail(pid: Int32(100 + i), command: "/Applications/Xcode.app/Contents/Developer/usr/bin/clang -c a.c", path: "/Applications/Xcode.app/Contents/Developer/usr/bin/clang")
-        }
-        expect(ProcessClassifier.likelyLabel(for: xcode) == "Xcode compiling (3 jobs)", "Xcode toolchain path should classify as an Xcode build")
-
-        // MCP server: args mention mcp and the parent is Claude/node.
-        let mcp = [detail(command: "/opt/homebrew/bin/node /Users/x/mcp-server/index.js", path: "/opt/homebrew/bin/node", parent: "Claude")]
-        expect(ProcessClassifier.likelyLabel(for: mcp) == "MCP server started by Claude", "mcp args under a Claude parent should classify as an MCP server")
-
-        // Browser jobs: a browser parent plus a renderer/gpu/utility type.
-        let browser = [detail(command: "/Applications/Google Chrome.app/.../Helper --type=renderer", path: "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper", parent: "Google Chrome")]
-        expect(ProcessClassifier.likelyLabel(for: browser) == "Chrome page/tab work", "renderer under a Chrome parent should classify as browser work")
-
-        // Node/JS tooling: a node/vite/esbuild parent, no mcp signal.
-        let node = [detail(command: "/usr/local/bin/esbuild --bundle", path: "/usr/local/bin/esbuild", parent: "node")]
-        expect(ProcessClassifier.likelyLabel(for: node) == "Node build tooling", "a node parent without mcp should classify as node tooling")
-
-        // Terminal job: the ppid chain hits a shell.
-        let term = [detail(command: "/usr/bin/make", path: "/usr/bin/make", parent: "zsh", grandparent: "login")]
-        expect(ProcessClassifier.likelyLabel(for: term) == "Started from your terminal", "a shell ancestor should classify as a terminal job")
-
-        // System daemon: exe under /usr/libexec.
-        let daemon = [detail(command: "/usr/libexec/secd", path: "/usr/libexec/secd", parent: "launchd")]
-        expect(ProcessClassifier.likelyLabel(for: daemon) == "macOS system service", "a system path should classify as a macOS service")
-
-        // Fallback: nothing matches, so degrade to honest raw facts.
-        let unknown = [detail(command: "/opt/weird/thing --run", path: "/opt/weird/thing", parent: "supervisord")]
-        expect(ProcessClassifier.likelyLabel(for: unknown) == "Started by supervisord — /opt/weird/thing", "unmatched input degrades to the honest fallback")
-
-        expect(ProcessClassifier.likelyLabel(for: []) == "No live processes", "an empty group must not crash")
     }
 
     private static func testRunProcessDrainsLargeStderrConcurrently() {
