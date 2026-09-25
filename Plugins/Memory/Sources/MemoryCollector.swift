@@ -74,7 +74,7 @@ final class MemoryCollector: @unchecked Sendable {
         )
     }
 
-    func collectMemoryPressure() -> Double? {
+    private func collectMemoryPressure() -> Double? {
         let result = host.run(path: "/usr/bin/memory_pressure", arguments: [])
         guard result.status == 0 else { return nil }
 
@@ -88,7 +88,7 @@ final class MemoryCollector: @unchecked Sendable {
         return nil
     }
 
-    func collectGPUSnapshot() -> GPUSnapshot {
+    private func collectGPUSnapshot() -> GPUSnapshot {
         let result = host.run(path: "/usr/sbin/ioreg", arguments: ["-r", "-c", "AGXAccelerator", "-d", "2"])
         guard result.status == 0, result.output.contains("AGXAccelerator") else {
             return GPUSnapshot()
@@ -100,7 +100,7 @@ final class MemoryCollector: @unchecked Sendable {
         )
     }
 
-    static func stringValue(in text: String, key: String) -> String? {
+    private static func stringValue(in text: String, key: String) -> String? {
         guard let keyRange = text.range(of: "\"\(key)\"") ?? text.range(of: key),
               let equalsRange = text[keyRange.upperBound...].range(of: "=") else {
             return nil
@@ -119,12 +119,12 @@ final class MemoryCollector: @unchecked Sendable {
         return String(token).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func doubleValue(in text: String, key: String) -> Double? {
+    private static func doubleValue(in text: String, key: String) -> Double? {
         guard let value = stringValue(in: text, key: key) else { return nil }
         return Double(value.filter { $0.isNumber || $0 == "." || $0 == "-" })
     }
 
-    static func uint64Value(in text: String, key: String) -> UInt64? {
+    private static func uint64Value(in text: String, key: String) -> UInt64? {
         guard let value = stringValue(in: text, key: key) else { return nil }
         return UInt64(value.filter { $0.isNumber })
     }
