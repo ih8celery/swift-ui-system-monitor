@@ -26,7 +26,7 @@ final class ProjectResolver {
     private var repositoryRootByDirectory: [String: String?] = [:]
 
     init(
-        homeDirectory: String = NSHomeDirectory(),
+        homeDirectory: String,
         isRepository: @escaping (String) -> Bool = { FileManager.default.fileExists(atPath: "\($0)/.git") }
     ) {
         self.homeDirectory = homeDirectory
