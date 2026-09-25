@@ -59,7 +59,7 @@ See `docs/one-page/systembar-tab-plugins.md` for the full contract.
 
 ## Requirements
 
-- **macOS 13 (Ventura) or later** — the menu bar UI is built on SwiftUI's `MenuBarExtra`, which is 13+ only
+- **macOS 14 (Sonoma) or later** — the SDK's stable interface records that target, and the code already used a macOS 14 API
 - **Xcode Command Line Tools**, for `swiftc`:
   ```bash
   xcode-select --install
