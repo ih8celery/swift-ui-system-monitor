@@ -19,8 +19,11 @@ swiftc \
   $(find Sources/Host -name '*.swift' | sort) \
   $(find Plugins -path '*/Sources/*.swift' -o -path '*/Tests/*.swift' | sort) \
   TestSupport.swift \
+  TestFakes.swift \
   SystemBarCapacityTests.swift \
+  SystemBarConfigTests.swift \
   SystemBarLoaderTests.swift \
+  SystemBarSchedulerTests.swift \
   SystemBarPerformanceTests.swift
 
 build/SystemBarTests

@@ -41,7 +41,9 @@ struct SystemBarPerformanceTests {
         testParseNetworkQualitySummary()
         testSampleHealthFromIsOK()
         SystemBarCapacityTests.runAll()
-        MainActor.assumeIsolated { SystemBarPluginTests.runAll() }
+        MainActor.assumeIsolated { SystemBarConfigTests.runAll() }
+        MainActor.assumeIsolated { SystemBarLoaderTests.runAll() }
+        MainActor.assumeIsolated { SystemBarSchedulerTests.runAll() }
         print("SystemBarPerformanceTests passed")
     }
 

@@ -65,7 +65,7 @@ enum PowerTests {
         let assertionsOutput = """
                 PreventUserIdleSystemSleep     1
         """
-        let host = SystemBarPluginTests.makeHost { path, arguments, _, _ in
+        let host = makeHost { path, arguments, _, _ in
             recorder.record((path: path, arguments: arguments))
             if arguments == ["-g", "batt"] {
                 return CommandOutput(output: batteryOutput, error: "", status: 0, didTimeout: false)
@@ -90,7 +90,7 @@ enum PowerTests {
     }
 
     private static func testCollectSaysWhatIsUnavailableWhenPmsetFails() {
-        let host = SystemBarPluginTests.makeHost { _, _, _, _ in
+        let host = makeHost { _, _, _, _ in
             CommandOutput(output: "", error: "boom", status: 1, didTimeout: false)
         }
 
@@ -102,7 +102,7 @@ enum PowerTests {
 
     private static func testContributorsFollowTheProcessFeed() {
         let feed = Feed(initial: ProcessSummary())
-        let host = SystemBarPluginTests.makeHost(processes: feed)
+        let host = makeHost(processes: feed)
         let plugin = PowerPlugin(host: host)
         let rows = [
             ProcessSnapshot(name: "clang", count: 1, physical: 1_000, virtualSize: 0, cpu: 50),
@@ -121,14 +121,14 @@ enum PowerTests {
     }
 
     private static func testPluginIdentityMatchesTheOldTab() {
-        let plugin = PowerPlugin(host: SystemBarPluginTests.makeHost())
+        let plugin = PowerPlugin(host: makeHost())
         expect(PowerPlugin.identifier == "power" && plugin.title == "Power" && plugin.systemImage == "bolt.heart", "the bundle keeps the tab's id, title and icon")
         expect(plugin.refreshInterval == 60 && plugin.sharedFeeds == [.processes], "the bundle keeps the tab's interval and its need for the process feed")
     }
 }
 
 /// Captures every `(path, arguments)` pair a `@Sendable` runner closure saw, under a lock,
-/// mirroring `Recorder` in SystemBarPluginTests.swift — but keeping every call, since a single
+/// mirroring `Recorder` in SystemBarConfigTests.swift — but keeping every call, since a single
 /// `collect()` reads pmset twice and both calls need checking.
 private final class PowerCallRecorder: @unchecked Sendable {
     private let lock = NSLock()
