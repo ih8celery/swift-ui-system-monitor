@@ -5,7 +5,6 @@ import SwiftUI
 import SystemBarKit
 
 enum MonitorMode: String, CaseIterable, Identifiable {
-    case memory = "Memory"
     case network = "Network"
     case cpu = "CPU"
 
@@ -13,25 +12,10 @@ enum MonitorMode: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .memory: return "memorychip"
         case .network: return "arrow.up.arrow.down"
         case .cpu: return "cpu"
         }
     }
-}
-
-struct MemorySnapshot {
-    var total: UInt64 = 0
-    var used: UInt64 = 0
-    var available: UInt64 = 0
-    var active: UInt64 = 0
-    var inactive: UInt64 = 0
-    var wired: UInt64 = 0
-    var compressed: UInt64 = 0
-    var purgeable: UInt64 = 0
-    var free: UInt64 = 0
-    var swapTotal: UInt64 = 0
-    var swapUsed: UInt64 = 0
 }
 
 /// Per-PID facts shown in the drill-in panel for a tapped process group.
@@ -131,11 +115,6 @@ enum ProcessClassifier {
     }
 }
 
-struct GPUSnapshot {
-    var deviceUtilization: Double = 0
-    var inUseMemory: UInt64 = 0
-}
-
 struct NetworkProcessSnapshot: Identifiable {
     let id: String
     let name: String
@@ -161,35 +140,22 @@ struct HostnameCacheEntry {
 }
 
 enum MonitorJob: Hashable {
-    case memory
     case network
 }
 
 struct MonitorSamplingPlan {
-    static let memoryRefreshInterval: TimeInterval = 3
     static let networkRefreshInterval: TimeInterval = 30
-    static let pressureRefreshInterval: TimeInterval = 30
 
     static func jobs(isVisible: Bool, mode: MonitorMode) -> Set<MonitorJob> {
         guard isVisible else { return [] }
 
         switch mode {
-        case .memory:
-            return [.memory]
         case .network:
             return [.network]
         case .cpu:
             return []
         }
     }
-}
-
-struct MemoryStatsSnapshot {
-    var memory = MemorySnapshot()
-    var gpu = GPUSnapshot()
-    var pressure: Double?
-    var pressureHistory: [Double] = []
-    var lastUpdated: Date?
 }
 
 struct NetworkSummary {

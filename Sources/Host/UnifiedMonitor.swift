@@ -9,7 +9,6 @@ import SystemBarKit
 /// host's now (HostSamplers); this class only mirrors those feeds for the panels still compiled in.
 final class UnifiedMonitor: ObservableObject {
     @Published var fastStats = FastStatsSnapshot()
-    @Published var memoryStats = MemoryStatsSnapshot()
     @Published var processSummary = ProcessSummary()
     @Published var networkSummary = NetworkSummary()
     @Published var isSpeedTestRunning = false
@@ -23,35 +22,23 @@ final class UnifiedMonitor: ObservableObject {
     private let slowQueue = DispatchQueue(label: "systembar.monitor.slow", qos: .utility)
     let dnsQueue = DispatchQueue(label: "systembar.monitor.dns", qos: .utility)
     let speedTestQueue = DispatchQueue(label: "systembar.monitor.speedtest", qos: .utility)
-    private let memoryQueue = DispatchQueue(label: "systembar.monitor.memory", qos: .utility)
     private let networkQueue = DispatchQueue(label: "systembar.monitor.network", qos: .utility)
     private var timers: [DispatchSourceTimer] = []
     private var feedSinks: [AnyCancellable] = []
-    var isCollectingMemory = false
     var isCollectingNetwork = false
-    var lastPressureRefresh = Date.distantPast
-    var cachedPressure: Double?
-    var cachedGPU = GPUSnapshot()
     var hostnameCache: [String: HostnameCacheEntry] = [:]
     var hostnameLookupsInFlight = Set<String>()
     private var isWindowVisible = false
     private var activeMode: MonitorMode?
 
-    var memory: MemorySnapshot { memoryStats.memory }
-    var gpu: GPUSnapshot { memoryStats.gpu }
-    var pressure: Double? { memoryStats.pressure }
-    var pressureHistory: [Double] { memoryStats.pressureHistory }
-    var lastUpdated: Date? { memoryStats.lastUpdated }
     var currentDownloadRate: Double { fastStats.currentDownloadRate }
     var currentUploadRate: Double { fastStats.currentUploadRate }
     var cpuUsagePercent: Double { fastStats.cpuUsagePercent }
     var cpuHistory: [Double] { fastStats.cpuHistory }
     var downloadHistory: [Double] { fastStats.downloadHistory }
     var uploadHistory: [Double] { fastStats.uploadHistory }
-    var topMemoryProcesses: [ProcessSnapshot] { processSummary.topMemory }
     var topCPUProcesses: [ProcessSnapshot] { processSummary.topCPU }
     var totalProcessCount: Int { processSummary.totalCount }
-    var maxPhysicalProcessMemory: UInt64 { processSummary.maxPhysical }
     var networkProcesses: [NetworkProcessSnapshot] { networkSummary.processes }
     var networkProcessCount: Int { networkSummary.totalProcessCount }
     var networkMaxCombinedRate: Double { networkSummary.maxCombinedRate }
@@ -66,7 +53,6 @@ final class UnifiedMonitor: ObservableObject {
 
     private init() {
         timers = [
-            makeTimer(every: MonitorSamplingPlan.memoryRefreshInterval, leeway: .seconds(1), job: .memory),
             makeTimer(every: MonitorSamplingPlan.networkRefreshInterval, leeway: .seconds(5), job: .network),
         ]
     }
@@ -123,7 +109,6 @@ final class UnifiedMonitor: ObservableObject {
     // the others.
     private func run(_ job: MonitorJob) {
         switch job {
-        case .memory: memoryQueue.async { [weak self] in self?.collectMemory() }
         case .network: networkQueue.async { [weak self] in self?.collectNetwork() }
         }
     }

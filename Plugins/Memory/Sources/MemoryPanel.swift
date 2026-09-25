@@ -1,22 +1,21 @@
-import AppKit
 import Foundation
 import SwiftUI
 import SystemBarKit
 
 struct MemoryPanel: View {
-    @ObservedObject var monitor: UnifiedMonitor
+    @ObservedObject var plugin: MemoryPlugin
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
-                Text("\(byteString(monitor.memory.available)) Available")
+                Text("\(byteString(plugin.stats.memory.available)) Available")
                     .font(.system(size: 38, weight: .bold, design: .rounded))
                     .foregroundStyle(memoryColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
 
                 HStack(spacing: 10) {
-                    StatPill(label: "Swap", value: swapStatText(used: monitor.memory.swapUsed, total: monitor.memory.swapTotal))
+                    StatPill(label: "Swap", value: swapStatText(used: plugin.stats.memory.swapUsed, total: plugin.stats.memory.swapTotal))
                         .help("macOS grows this reserved amount dynamically as needed, so the total is what's currently set aside, not a fixed cap.")
                     StatPill(label: "Pressure", value: pressureText)
                 }
@@ -25,20 +24,20 @@ struct MemoryPanel: View {
                     Text("GPU")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
-                    Text(percentString(monitor.gpu.deviceUtilization))
+                    Text(percentString(plugin.stats.gpu.deviceUtilization))
                         .font(.system(size: 18, weight: .bold, design: .monospaced))
                         .foregroundStyle(Palette.blue)
                     Spacer()
-                    StatPill(label: "GPU in use", value: byteString(monitor.gpu.inUseMemory))
+                    StatPill(label: "GPU in use", value: byteString(plugin.stats.gpu.inUseMemory))
                 }
                 .padding(10)
                 .background(Color.white.opacity(0.055))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                MemoryBar(memory: monitor.memory)
+                MemoryBar(memory: plugin.stats.memory)
                     .frame(height: 34)
 
-                MemoryLegend(memory: monitor.memory)
+                MemoryLegend(memory: plugin.stats.memory)
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -46,12 +45,12 @@ struct MemoryPanel: View {
                         Spacer()
                         ChartUnitLabel("% pressure - recent")
                     }
-                    Sparkline(values: monitor.pressureHistory, maxValue: 100, color: pressureColor, fill: true)
+                    Sparkline(values: plugin.stats.pressureHistory, maxValue: 100, color: pressureColor, fill: true)
                         .frame(height: 100)
                 }
 
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(updatedAgoText(lastUpdated: monitor.lastUpdated, now: context.date))
+                    Text(updatedAgoText(lastUpdated: plugin.stats.lastUpdated, now: context.date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -66,11 +65,11 @@ struct MemoryPanel: View {
 
             ProcessList(
                 title: "Top Memory",
-                rows: monitor.topMemoryProcesses,
+                rows: plugin.processes.topMemory,
                 value: { byteString($0.physical) },
                 subvalue: { "\($0.count)x  \(percentString(machineCPUPercent($0.cpu))) CPU" },
                 fraction: { row in
-                    Double(row.physical) / Double(monitor.maxPhysicalProcessMemory)
+                    Double(row.physical) / Double(plugin.processes.maxPhysical)
                 },
                 color: Palette.good
             )
@@ -79,27 +78,27 @@ struct MemoryPanel: View {
     }
 
     private var memoryColor: Color {
-        let ratio = Double(monitor.memory.available) / Double(max(monitor.memory.total, 1))
+        let ratio = Double(plugin.stats.memory.available) / Double(max(plugin.stats.memory.total, 1))
         if ratio > 0.30 && !memoryNeedsAction { return Palette.good }
         if ratio > 0.15 { return Palette.caution }
         return Palette.critical
     }
 
     private var pressureText: String {
-        guard let pressure = monitor.pressure else { return "Unknown" }
+        guard let pressure = plugin.stats.pressure else { return "Unknown" }
         return "\(Int(pressure.rounded()))%"
     }
 
     private var pressureColor: Color {
-        guard let pressure = monitor.pressure else { return .secondary }
+        guard let pressure = plugin.stats.pressure else { return .secondary }
         if pressure < 50 { return Palette.good }
         if pressure < 75 { return Palette.caution }
         return Palette.critical
     }
 
     private var memoryNeedsAction: Bool {
-        let availableRatio = Double(monitor.memory.available) / Double(max(monitor.memory.total, 1))
-        return availableRatio < 0.25 || monitor.memory.swapUsed > 1_073_741_824 || (monitor.pressure ?? 0) >= 75
+        let availableRatio = Double(plugin.stats.memory.available) / Double(max(plugin.stats.memory.total, 1))
+        return availableRatio < 0.25 || plugin.stats.memory.swapUsed > 1_073_741_824 || (plugin.stats.pressure ?? 0) >= 75
     }
 
 }

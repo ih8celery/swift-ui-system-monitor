@@ -156,35 +156,4 @@ extension UnifiedMonitor {
         formatter.dateStyle = .none
         return formatter.string(from: date)
     }
-
-    static func stringValue(in text: String, key: String) -> String? {
-        guard let keyRange = text.range(of: "\"\(key)\"") ?? text.range(of: key),
-              let equalsRange = text[keyRange.upperBound...].range(of: "=") else {
-            return nil
-        }
-
-        let suffix = text[equalsRange.upperBound...].drop(while: { $0 == " " })
-        if suffix.first == "\"" {
-            let afterOpeningQuote = suffix.index(after: suffix.startIndex)
-            guard let closingQuote = suffix[afterOpeningQuote...].firstIndex(of: "\"") else {
-                return nil
-            }
-            return String(suffix[afterOpeningQuote..<closingQuote])
-        }
-
-        let token = suffix.prefix { !$0.isNewline && $0 != "," && $0 != "}" }
-        return String(token).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    static func doubleValue(in text: String, key: String) -> Double? {
-        guard let value = stringValue(in: text, key: key) else { return nil }
-        return Double(value.filter { $0.isNumber || $0 == "." || $0 == "-" })
-    }
-
-    static func uint64Value(in text: String, key: String) -> UInt64? {
-        guard let value = stringValue(in: text, key: key) else { return nil }
-        return UInt64(value.filter { $0.isNumber })
-    }
-
-
 }

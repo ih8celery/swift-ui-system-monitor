@@ -307,7 +307,7 @@ struct SystemBarLoaderTests {
         let bundles = BundleTabSource(builtInPlugInsURL: folder, homeDirectory: "/Users/x", loader: FakeBundleLoader(classes: ["CPU.bundle": FakeObjCTab.self]))
         let source = HostTabSource(bundles: bundles, builtins: BuiltinTabSource())
         expect((try? source.resolve(entry("CPU.bundle")))?.identifier == "objc", "a bundle in PlugIns wins over the compiled-in tab of the same name")
-        expect((try? source.resolve(entry("Memory.bundle")))?.identifier == "memory", "a name with no bundle still finds the compiled-in tab")
+        expect((try? source.resolve(entry("Network.bundle")))?.identifier == "network", "a name with no bundle still finds the compiled-in tab")
         do {
             _ = try source.resolve(entry("Weather.bundle"))
             expect(false, "an unknown name fails")

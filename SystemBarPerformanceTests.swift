@@ -19,8 +19,7 @@ struct SystemBarPerformanceTests {
         testRunProcessTimesOutHungCommand()
         testCollectorsDoNotLeakHostPortRights()
         testGroupsNeedingRefinement()
-        testSwapStatText()
-        testMemorySegmentsMatchEveryBarSegment()
+        MainActor.assumeIsolated { MemoryTests.runAll() }
         testUpdatedAgoText()
         testHostnameCacheEntryExpiry()
         testParseCSVLine()
@@ -41,7 +40,6 @@ struct SystemBarPerformanceTests {
     private static func testSamplingPlan() {
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .network).isEmpty, "hidden window should not run heavy samplers")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .network) == [.network], "network mode should only run network heavy sampler")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .memory) == [.memory], "memory mode runs the memory sampler; the process feed comes from the host samplers now")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .cpu).isEmpty, "cpu mode needs nothing of the monitor; both its feeds come from the host samplers")
         expect(MonitorSamplingPlan.networkRefreshInterval >= 30, "network refresh interval should protect idle CPU")
     }
@@ -249,7 +247,6 @@ struct SystemBarPerformanceTests {
 
         for _ in 0..<50 {
             _ = FastStatsSampler.collectCPUCounters()
-            _ = UnifiedMonitor.collectMemorySnapshot()
         }
 
         var after: mach_port_urefs_t = 0
@@ -277,36 +274,6 @@ struct SystemBarPerformanceTests {
 
         let refinedAll = ProcessSampler.groupsNeedingRefinement(samples: samples, memoryLimit: 10, cpuLimit: 10)
         expect(refinedAll == ["big-mem", "big-cpu", "small"], "a generous limit should cover every group")
-    }
-
-    private static func testSwapStatText() {
-        expect(
-            swapStatText(used: 2_147_483_648, total: 8_589_934_592) == "2.00 GB / 8.00 GB",
-            "swap stat should show used and reserved totals, not just used"
-        )
-        expect(
-            swapStatText(used: 0, total: 0) == "0 B / 0 B",
-            "zero swap should still render both sides rather than dividing by zero"
-        )
-    }
-
-    private static func testMemorySegmentsMatchEveryBarSegment() {
-        let memory = MemorySnapshot(active: 10, inactive: 40, wired: 20, compressed: 30, purgeable: 0, free: 5)
-        let segments = memorySegments(for: memory)
-        let kinds = Set(segments.map { $0.kind })
-        expect(
-            kinds == Set(MemorySegmentKind.allCases),
-            "every non-zero memory category the bar can draw must also appear in the legend's segment set"
-        )
-
-        let zeroFree = MemorySnapshot(active: 10, inactive: 40, wired: 20, compressed: 30, purgeable: 0, free: 0)
-        expect(
-            !memorySegments(for: zeroFree).contains { $0.kind == .free },
-            "a zero-value category should be omitted from both the bar and the legend, not just one"
-        )
-
-        let names = MemorySegmentKind.allCases.map { $0.rawValue }
-        expect(names.count == Set(names).count, "every segment kind must have a unique display name")
     }
 
     private static func testUpdatedAgoText() {
