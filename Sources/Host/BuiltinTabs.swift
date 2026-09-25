@@ -2,6 +2,12 @@ import Foundation
 import SwiftUI
 import SystemBarKit
 
+/// What a fresh plugins.json lists, in today's tab order. Power is a bundle in PlugIns; the
+/// other five are still compiled in until Stage 3.
+enum DefaultPlugins {
+    static let names = ["Power.bundle", "Dev.bundle", "Memory.bundle", "Disk.bundle", "Network.bundle", "CPU.bundle"]
+}
+
 /// Stage 1 of the plugin conversion: the six tabs still compile into the app and still read the
 /// one `UnifiedMonitor`, but the window only knows them through `TabPlugin`. This protocol is
 /// the seam that lets the monitor keep its own sampling rule (`MonitorSamplingPlan.jobs`) until
@@ -14,16 +20,12 @@ struct BuiltinTabSource: TabSource {
     /// One row per built-in, in today's tab order, keyed by the bundle name each tab will have
     /// once it is a real bundle, so a plugins.json written today is still right then.
     static let builtins: [(name: String, type: TabPlugin.Type)] = [
-        ("Power.bundle", PowerTab.self),
         ("Dev.bundle", DevTab.self),
         ("Memory.bundle", MemoryTab.self),
         ("Disk.bundle", DiskTab.self),
         ("Network.bundle", NetworkTab.self),
         ("CPU.bundle", CPUTab.self),
     ]
-
-    /// The order a fresh plugins.json lists them in.
-    static let defaultNames = builtins.map(\.name)
 
     static let types = Dictionary(uniqueKeysWithValues: builtins.map { ($0.name, $0.type) })
 
@@ -48,20 +50,6 @@ struct BuiltinTabSource: TabSource {
 // that tab today, plus the 1-second fast feed wherever the panel reads it (today that feed runs
 // for every visible tab, so the plan never lists it). Nothing reads them yet; the host scheduler
 // that will arrives in Stage 2.
-
-final class PowerTab: MonitorBackedTab {
-    static let identifier = "power"
-    let title = "Power"
-    let systemImage = "bolt.heart"
-    let accent = Palette.caution
-    let refreshInterval = MonitorSamplingPlan.powerRefreshInterval
-    let sharedFeeds: Set<SharedFeed> = [.processes]
-    let monitorMode = MonitorMode.power
-
-    init(host: HostServices) {}
-    func collect() {}
-    @MainActor func makeView() -> AnyView { AnyView(PowerPanel(monitor: .shared)) }
-}
 
 final class DevTab: MonitorBackedTab {
     static let identifier = "dev"

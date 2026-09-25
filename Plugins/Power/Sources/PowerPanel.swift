@@ -4,37 +4,37 @@ import SwiftUI
 import SystemBarKit
 
 struct PowerPanel: View {
-    @ObservedObject var monitor: UnifiedMonitor
+    @ObservedObject var plugin: PowerPlugin
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
-                Text(monitor.power.thermalState)
+                Text(plugin.snapshot.thermalState)
                     .font(.system(size: 38, weight: .bold, design: .rounded))
                     .foregroundStyle(thermalColor)
 
                 HStack(spacing: 10) {
-                    StatPill(label: "Source", value: monitor.power.powerSource)
-                    if let percent = monitor.power.batteryPercent {
-                        StatPill(label: "Battery", value: batteryStatLabel(percent: percent, isCharging: monitor.power.isCharging))
+                    StatPill(label: "Source", value: plugin.snapshot.powerSource)
+                    if let percent = plugin.snapshot.batteryPercent {
+                        StatPill(label: "Battery", value: batteryStatLabel(percent: percent, isCharging: plugin.snapshot.isCharging))
                     }
                 }
 
                 SectionTitle("Sleep Assertions")
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        if monitor.power.sleepAssertions.isEmpty {
+                        if plugin.snapshot.sleepAssertions.isEmpty {
                             EvidenceRow(label: "Sleep", value: "No blockers", detail: "pmset did not report active preventing assertions.")
                         }
-                        ForEach(Array(monitor.power.sleepAssertions.enumerated()), id: \.offset) { _, assertion in
+                        ForEach(Array(plugin.snapshot.sleepAssertions.enumerated()), id: \.offset) { _, assertion in
                             EvidenceRow(label: "Assertion", value: "Active", detail: assertion)
                         }
                     }
                 }
 
-                Text(monitor.power.status)
+                Text(plugin.snapshot.status)
                     .font(.caption)
-                    .foregroundStyle(monitor.power.health == .ok ? .secondary : Palette.warning)
+                    .foregroundStyle(plugin.snapshot.health == .ok ? .secondary : Palette.warning)
             }
             .padding(18)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -45,7 +45,7 @@ struct PowerPanel: View {
                 SectionTitle("Likely Contributors")
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(monitor.power.contributors) { contributor in
+                        ForEach(plugin.snapshot.contributors) { contributor in
                             EvidenceRow(label: contributor.name, value: "Activity", detail: contributor.evidence)
                         }
                     }
@@ -58,7 +58,7 @@ struct PowerPanel: View {
     }
 
     private var thermalColor: Color {
-        switch monitor.power.thermalState.lowercased() {
+        switch plugin.snapshot.thermalState.lowercased() {
         case "critical": return Palette.critical
         case "serious": return Palette.warning
         case "fair": return Palette.caution
@@ -66,5 +66,3 @@ struct PowerPanel: View {
         }
     }
 }
-
-

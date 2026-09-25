@@ -5,7 +5,6 @@ import SwiftUI
 import SystemBarKit
 
 enum MonitorMode: String, CaseIterable, Identifiable {
-    case power = "Power"
     case developer = "Dev"
     case memory = "Memory"
     case disk = "Disk"
@@ -16,7 +15,6 @@ enum MonitorMode: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .power: return "bolt.heart"
         case .developer: return "terminal"
         case .memory: return "memorychip"
         case .disk: return "internaldrive"
@@ -178,24 +176,6 @@ struct HostnameCacheEntry {
     let cachedAt: Date
 }
 
-struct PowerContributor: Identifiable {
-    var id: String { name }
-    let name: String
-    let evidence: String
-}
-
-struct PowerSnapshot {
-    var powerSource = "Unknown"
-    var thermalState = "Unknown"
-    var batteryPercent: Int?
-    var isCharging: Bool?
-    var sleepAssertions: [String] = []
-    var contributors: [PowerContributor] = []
-    var status = "Waiting for power sample"
-    var health = SampleHealth.degraded
-    var lastUpdated: Date?
-}
-
 struct DeveloperPort: Identifiable {
     var id: String { "\(process)|\(pid)|\(port)|\(localAddress)" }
     let process: String
@@ -305,7 +285,6 @@ enum MonitorJob: Hashable {
     case memory
     case processes
     case network
-    case power
     case capacity
     case disk
 }
@@ -315,7 +294,6 @@ struct MonitorSamplingPlan {
     static let memoryRefreshInterval: TimeInterval = 3
     static let processRefreshInterval: TimeInterval = 10
     static let networkRefreshInterval: TimeInterval = 30
-    static let powerRefreshInterval: TimeInterval = 60
     static let capacityRefreshInterval: TimeInterval = 60
     /// How far apart the two rusage reads sit. Per-project CPU and disk figures are deltas, so this
     /// is the interval they are measured over — long enough to be meaningful, short enough that the
@@ -349,8 +327,6 @@ struct MonitorSamplingPlan {
         guard isVisible else { return [] }
 
         switch mode {
-        case .power:
-            return [.power, .processes]
         case .developer:
             // The capacity collector runs its own ps and lsof, so the Dev tab no longer needs the
             // shared process or network samplers to be running alongside it.

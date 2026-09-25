@@ -1,29 +1,11 @@
-import AppKit
-import Darwin
 import Foundation
-import SwiftUI
 import SystemBarKit
 
-extension UnifiedMonitor {
-    func collectPower() {
-        guard !isCollectingPower else { return }
-        isCollectingPower = true
-        defer { isCollectingPower = false }
-
-        var snapshot = Self.collectPowerSnapshot()
-        let sampleDate = Date()
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            snapshot.contributors = Self.powerContributors(from: self.processSummary.topCPU)
-            snapshot.lastUpdated = sampleDate
-            self.powerSnapshot = snapshot
-        }
-    }
-
-
-    static func collectPowerSnapshot() -> PowerSnapshot {
-        let battery = runProcess(path: "/usr/bin/pmset", arguments: ["-g", "batt"])
-        let assertions = runProcess(path: "/usr/bin/pmset", arguments: ["-g", "assertions"])
+/// Two pmset reads and the parsing of them. Pure apart from `collect(using:)`.
+enum PowerCollector {
+    static func collect(using host: HostServices) -> PowerSnapshot {
+        let battery = host.run(path: "/usr/bin/pmset", arguments: ["-g", "batt"])
+        let assertions = host.run(path: "/usr/bin/pmset", arguments: ["-g", "assertions"])
         let parsedBattery = parseBatteryStatus(battery.output)
         let parsedAssertions = assertions.status == 0 ? parseSleepAssertions(assertions.output) : []
         var status: [String] = []
@@ -43,7 +25,7 @@ extension UnifiedMonitor {
         )
     }
 
-    static func powerContributors(from rows: [ProcessSnapshot]) -> [PowerContributor] {
+    static func contributors(from rows: [ProcessSnapshot]) -> [PowerContributor] {
         rows.prefix(5).map { row in
             PowerContributor(
                 name: row.name,
@@ -96,5 +78,4 @@ extension UnifiedMonitor {
             .prefix(8)
             .map { String($0) }
     }
-
 }

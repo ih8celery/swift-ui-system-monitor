@@ -17,6 +17,7 @@ swiftc \
   -framework SwiftUI -framework AppKit \
   -o build/SystemBarTests \
   $(find Sources/Host -name '*.swift' | sort) \
+  $(find Plugins -path '*/Sources/*.swift' -o -path '*/Tests/*.swift' | sort) \
   TestSupport.swift \
   SystemBarCapacityTests.swift \
   SystemBarPluginTests.swift \

@@ -9,7 +9,6 @@ final class UnifiedMonitor: ObservableObject {
     @Published var memoryStats = MemoryStatsSnapshot()
     @Published var processSummary = ProcessSummary()
     @Published var networkSummary = NetworkSummary()
-    @Published var powerSnapshot = PowerSnapshot()
     @Published var capacitySnapshot = CapacitySnapshot()
     @Published var diskSnapshot = DiskSnapshot()
     @Published var isSpeedTestRunning = false
@@ -27,12 +26,10 @@ final class UnifiedMonitor: ObservableObject {
     private let memoryQueue = DispatchQueue(label: "systembar.monitor.memory", qos: .utility)
     private let processQueue = DispatchQueue(label: "systembar.monitor.process", qos: .utility)
     private let networkQueue = DispatchQueue(label: "systembar.monitor.network", qos: .utility)
-    private let powerQueue = DispatchQueue(label: "systembar.monitor.power", qos: .utility)
     private let developerQueue = DispatchQueue(label: "systembar.monitor.developer", qos: .utility)
     private var memoryTimer: DispatchSourceTimer?
     private var processTimer: DispatchSourceTimer?
     private var networkTimer: DispatchSourceTimer?
-    private var powerTimer: DispatchSourceTimer?
     private var developerTimer: DispatchSourceTimer?
     private var diskTimer: DispatchSourceTimer?
     private var fastTimer: DispatchSourceTimer?
@@ -44,7 +41,6 @@ final class UnifiedMonitor: ObservableObject {
     var isCollectingMemory = false
     var isCollectingProcesses = false
     var isCollectingNetwork = false
-    var isCollectingPower = false
     var isCollectingCapacity = false
     var isCollectingDisk = false
     var isScanningDiskHogs = false
@@ -84,7 +80,6 @@ final class UnifiedMonitor: ObservableObject {
     var resolvedHostnames: [String: String] { networkSummary.resolvedHostnames }
     var networkStatus: String { networkSummary.status }
     var networkHealth: SampleHealth { networkSummary.health }
-    var power: PowerSnapshot { powerSnapshot }
     var capacity: CapacitySnapshot { capacitySnapshot }
     var disk: DiskSnapshot { diskSnapshot }
 
@@ -147,18 +142,6 @@ final class UnifiedMonitor: ObservableObject {
         networkTimer.resume()
         self.networkTimer = networkTimer
 
-        let powerTimer = DispatchSource.makeTimerSource(queue: slowQueue)
-        powerTimer.schedule(
-            deadline: .now() + MonitorSamplingPlan.powerRefreshInterval,
-            repeating: MonitorSamplingPlan.powerRefreshInterval,
-            leeway: .seconds(10)
-        )
-        powerTimer.setEventHandler { [weak self] in
-            self?.collectPowerIfVisible()
-        }
-        powerTimer.resume()
-        self.powerTimer = powerTimer
-
         let developerTimer = DispatchSource.makeTimerSource(queue: slowQueue)
         developerTimer.schedule(
             deadline: .now() + MonitorSamplingPlan.capacityRefreshInterval,
@@ -215,7 +198,6 @@ final class UnifiedMonitor: ObservableObject {
         memoryTimer?.cancel()
         processTimer?.cancel()
         networkTimer?.cancel()
-        powerTimer?.cancel()
         developerTimer?.cancel()
         diskTimer?.cancel()
     }
@@ -241,9 +223,6 @@ final class UnifiedMonitor: ObservableObject {
         if jobs.contains(.network) {
             networkQueue.async { [weak self] in self?.collectNetwork() }
         }
-        if jobs.contains(.power) {
-            powerQueue.async { [weak self] in self?.collectPower() }
-        }
         if jobs.contains(.capacity) {
             developerQueue.async { [weak self] in self?.collectCapacity() }
         }
@@ -265,11 +244,6 @@ final class UnifiedMonitor: ObservableObject {
     private func collectNetworkIfVisible() {
         guard visibleJobs.contains(.network) else { return }
         networkQueue.async { [weak self] in self?.collectNetwork() }
-    }
-
-    private func collectPowerIfVisible() {
-        guard visibleJobs.contains(.power) else { return }
-        powerQueue.async { [weak self] in self?.collectPower() }
     }
 
     private func collectCapacityIfVisible() {

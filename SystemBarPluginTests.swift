@@ -48,7 +48,7 @@ struct SystemBarPluginTests {
         testCatalogCarriesOnAfterAFailure()
         testCatalogRefusesADuplicateBeforeConstructingIt()
         testListReportPrintsOneLinePerEntry()
-        testEveryDefaultNameIsABuiltin()
+        testEveryCompiledInTabIsInTheDefaultList()
         testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode()
         testBuiltinSourceNamesTheUnknownTab()
         testBuiltinSourceDoesNotTakePaths()
@@ -397,8 +397,11 @@ struct SystemBarPluginTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: makeHost())
-        expect(loaded.map(\.title) == ["Power", "Dev", "Memory", "Disk", "Network", "CPU"],
-               "a fresh file loads every built-in in its default order, got \(loaded.map(\.title))")
+        expect(loaded.map(\.title) == ["Error", "Dev", "Memory", "Disk", "Network", "CPU"],
+               "a fresh file lists every default; the five compiled-in tabs load and Power, now a bundle, cannot come from the built-in table, got \(loaded.map(\.title))")
+        if case let .failed(_, reason)? = loaded.first {
+            expect(reason.contains("Power.bundle"), "the failure names the entry, got \(reason)")
+        }
         expect(FileManager.default.fileExists(atPath: store.fileURL.path), "and the default file is written")
     }
 
@@ -488,21 +491,19 @@ struct SystemBarPluginTests {
 
     // MARK: - Built-in tabs
 
-    private static func testEveryDefaultNameIsABuiltin() {
-        let names = BuiltinTabSource.defaultNames
-        expect(names.count == BuiltinTabSource.types.count, "the default file lists every built-in exactly once")
-        expect(names.allSatisfy { BuiltinTabSource.types[$0] != nil }, "every default name resolves to a built-in type")
-        expect(names.allSatisfy { $0.hasSuffix(".bundle") }, "names are the bundle names each tab will have once it is a real bundle")
-        expect(Set(names) == Set(BuiltinTabSource.types.keys), "the default names and the known names are the same set")
+    private static func testEveryCompiledInTabIsInTheDefaultList() {
+        expect(Set(BuiltinTabSource.types.keys).isSubset(of: DefaultPlugins.names), "every compiled-in tab is somewhere in the default list")
+        expect(DefaultPlugins.names.count == 6 && Set(DefaultPlugins.names).count == 6, "six distinct default names")
+        expect(DefaultPlugins.names.allSatisfy { $0.hasSuffix(".bundle") }, "names are the bundle names each tab will have once it is a real bundle")
     }
 
     private static func testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode() {
-        let config = PluginConfig.builtins(named: BuiltinTabSource.defaultNames)
+        let config = PluginConfig.builtins(named: DefaultPlugins.names)
         let tabs = TabCatalog.build(config: config, source: BuiltinTabSource(), host: makeHost())
         let plugins = tabs.compactMap(\.plugin)
-        expect(plugins.count == 6, "all six built-ins load, got \(PluginListReport.lines(for: tabs))")
+        expect(plugins.count == 5, "all five compiled-in tabs load, got \(PluginListReport.lines(for: tabs))")
         let ids = Set(plugins.map { type(of: $0).identifier })
-        expect(ids.count == 6, "the six built-ins have six different ids, got \(ids)")
+        expect(ids.count == 5, "the five built-ins have five different ids, got \(ids)")
         for plugin in plugins {
             guard let backed = plugin as? MonitorBackedTab else {
                 expect(false, "\(plugin.title) must say which MonitorMode drives its sampling until it owns a collector")

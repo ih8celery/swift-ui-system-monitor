@@ -43,4 +43,10 @@ chmod 755 SystemBar.app/Contents/MacOS/SystemBar
 cp -f build/Frameworks/libSystemBarKit.dylib SystemBar.app/Contents/Frameworks/
 cp -f build/SDK/SystemBarKit.swiftinterface SystemBar.app/Contents/Resources/SDK/
 
+# 4. Every plugin directory, into the app's PlugIns folder, the way a user's would be built.
+for dir in Plugins/*/; do
+  name=$(basename "$dir")
+  ./build-plugin.sh "$dir" "SystemBar.app/Contents/PlugIns/$name.bundle" build
+done
+
 echo "Built $(pwd)/SystemBar.app"

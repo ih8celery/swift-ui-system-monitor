@@ -13,7 +13,7 @@ struct SystemBarPerformanceTests {
         testGroupDetailRows()
         testProcessClassifier()
         testListeningPortParsing()
-        testBatteryParsing()
+        MainActor.assumeIsolated { PowerTests.runAll() }
         testDiskVolumeMath()
         testDiskUsageParsing()
         testLocalSnapshotParsing()
@@ -40,7 +40,6 @@ struct SystemBarPerformanceTests {
         testIsLANAddress()
         testParseNetworkQualityJSON()
         testParseNetworkQualitySummary()
-        testParseSleepAssertions()
         testSampleHealthFromIsOK()
         SystemBarCapacityTests.runAll()
         MainActor.assumeIsolated { SystemBarPluginTests.runAll() }
@@ -50,14 +49,12 @@ struct SystemBarPerformanceTests {
     private static func testSamplingPlan() {
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .network).isEmpty, "hidden window should not run heavy samplers")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .network) == [.network], "network mode should only run network heavy sampler")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .power) == [.power, .processes], "power mode should refresh power and process evidence")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .developer) == [.capacity], "the Dev tab runs only the capacity sampler, which does its own ps and lsof")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .memory) == [.memory, .processes], "memory mode should refresh memory and processes")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .cpu) == [.processes], "cpu mode should refresh processes only")
         expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .disk) == [.disk], "disk mode should only run the disk sampler")
         expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .disk).isEmpty, "hidden window should not scan disks")
         expect(MonitorSamplingPlan.networkRefreshInterval >= 30, "network refresh interval should protect idle CPU")
-        expect(MonitorSamplingPlan.powerRefreshInterval >= 60, "power collector should be conservative")
         expect(MonitorSamplingPlan.capacityRefreshInterval >= 60, "capacity collector should be conservative")
         expect(
             MonitorSamplingPlan.capacitySampleWindow < MonitorSamplingPlan.capacityRefreshInterval,
@@ -612,17 +609,6 @@ struct SystemBarPerformanceTests {
         expect(batteryStatLabel(percent: 82, isCharging: nil) == "82%", "unknown charging state should not be asserted")
     }
 
-    private static func testBatteryParsing() {
-        let sample = """
-        Now drawing from 'AC Power'
-         -InternalBattery-0 (id=1234567)\t92%; charging; 0:14 remaining present: true
-        """
-        let parsed = UnifiedMonitor.parseBatteryStatus(sample)
-        expect(parsed.powerSource == "AC Power", "battery parser should extract power source")
-        expect(parsed.percent == 92, "battery parser should extract percentage")
-        expect(parsed.isCharging == true, "battery parser should identify charging state")
-    }
-
     private static func testParseCSVLine() {
         expect(
             UnifiedMonitor.parseCSVLine("foo,bar,baz") == ["foo", "bar", "baz"],
@@ -717,20 +703,6 @@ struct SystemBarPerformanceTests {
         expect(result?.downloadMbps == 220.71, "'Downlink capacity' line should be parsed as the download rate")
         expect(result?.uploadMbps == 45.23, "'Uplink capacity' line should be parsed as the upload rate")
         expect(result?.latencyMS == 8.123, "'Idle Latency' line should be parsed as the latency")
-    }
-
-    private static func testParseSleepAssertions() {
-        let output = """
-                PreventUserIdleSystemSleep     1
-                PreventUserIdleDisplaySleep    0
-                UserIsActive                   1
-                AssertionType: PreventSystemSleep = 0
-        """
-        let assertions = UnifiedMonitor.parseSleepAssertions(output)
-        expect(assertions.count == 2, "only lines mentioning 'prevent' that aren't explicitly zeroed should be kept")
-        expect(assertions.contains { $0.contains("PreventUserIdleSystemSleep") }, "an active prevent-sleep assertion should be included")
-        expect(!assertions.contains { $0.contains("UserIsActive") }, "a line not mentioning 'prevent' should be excluded")
-        expect(!assertions.contains { $0.contains("= 0") }, "an assertion explicitly set to 0 should be excluded")
     }
 
     private static func testSampleHealthFromIsOK() {

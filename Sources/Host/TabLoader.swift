@@ -6,7 +6,7 @@ import SystemBarKit
 /// naming the path and the reason, and nothing else: the fix is in the file, not the app.
 enum TabLoader {
     @MainActor static func load(store: PluginConfigStore, source: TabSource, host: HostServices) -> [LoadedTab] {
-        switch store.loadOrCreate(default: .builtins(named: BuiltinTabSource.defaultNames)) {
+        switch store.loadOrCreate(default: .builtins(named: DefaultPlugins.names)) {
         case .success(let config):
             return TabCatalog.build(config: config, source: source, host: host)
         case .failure(let error):
