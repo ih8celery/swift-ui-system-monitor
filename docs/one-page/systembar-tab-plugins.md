@@ -436,4 +436,6 @@ leaving a working, buildable, tested app:
 - 2026-09-24 — `refreshInterval` is clamped to 0.25s to one day: NaN, zero and
   negative values become 0.25s, infinity and anything larger become one day,
   and each substitution is logged — Claude, from code review.
-- 2026-09-24 — The host times each `init(host:)` and logs when it passes 100 ms: Adam asked that the no-slow-work rule be enforced, and a log line is the lightest enforcement that never refuses a working plugin — Adam.
+- 2026-09-24 — The host times each `init(host:)` and logs when it passes 100
+  ms: Adam asked that the no-slow-work rule be enforced, and a log line is the
+  lightest enforcement that never refuses a working plugin — Adam.

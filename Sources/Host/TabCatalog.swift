@@ -41,7 +41,8 @@ protocol TabSource {
 enum TabCatalog {
     /// The SDK promises `init(host:)` runs on the main thread and does no slow work, because
     /// slow work there freezes the menu bar while the window opens. This is how long an init
-    /// may take before the host warns that the work belongs in `collect()` instead.
+    /// may take before the host warns that the work belongs in `collect()` instead. The README
+    /// and the spec quote this value, so change them together.
     static let slowInitThreshold: TimeInterval = 0.1
 
     /// Every enabled entry, in order, as a loaded tab or a failure. Nothing here stops on error.
