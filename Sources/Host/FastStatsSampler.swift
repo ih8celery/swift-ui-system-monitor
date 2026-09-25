@@ -4,7 +4,7 @@ import SystemBarKit
 
 /// The 1-second sample: CPU busy percent and network rates, each worked out from how far the
 /// kernel's counters moved since the last sample, with their short histories. Only
-/// HostSamplers' serial queue calls `sample()`, which is what makes the unlocked state safe.
+/// HostSamplers' fast queue calls `sample()`, which is what makes the unlocked state safe.
 final class FastStatsSampler: @unchecked Sendable {
     /// Ninety one-second samples: the "last 90s" the CPU and Network graphs are labelled with.
     static let historyLimit = 90
