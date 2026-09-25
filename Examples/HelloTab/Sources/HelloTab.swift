@@ -33,7 +33,8 @@ public final class HelloTabPlugin: NSObject, TabPlugin, ObservableObject {
     public func collect() {
         let result = host.run(path: "/bin/date", arguments: ["+%H:%M:%S"])
         let time = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        let text = result.status == 0 ? "Hello from a plugin. The time is \(time)." : "date failed: \(result.error)"
+        let reason = result.error.isEmpty ? "exit \(result.status)" : result.error
+        let text = result.status == 0 ? "Hello from a plugin. The time is \(time)." : "date failed: \(reason)"
         DispatchQueue.main.async { [weak self] in
             self?.greeting = text
         }

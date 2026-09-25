@@ -44,7 +44,8 @@ expected="ok power Power Power.bundle
 ok hello Hello $tmp/HelloTab.bundle
 error $tmp/Missing.bundle: nothing at $tmp/Missing.bundle
 error Power.bundle: the id \"power\" is already used by \"Power.bundle\", which comes earlier in the list"
-actual=$(SYSTEMBAR_PLUGINS_FILE="$tmp/plugins.json" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins)
+actual=$(SYSTEMBAR_PLUGINS_FILE="$tmp/plugins.json" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
+  || { echo "Boundary check failed: SystemBar --list-plugins exited $?" >&2; exit 1; }
 
 if [[ "$actual" != "$expected" ]]; then
   echo "Boundary check failed. Expected:" >&2
