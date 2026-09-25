@@ -84,6 +84,8 @@ struct CPUPanel: View {
         drillGroup = row.name
         drillRows = []
         isDrillLoading = true
+        // Take the plugin reference on main, so the background closure never reads view state.
+        let plugin = plugin
         DispatchQueue.global(qos: .userInitiated).async {
             let rows = plugin.groupDetail(named: row.name)
             DispatchQueue.main.async {
