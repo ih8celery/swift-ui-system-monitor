@@ -13,6 +13,8 @@ struct SystemBarPerformanceTests {
         testProcessTableStatsOnceForASpaceFreePath()
         testProcessTableFallsBackWhenTheExecutableIsGone()
         testProcessTableNeverStatsARelativeCommand()
+        testProcessTableCapCountsWords()
+        testRegularFileCheckAcceptsOnlyRegularFiles()
         MainActor.assumeIsolated { CPUTests.runAll() }
         MainActor.assumeIsolated { PowerTests.runAll() }
         MainActor.assumeIsolated { DiskTests.runAll() }
@@ -183,6 +185,37 @@ struct SystemBarPerformanceTests {
         )
         expect(table[13]?.path == "python3" && table[13]?.name == "python3", "a relative command keeps its first token, got \(String(describing: table[13]?.path))")
         expect(asked.messages.isEmpty, "a relative command is never looked up on disk, got \(asked.messages)")
+    }
+
+    /// The cap counts words: a path of exactly `maximumPathPrefixes` words (one fewer spaces)
+    /// still resolves, and one word more falls back to the first word.
+    private static func testProcessTableCapCountsWords() {
+        let cap = ProcessTable.maximumPathPrefixes
+        let atCap = "/p" + (1..<cap).map { " w\($0)" }.joined()
+        let fits = ProcessTable.parse(psRow(pid: 14, args: "\(atCap) --flag value"), fileExists: fakeFileExists([atCap], asked: LogRecorder()))
+        expect(fits[14]?.path == atCap, "a path of exactly \(cap) words resolves, got \(String(describing: fits[14]?.path))")
+
+        let pastCap = atCap + " w\(cap)"
+        let tooLong = ProcessTable.parse(psRow(pid: 15, args: "\(pastCap) --flag value"), fileExists: fakeFileExists([pastCap], asked: LogRecorder()))
+        expect(tooLong[15]?.path == "/p", "a path of \(cap + 1) words falls back to the first word, got \(String(describing: tooLong[15]?.path))")
+    }
+
+    /// The real check, against the real disk, in a folder of the test's own that it removes after.
+    private static func testRegularFileCheckAcceptsOnlyRegularFiles() {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("systembar-regular-file-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            expect(false, "could not create the test folder: \(error)")
+        }
+        let file = folder.appendingPathComponent("tool with spaces")
+        expect(FileManager.default.createFile(atPath: file.path, contents: Data("x".utf8)), "could not create the test file")
+
+        expect(!ProcessTable.isExistingRegularFile(atPath: folder.path), "a folder is not a regular file")
+        expect(ProcessTable.isExistingRegularFile(atPath: file.path), "a regular file is one")
+        expect(!ProcessTable.isExistingRegularFile(atPath: folder.appendingPathComponent("missing").path), "a missing path is not a regular file")
+        expect(!ProcessTable.isExistingRegularFile(atPath: "/dev/null"), "a device such as /dev/null is not a regular file")
     }
 
     private static func testRunProcessDrainsLargeStderrConcurrently() {

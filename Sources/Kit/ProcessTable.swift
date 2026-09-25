@@ -44,8 +44,9 @@ public enum ProcessTable {
     /// `parse` depends on exactly this column order; change the two together or not at all.
     public static let arguments = ["-eo", "pid,ppid,pcpu,rss,etime,args"]
 
-    /// A path with more spaces than this is not worth chasing: past it the parser gives up and
-    /// takes the first word, so a long command line never costs more than this many file checks.
+    /// How many words of args the parser will try as a path. A path of more words than this
+    /// (more than 15 spaces) is not worth chasing: the parser falls back to the first word, so a
+    /// long command line never costs more than this many file checks.
     package static let maximumPathPrefixes = 16
 
     /// A pid -> record map, with each executable path checked against the disk. Same as
@@ -63,17 +64,20 @@ public enum ProcessTable {
     /// absolute path (one starting with `/`) is looked up; a relative command keeps its first
     /// word without a check. The ordinary row, whose path has no spaces, costs one check; a row
     /// whose executable is gone costs up to `maximumPathPrefixes` checks and keeps its first word.
-    /// Tests pass a fake `fileExists` so they never read the disk.
+    /// A caller, such as a test, can pass a fake `fileExists` to keep the disk out of it.
     public static func parse(_ output: String, fileExists: (String) -> Bool) -> [Int32: PidRecord] {
         let records = output.split(whereSeparator: \.isNewline).compactMap { record(from: $0, fileExists: fileExists) }
         return Dictionary(records.map { ($0.pid, $0) }, uniquingKeysWith: { _, latest in latest })
     }
 
-    /// The existence check `parse(_:)` uses: true for a file (or a link to one), false for a
-    /// folder or nothing at all, so `/Applications/Google` never passes for an executable.
+    /// The check `parse(_:)` uses: true only when `path` is a regular file, after following a
+    /// symbolic link to whatever it points at. False for a folder, a device such as `/dev/null`,
+    /// a socket, a FIFO, a broken link or nothing at all, so `/Applications/Google` never passes
+    /// for an executable.
     public static func isExistingRegularFile(atPath path: String) -> Bool {
-        var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && !isDirectory.boolValue
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        let values = try? resolved.resourceValues(forKeys: [.isRegularFileKey])
+        return values?.isRegularFile ?? false
     }
 
     /// One row, or nil for the header and anything unreadable.
@@ -98,8 +102,8 @@ public enum ProcessTable {
     /// Tries "first word", then "first two words", and so on up to the cap, and stops at the first
     /// one that exists. Falls back to the first word when none does.
     private static func executablePath(in args: String, fileExists: (String) -> Bool) -> String {
-        // One more split than the cap, so the last piece is the untried remainder and a very long
-        // command line is never split all the way through.
+        // At most one more piece than the cap, so the last piece is the untried remainder and a
+        // very long command line is never split all the way through.
         let words = args.split(separator: " ", maxSplits: maximumPathPrefixes, omittingEmptySubsequences: false)
         let firstWord = words.first.map(String.init) ?? args
         guard args.hasPrefix("/") else { return firstWord }
