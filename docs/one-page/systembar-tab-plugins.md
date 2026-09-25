@@ -413,15 +413,18 @@ leaving a working, buildable, tested app:
 - 2026-09-24 — `init(host:)` is `@MainActor`: the host already constructs on
   main, a plugin's model objects usually are main-actor, and adding the
   attribute after the freeze would break every existing bundle — Claude,
-  from code review, for Adam to confirm.
+  from code review; confirmed by Adam 2026-09-24, who also asked that the
+  no-slow-work-in-init rule be enforced, not just documented (2ik.7).
 - 2026-09-24 — `Feed.send` is `package` access, not public: a plugin reads a
   shared feed and can never overwrite it for the others — Claude, from code
-  review, for Adam to confirm.
+  review; confirmed by Adam 2026-09-24 as fair for now. He expects to want
+  plugins that drive controls eventually, which needs a host-side channel
+  designed when the need is concrete (2ik.8).
 - 2026-09-24 — The app ships only the SDK's textual `.swiftinterface`, not the
   binary `.swiftmodule`: the binary would expose `package`-access members to
   anyone who also passed `-package-name SystemBar`, and would let a plugin
   skip the exact compile path a real plugin author uses — Claude, from code
-  review, for Adam to confirm.
+  review; confirmed by Adam 2026-09-24.
 - 2026-09-24 — Stage 2 landed: Power loads from `Contents/PlugIns/Power.bundle`
   through the same loader as a user's bundle; a plugin's published changes were
   seen redrawing the host window before any of it was built. The popover
