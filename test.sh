@@ -20,7 +20,7 @@ swiftc \
   $(find Plugins -path '*/Sources/*.swift' -o -path '*/Tests/*.swift' | sort) \
   TestSupport.swift \
   SystemBarCapacityTests.swift \
-  SystemBarPluginTests.swift \
+  SystemBarLoaderTests.swift \
   SystemBarPerformanceTests.swift
 
 build/SystemBarTests
