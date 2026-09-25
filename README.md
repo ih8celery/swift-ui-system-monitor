@@ -70,13 +70,13 @@ To test a plugin that follows a feed, make the feed with `Feed.forTesting(initia
 @MainActor func testFollowsTheProcessFeed() {
     let (processes, sendProcesses) = Feed.forTesting(initial: ProcessSummary())
     let host = HostServices(
-        homeDirectory: NSTemporaryDirectory(),
+        homeDirectory: "/Users/test",
         processes: processes,
         fastStats: Feed(initial: FastStatsSnapshot()),
         runner: { _, _, _, _ in CommandOutput(output: "", error: "", status: 0, didTimeout: false) },
         log: { print($0) }
     )
-    let plugin = MyPlugin(host: host)
+    let plugin = MyPlugin(host: host)  // keeps the top CPU group's name in `busiest`
 
     sendProcesses(ProcessSummary(rows: [
         ProcessSnapshot(name: "clang", count: 4, physical: 2_000_000_000, virtualSize: 0, cpu: 250)
@@ -89,7 +89,7 @@ To test a plugin that follows a feed, make the feed with `Feed.forTesting(initia
 
 A plugin's `refreshInterval` is clamped to between 0.25 seconds and one day: NaN, zero, and negative values become 0.25 seconds, and infinity or anything larger becomes one day, with each substitution logged. Build your plugin with the same Xcode as the app, or a newer one — the SDK interface names types from that Xcode's SwiftUI, so an older Xcode cannot read it.
 
-The SDK's documentation is the doc comments in `Sources/Kit/`. The app ships them beside the interface, as `Contents/Resources/SDK/SystemBarKit.swiftdoc`, so tools that read a module's documentation through the compiler, such as `swift-symbolgraph-extract` (and so DocC), show them for a plugin built against the app. The `.swiftinterface` file itself holds only signatures; to read the documentation directly, open the sources.
+The SDK's documentation is the doc comments in `Sources/Kit/`. The app ships them beside the interface, as `Contents/Resources/SDK/SystemBarKit.swiftdoc`, so tools that read a module's documentation through the compiler, such as `swift-symbolgraph-extract` (and so DocC), show them for a plugin built against the app. The `.swiftinterface` file itself holds only signatures; the comments themselves are in the repository under `Sources/Kit/`.
 
 The host times how long your plugin's `init(host:)` takes and logs a warning once it passes 100 ms, so put slow work in `collect()` instead of `init(host:)`.
 

@@ -101,18 +101,20 @@ public struct FastStatsSnapshot: Sendable {
 /// groups by memory and by CPU. The host leaves out processes under a megabyte resident before
 /// it groups, counts or ranks anything.
 public struct ProcessSummary: Sendable {
-    /// How many rows `topMemory` and `topCPU` keep. The host samples only this many per list,
-    /// so a plugin sees at most these.
+    /// How many rows `topMemory` keeps in the host's feed. The host samples only this many, so a
+    /// plugin sees at most this many.
     public static let memoryDisplayLimit = 18
-    /// How many rows `topCPU` keeps; see `memoryDisplayLimit`.
+    /// How many rows `topCPU` keeps in the host's feed, the same way.
     public static let cpuDisplayLimit = 28
 
     /// How many process groups were counted: groups, not processes, so eight copies of one
     /// helper count once.
     public private(set) var totalCount = 0
-    /// The groups using the most memory, largest `physical` first, at most `memoryDisplayLimit`.
+    /// The groups using the most memory, largest `physical` first, at most the limit the summary was
+    /// built with (`memoryDisplayLimit` in the host's feed).
     public private(set) var topMemory: [ProcessSnapshot] = []
-    /// The groups using the most CPU, largest `cpu` first, at most `cpuDisplayLimit`.
+    /// The groups using the most CPU, largest `cpu` first, at most the limit the summary was built
+    /// with (`cpuDisplayLimit` in the host's feed).
     public private(set) var topCPU: [ProcessSnapshot] = []
     /// The largest `physical` of any group, in bytes, and never less than 1, so a bar can
     /// divide by it safely.
