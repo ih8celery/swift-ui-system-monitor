@@ -1,19 +1,25 @@
-import AppKit
 import Darwin
 import Foundation
-import SwiftUI
 import SystemBarKit
 
-extension UnifiedMonitor {
-    func collectNetwork() {
-        guard !isCollectingNetwork else { return }
-        isCollectingNetwork = true
-        defer { isCollectingNetwork = false }
+/// The Network tab's sampler: nettop for per-process throughput and lsof for who is talking to
+/// where, every 30 seconds on the plugin's queue; and reverse DNS for the destinations, on its
+/// own queue. The hostname cache and the in-flight set are touched only on the main thread.
+final class NetworkCollector: @unchecked Sendable {
+    private let host: HostServices
+    private let dnsQueue = DispatchQueue(label: "systembar.network.dns", qos: .utility)
+    private var hostnameCache: [String: HostnameCacheEntry] = [:]
+    private var hostnameLookupsInFlight = Set<String>()
 
-        let nettop = Self.runProcess(path: "/usr/bin/nettop", arguments: [
+    init(host: HostServices) {
+        self.host = host
+    }
+
+    func sample() -> NetworkReading {
+        let nettop = host.run(path: "/usr/bin/nettop", arguments: [
             "-d", "-P", "-L", "2", "-s", "1", "-x", "-n", "-J", "bytes_in,bytes_out"
         ])
-        let lsof = Self.runProcess(path: "/usr/sbin/lsof", arguments: ["-n", "-P", "-iTCP"])
+        let lsof = host.run(path: "/usr/sbin/lsof", arguments: ["-n", "-P", "-iTCP"])
         let rows = Self.parseNettopCSV(nettop.output)
             .filter { $0.downloadRate > 0 || $0.uploadRate > 0 }
             .sorted {
@@ -24,30 +30,23 @@ extension UnifiedMonitor {
             }
         let connections = lsof.status == 0 ? Self.parseLsofTCP(lsof.output) : []
         let internet = connections.filter(\.isInternet)
-        let destinations = Self.summarizeDestinations(internet)
-        let status = Self.networkStatus(nettop: nettop, lsof: lsof)
-        let health = SampleHealth(isOK: nettop.status == 0 && lsof.status == 0)
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.networkSummary = NetworkSummary(
-                processes: rows,
-                destinations: destinations,
-                resolvedHostnames: self.networkSummary.resolvedHostnames,
-                status: status,
-                health: health
-            )
-            self.resolveHostnames(for: destinations)
-        }
+        return NetworkReading(
+            processes: rows,
+            destinations: Self.summarizeDestinations(internet),
+            status: Self.networkStatus(nettop: nettop, lsof: lsof),
+            health: SampleHealth(isOK: nettop.status == 0 && lsof.status == 0)
+        )
     }
 
-
-    private func resolveHostnames(for destinations: [NetworkDestination]) {
+    /// Main thread. Hands each destination's hostname to `resolved`, on the main thread: at once
+    /// from the cache, or after a lookup on the DNS queue. An address already being looked up is
+    /// not asked twice.
+    func resolveHostnames(for destinations: [NetworkDestination], resolved: @escaping (String, String) -> Void) {
         let now = Date()
         for address in Set(destinations.map(\.remoteAddress)) {
             let normalized = Self.normalizedIPAddress(address)
             if let entry = hostnameCache[normalized], Self.isHostnameCacheEntryValid(entry, now: now, ttl: Self.negativeHostnameCacheTTL) {
-                setResolvedHostname(entry.hostname, for: normalized)
+                resolved(normalized, entry.hostname)
                 continue
             }
 
@@ -60,7 +59,7 @@ extension UnifiedMonitor {
                     guard let self else { return }
                     self.hostnameLookupsInFlight.remove(normalized)
                     self.hostnameCache[normalized] = HostnameCacheEntry(hostname: hostname, cachedAt: Date())
-                    self.setResolvedHostname(hostname, for: normalized)
+                    resolved(normalized, hostname)
                 }
             }
         }
@@ -76,13 +75,6 @@ extension UnifiedMonitor {
         guard entry.hostname.isEmpty else { return true }
         return now.timeIntervalSince(entry.cachedAt) < ttl
     }
-
-    private func setResolvedHostname(_ hostname: String, for address: String) {
-        var snapshot = networkSummary
-        snapshot.resolvedHostnames[address] = hostname
-        networkSummary = snapshot
-    }
-
 
     static func parseNettopCSV(_ csv: String) -> [NetworkProcessSnapshot] {
         var totals: [String: (downloaded: UInt64, uploaded: UInt64)] = [:]
@@ -236,7 +228,7 @@ extension UnifiedMonitor {
         return String(trimmed[..<separator])
     }
 
-    static func port(from endpoint: String) -> String? {
+    private static func port(from endpoint: String) -> String? {
         let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let separator = trimmed.lastIndex(of: ":") else { return nil }
         let port = trimmed[trimmed.index(after: separator)...]
@@ -362,6 +354,4 @@ extension UnifiedMonitor {
         }
         return parts.isEmpty ? "Network sample OK" : parts.joined(separator: ", ")
     }
-
-
 }

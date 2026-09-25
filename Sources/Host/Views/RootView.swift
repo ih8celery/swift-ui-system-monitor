@@ -4,8 +4,6 @@ import SwiftUI
 import SystemBarKit
 
 struct RootView: View {
-    // Not observed: the panels observe the monitor themselves; RootView only tells it what is visible.
-    let monitor: UnifiedMonitor
     let tabs: [LoadedTab]
     let configPath: String
     let scheduler: PluginScheduler
@@ -117,9 +115,8 @@ struct RootView: View {
         }
     }
 
-    /// Tells the scheduler, the host samplers and the monitor what the selected tab needs. A
-    /// compiled-in tab still keys the monitor's own samplers by MonitorMode; every tab gets the
-    /// shared samplers it declares; an error tab or an empty list needs nothing.
+    /// Tells the scheduler and the host samplers what the selected tab needs. An error tab or an
+    /// empty list needs nothing.
     private func present(index: Int, isVisible: Bool) {
         let plugin = loadedPlugin(at: index)
         plugin?.visibilityChanged(isVisible: isVisible)
@@ -129,9 +126,5 @@ struct RootView: View {
             scheduler.hide()
         }
         samplers.update(isVisible: isVisible && plugin != nil, feeds: plugin?.sharedFeeds ?? [])
-        monitor.updatePresentation(
-            isVisible: isVisible && plugin != nil,
-            mode: (plugin as? MonitorBackedTab)?.monitorMode
-        )
     }
 }

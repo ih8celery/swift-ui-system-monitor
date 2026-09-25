@@ -1,44 +1,22 @@
-import AppKit
-import Darwin
 import Foundation
-import SwiftUI
 import SystemBarKit
 
-extension UnifiedMonitor {
-    func runSpeedTest() {
-        guard !isSpeedTestRunning else { return }
+/// Apple's networkQuality, run only when the button is pressed, and what its output means.
+enum SpeedTest {
+    /// -M 20 caps the test itself at about 20 seconds; this leaves room to start up and report.
+    static let timeout: TimeInterval = 30
 
-        let startedAt = Date()
-        isSpeedTestRunning = true
-        speedTestStatus = "Testing"
-        speedTestHealth = .ok
-
-        speedTestQueue.async { [weak self] in
-            // -M 20 caps the test itself at ~20s; give it room to also start up and report.
-            let output = Self.runProcess(path: "/usr/bin/networkQuality", arguments: ["-c", "-M", "20"], timeout: 30)
-            let finishedAt = Date()
-            let parsed = output.status == 0 ? Self.parseNetworkQualityOutput(
-                output.output,
-                measuredAt: finishedAt,
-                duration: finishedAt.timeIntervalSince(startedAt)
-            ) : nil
-            let failure = Self.speedTestFailureMessage(output)
-
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isSpeedTestRunning = false
-                if let parsed {
-                    self.speedTestResult = parsed
-                    self.speedTestStatus = "Last run \(Self.shortTimeString(parsed.measuredAt))"
-                    self.speedTestHealth = .ok
-                } else {
-                    self.speedTestStatus = failure
-                    self.speedTestHealth = .degraded
-                }
-            }
-        }
+    /// Blocks for up to `timeout`, so the plugin calls it on its speed-test queue.
+    static func measure(using host: HostServices, startedAt: Date) -> SpeedTestOutcome {
+        let output = host.run(path: "/usr/bin/networkQuality", arguments: ["-c", "-M", "20"], timeout: timeout)
+        let finishedAt = Date()
+        let parsed = output.status == 0 ? parseNetworkQualityOutput(
+            output.output,
+            measuredAt: finishedAt,
+            duration: finishedAt.timeIntervalSince(startedAt)
+        ) : nil
+        return SpeedTestOutcome(result: parsed, failure: speedTestFailureMessage(output))
     }
-
 
     private static func parseNetworkQualityOutput(_ output: String, measuredAt: Date, duration: TimeInterval) -> SpeedTestResult? {
         if let result = parseNetworkQualityJSON(output, measuredAt: measuredAt, duration: duration) {
@@ -130,7 +108,7 @@ extension UnifiedMonitor {
         return nil
     }
 
-    static func doubleValue(_ value: Any?) -> Double? {
+    private static func doubleValue(_ value: Any?) -> Double? {
         if let number = value as? NSNumber {
             return number.doubleValue
         }
@@ -140,7 +118,7 @@ extension UnifiedMonitor {
         return nil
     }
 
-    static func stringValue(_ value: Any?) -> String? {
+    private static func stringValue(_ value: Any?) -> String? {
         if let string = value as? String {
             return string
         }
@@ -150,7 +128,7 @@ extension UnifiedMonitor {
         return nil
     }
 
-    private static func shortTimeString(_ date: Date) -> String {
+    static func shortTimeString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         formatter.dateStyle = .none

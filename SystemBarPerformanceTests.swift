@@ -4,7 +4,6 @@ import SystemBarKit
 @main
 struct SystemBarPerformanceTests {
     static func main() {
-        testSamplingPlan()
         testBoundedHistory()
         testProcessSummary()
         testProcessCPUScale()
@@ -19,13 +18,7 @@ struct SystemBarPerformanceTests {
         testGroupsNeedingRefinement()
         MainActor.assumeIsolated { MemoryTests.runAll() }
         testUpdatedAgoText()
-        testHostnameCacheEntryExpiry()
-        testParseCSVLine()
-        testParseNettopCSV()
-        testParseLsofTCP()
-        testIsLANAddress()
-        testParseNetworkQualityJSON()
-        testParseNetworkQualitySummary()
+        MainActor.assumeIsolated { NetworkTests.runAll() }
         testSampleHealthFromIsOK()
         MainActor.assumeIsolated { CapacityTests.runAll() }
         MainActor.assumeIsolated { DevPluginTests.runAll() }
@@ -33,12 +26,6 @@ struct SystemBarPerformanceTests {
         MainActor.assumeIsolated { SystemBarLoaderTests.runAll() }
         MainActor.assumeIsolated { SystemBarSchedulerTests.runAll() }
         print("SystemBarPerformanceTests passed")
-    }
-
-    private static func testSamplingPlan() {
-        expect(MonitorSamplingPlan.jobs(isVisible: false, mode: .network).isEmpty, "hidden window should not run heavy samplers")
-        expect(MonitorSamplingPlan.jobs(isVisible: true, mode: .network) == [.network], "network mode should only run network heavy sampler")
-        expect(MonitorSamplingPlan.networkRefreshInterval >= 30, "network refresh interval should protect idle CPU")
     }
 
     private static func testBoundedHistory() {
@@ -205,124 +192,6 @@ struct SystemBarPerformanceTests {
             updatedAgoText(lastUpdated: nil, now: sample) == "Waiting for sample",
             "no sample yet should say so instead of showing a bogus age"
         )
-    }
-
-    private static func testHostnameCacheEntryExpiry() {
-        let now = Date(timeIntervalSince1970: 1_000)
-
-        let freshFailure = HostnameCacheEntry(hostname: "", cachedAt: now)
-        expect(
-            UnifiedMonitor.isHostnameCacheEntryValid(freshFailure, now: now, ttl: 60),
-            "a failed lookup should stay cached until its TTL elapses"
-        )
-
-        let staleFailure = HostnameCacheEntry(hostname: "", cachedAt: now.addingTimeInterval(-61))
-        expect(
-            !UnifiedMonitor.isHostnameCacheEntryValid(staleFailure, now: now, ttl: 60),
-            "a failed lookup past its TTL should be treated as expired so it can be retried"
-        )
-
-        let oldSuccess = HostnameCacheEntry(hostname: "example.com", cachedAt: now.addingTimeInterval(-100_000))
-        expect(
-            UnifiedMonitor.isHostnameCacheEntryValid(oldSuccess, now: now, ttl: 60),
-            "a successful lookup should never expire regardless of age"
-        )
-    }
-
-    private static func testParseCSVLine() {
-        expect(
-            UnifiedMonitor.parseCSVLine("foo,bar,baz") == ["foo", "bar", "baz"],
-            "a plain comma-separated line should split on every comma"
-        )
-        expect(
-            UnifiedMonitor.parseCSVLine("x,\"1,2,3\",y") == ["x", "1,2,3", "y"],
-            "commas inside a quoted field must not split the field"
-        )
-        expect(
-            UnifiedMonitor.parseCSVLine("a,\"say \"\"hi\"\"\",b") == ["a", "say \"hi\"", "b"],
-            "a doubled quote inside a quoted field should decode to one literal quote"
-        )
-    }
-
-    private static func testParseNettopCSV() {
-        let csv = """
-        Name,bytes_in,bytes_out
-        Safari.501,1000,500
-        Chrome.502,2000,800
-        Name,bytes_in,bytes_out
-        Safari.501,50,20
-        Chrome.502,80,40
-        """
-        let rows = UnifiedMonitor.parseNettopCSV(csv).reduce(into: [String: NetworkProcessSnapshot]()) { $0[$1.name] = $1 }
-
-        expect(rows["Safari"]?.totalDownloaded == 1000, "first CSV block should be treated as cumulative totals")
-        expect(rows["Safari"]?.totalUploaded == 500, "first CSV block's third field is the uploaded total")
-        expect(rows["Safari"]?.downloadRate == 50, "second CSV block should be treated as the current rate")
-        expect(rows["Chrome"]?.downloadRate == 80, "each process name (with its .pid suffix stripped) gets its own row")
-        expect(rows["Safari.501"] == nil, "the numeric .pid suffix must be stripped from the process name")
-    }
-
-    private static func testParseLsofTCP() {
-        let output = """
-        COMMAND   PID   USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
-        Safari   1234  adamu   50u  IPv4 0x1  0t0  TCP 192.168.1.5:54321->17.253.144.10:443 (ESTABLISHED)
-        Safari   1234  adamu   50w  IPv4 0x1  0t0  TCP 192.168.1.5:54321->17.253.144.10:443 (ESTABLISHED)
-        sshd     999   root    10u  IPv4 0x3  0t0  TCP *:22 (LISTEN)
-        Terminal 5555  adamu   12u  IPv4 0x4  0t0  TCP 192.168.1.5:60000->192.168.1.10:22 (ESTABLISHED)
-        """
-        let connections = UnifiedMonitor.parseLsofTCP(output)
-
-        expect(connections.count == 2, "an exact duplicate connection and a LISTEN-state row should both be dropped")
-        expect(
-            connections.contains { $0.process == "Safari" && $0.remoteAddress == "17.253.144.10" && $0.isInternet },
-            "an ESTABLISHED connection to a public IP should be parsed and flagged as internet-facing"
-        )
-        expect(
-            connections.contains { $0.process == "Terminal" && $0.remoteAddress == "192.168.1.10" && !$0.isInternet },
-            "a connection to a private LAN address should not be flagged as internet-facing"
-        )
-    }
-
-    private static func testIsLANAddress() {
-        expect(UnifiedMonitor.isLANAddress("192.168.1.5"), "192.168.0.0/16 is a private LAN range")
-        expect(UnifiedMonitor.isLANAddress("10.1.2.3"), "10.0.0.0/8 is a private LAN range")
-        expect(UnifiedMonitor.isLANAddress("172.16.0.1"), "172.16.0.0/12's lower bound is a private LAN range")
-        expect(!UnifiedMonitor.isLANAddress("172.32.0.1"), "172.32.0.0 is just outside the 172.16-31 private range")
-        expect(UnifiedMonitor.isLANAddress("127.0.0.1"), "loopback is a LAN address")
-        expect(!UnifiedMonitor.isLANAddress("8.8.8.8"), "a public IPv4 address is not a LAN address")
-        expect(UnifiedMonitor.isLANAddress("::1"), "the IPv6 loopback address is a LAN address")
-        expect(UnifiedMonitor.isLANAddress("fe80::1"), "fe80::/10 link-local IPv6 is a LAN address")
-        expect(!UnifiedMonitor.isLANAddress("2001:4860:4860::8888"), "a public IPv6 address is not a LAN address")
-    }
-
-    private static func testParseNetworkQualityJSON() {
-        let json = """
-        {"dl_throughput": 150000000, "ul_throughput": 20000000, "base_rtt": 12.5, "interface_name": "en0", "test_endpoint": "https://mensura.cdn-apple.com"}
-        """
-        let result = UnifiedMonitor.parseNetworkQualityJSON(json, measuredAt: Date(timeIntervalSince1970: 0), duration: 10)
-        expect(result?.downloadMbps == 150, "dl_throughput is in bits/sec and should be converted to Mbps")
-        expect(result?.uploadMbps == 20, "ul_throughput is in bits/sec and should be converted to Mbps")
-        expect(result?.latencyMS == 12.5, "base_rtt should be passed through as milliseconds")
-        expect(result?.interfaceName == "en0", "interface_name should be extracted as-is")
-        expect(result?.endpoint == "https://mensura.cdn-apple.com", "test_endpoint should be extracted as-is")
-
-        expect(
-            UnifiedMonitor.parseNetworkQualityJSON("{}", measuredAt: Date(timeIntervalSince1970: 0), duration: 10) == nil,
-            "JSON with none of the expected keys should yield no result rather than a zeroed-out one"
-        )
-    }
-
-    private static func testParseNetworkQualitySummary() {
-        let summary = """
-        ==== SUMMARY ====
-        Uplink capacity: 45.230 Mbps
-        Downlink capacity: 220.710 Mbps
-        Idle Latency: 8.123 milliseconds
-        """
-        let result = UnifiedMonitor.parseNetworkQualitySummary(summary, measuredAt: Date(timeIntervalSince1970: 0), duration: 10)
-        expect(result?.downloadMbps == 220.71, "'Downlink capacity' line should be parsed as the download rate")
-        expect(result?.uploadMbps == 45.23, "'Uplink capacity' line should be parsed as the upload rate")
-        expect(result?.latencyMS == 8.123, "'Idle Latency' line should be parsed as the latency")
     }
 
     private static func testSampleHealthFromIsOK() {

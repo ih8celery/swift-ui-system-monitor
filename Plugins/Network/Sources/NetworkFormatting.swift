@@ -1,8 +1,6 @@
 import Foundation
-import SystemBarKit
 
-/// Formatters used by exactly one or two built-in panels, so they stay in the app instead of
-/// the Kit's public surface.
+/// The speed-test card's formatters. Only this panel uses them.
 
 func speedTestRateText(_ megabitsPerSecond: Double?) -> String {
     guard let megabitsPerSecond else { return "-- Mbps" }

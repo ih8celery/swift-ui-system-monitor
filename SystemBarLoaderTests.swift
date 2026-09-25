@@ -3,11 +3,11 @@ import SwiftUI
 import SystemBarKit
 
 /// Tests for turning plugins.json into tabs: the loader, the catalog and its list report, the
-/// compiled-in tabs, plugin paths, bundle loading, and the relauncher.
+/// default list, plugin paths, bundle loading, and the relauncher.
 @MainActor
 struct SystemBarLoaderTests {
     static func runAll() {
-        testLoaderWritesTheDefaultAndLoadsWhatTheSourceKnowsOnFirstRun()
+        testLoaderWritesTheDefaultListAndResolvesEveryEntryOnFirstRun()
         testLoaderTurnsAnUnparseableFileIntoOneErrorTab()
         testLoaderReportsNothingForAnEmptyList()
         testCatalogKeepsOrderAndSkipsDisabledEntries()
@@ -18,10 +18,7 @@ struct SystemBarLoaderTests {
         testCatalogLogsWhenInitPassesTheSlowThreshold()
         testCatalogLogsNothingForAFastInit()
         testListReportPrintsOneLinePerEntry()
-        testEveryCompiledInTabIsInTheDefaultList()
-        testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode()
-        testBuiltinSourceNamesTheUnknownTab()
-        testBuiltinSourceDoesNotTakePaths()
+        testDefaultListNamesSixBundles()
         testPluginPathResolvesNamesInsideThePlugInsFolder()
         testPluginPathRejectsNamesThatLeaveTheFolder()
         testPluginPathKeepsAStrangeNameInsideTheFolder()
@@ -29,7 +26,6 @@ struct SystemBarLoaderTests {
         testPluginPathRejectsRelativeAndEmptyPaths()
         testBundleSourceReportsEachFailureStep()
         testBundleSourceFindsAPrincipalClassThatAdoptsTabPlugin()
-        testHostSourcePrefersABundleOverTheCompiledInTab()
         testFoundationLoaderRefusesABareFolder()
         testFoundationLoaderRefusesAPlainFile()
         testFoundationLoaderRefusesABundleWithNoPrincipalClass()
@@ -40,18 +36,23 @@ struct SystemBarLoaderTests {
 
     // MARK: - Loader
 
-    private static func testLoaderWritesTheDefaultAndLoadsWhatTheSourceKnowsOnFirstRun() {
+    private static func testLoaderWritesTheDefaultListAndResolvesEveryEntryOnFirstRun() {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
-        let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: makeHost())
-        let expected = DefaultPlugins.names.map { BuiltinTabSource.types[$0] != nil }
-        expect(loaded.map { $0.plugin != nil } == expected,
-               "a fresh file lists all six defaults in order; each tab still compiled in loads, and each that is now a bundle cannot come from the built-in table so it is an error tab in its place, got \(loaded.map(\.title))")
-        if case let .failed(_, reason)? = loaded.first {
-            expect(reason.contains("Power.bundle"), "the failure names the entry, got \(reason)")
+        let source = MapTabSource(types: ["Power.bundle": FakeTab.self, "CPU.bundle": OtherFakeTab.self])
+        let loaded = TabLoader.load(store: store, source: source, host: makeHost())
+        expect(loaded.map(\.title) == ["Fake", "Error", "Error", "Error", "Error", "Other"],
+               "a fresh file lists all six defaults in order, each resolved through the source: the two it knows load and the four it does not are error tabs in their places, got \(loaded.map(\.title))")
+        if case let .failed(location, _)? = loaded.dropFirst().first {
+            expect(location == "Dev.bundle", "an error tab names its entry, got \(location)")
         }
         expect(FileManager.default.fileExists(atPath: store.fileURL.path), "and the default file is written")
+        if case .success(let written) = store.loadOrCreate(default: PluginConfig(plugins: [])) {
+            expect(written == .builtins(named: DefaultPlugins.names), "the file written is the default list, got \(written)")
+        } else {
+            expect(false, "the file written must read back")
+        }
     }
 
     private static func testLoaderTurnsAnUnparseableFileIntoOneErrorTab() {
@@ -59,7 +60,7 @@ struct SystemBarLoaderTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         try? Data(#"{ "plugins": [ { "name": } ] }"#.utf8).write(to: store.fileURL)
-        let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: makeHost())
+        let loaded = TabLoader.load(store: store, source: MapTabSource(types: [:]), host: makeHost())
         guard loaded.count == 1, case .failed(let location, let reason) = loaded[0] else {
             expect(false, "an unparseable file yields exactly one error tab, got \(loaded)")
             return
@@ -73,7 +74,7 @@ struct SystemBarLoaderTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         try? Data(#"{ "plugins": [ { "name": "CPU.bundle", "enabled": false } ] }"#.utf8).write(to: store.fileURL)
-        let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: makeHost())
+        let loaded = TabLoader.load(store: store, source: MapTabSource(types: [:]), host: makeHost())
         expect(loaded.isEmpty, "a disabled-only config loads nothing, got \(loaded)")
         expect(PluginListReport.lines(for: loaded).isEmpty, "and --list-plugins prints nothing for it")
     }
@@ -160,51 +161,11 @@ struct SystemBarLoaderTests {
                "--list-plugins prints ok/error lines in order, got \(PluginListReport.lines(for: tabs))")
     }
 
-    // MARK: - Built-in tabs
+    // MARK: - Default list
 
-    private static func testEveryCompiledInTabIsInTheDefaultList() {
-        expect(Set(BuiltinTabSource.types.keys).isSubset(of: DefaultPlugins.names), "every compiled-in tab is somewhere in the default list")
+    private static func testDefaultListNamesSixBundles() {
         expect(DefaultPlugins.names.count == 6 && Set(DefaultPlugins.names).count == 6, "six distinct default names")
-        expect(DefaultPlugins.names.allSatisfy { $0.hasSuffix(".bundle") }, "names are the bundle names each tab will have once it is a real bundle")
-    }
-
-    private static func testBuiltinsHaveDistinctIdentifiersAndMatchTheirMonitorMode() {
-        let config = PluginConfig.builtins(named: DefaultPlugins.names)
-        let tabs = TabCatalog.build(config: config, source: BuiltinTabSource(), host: makeHost())
-        let plugins = tabs.compactMap(\.plugin)
-        expect(plugins.count == BuiltinTabSource.builtins.count, "every compiled-in tab loads, got \(PluginListReport.lines(for: tabs))")
-        let ids = Set(plugins.map { type(of: $0).identifier })
-        expect(ids.count == BuiltinTabSource.builtins.count, "the built-ins have different ids, got \(ids)")
-        for plugin in plugins {
-            guard let backed = plugin as? MonitorBackedTab else {
-                expect(false, "\(plugin.title) must say which MonitorMode drives its sampling until it owns a collector")
-                continue
-            }
-            expect(backed.monitorMode.icon == plugin.systemImage, "\(plugin.title) keeps the icon its MonitorMode had")
-            expect(backed.monitorMode.rawValue == plugin.title, "\(plugin.title) keeps the title its MonitorMode had")
-        }
-        expect(plugins.compactMap { ($0 as? MonitorBackedTab)?.monitorMode } == MonitorMode.allCases,
-               "the default order is today's tab order, got \(plugins.map(\.title))")
-    }
-
-    private static func testBuiltinSourceNamesTheUnknownTab() {
-        do {
-            _ = try BuiltinTabSource().resolve(entry("Weather.bundle"))
-            expect(false, "an unknown name throws")
-        } catch {
-            expect("\(error)".contains("Weather.bundle") && BuiltinTabSource.types.keys.allSatisfy { "\(error)".contains($0) },
-                   "the error names the bad name and lists the real ones, got: \(error)")
-        }
-    }
-
-    private static func testBuiltinSourceDoesNotTakePaths() {
-        let pathEntry = PluginEntry(name: nil, path: "/tmp/X.bundle", isEnabled: true)
-        do {
-            _ = try BuiltinTabSource().resolve(pathEntry)
-            expect(false, "a path entry cannot load until bundles exist")
-        } catch {
-            expect("\(error)".contains("path"), "the error says path entries are not supported yet, got: \(error)")
-        }
+        expect(DefaultPlugins.names.allSatisfy { $0.hasSuffix(".bundle") }, "every default is a bundle in the app's PlugIns")
     }
 
     // MARK: - Bundles
@@ -298,28 +259,6 @@ struct SystemBarLoaderTests {
         let source = BundleTabSource(builtInPlugInsURL: folder, homeDirectory: "/Users/x", loader: FakeBundleLoader(classes: ["ObjC.bundle": FakeObjCTab.self]))
         let type = try? source.resolve(entry("ObjC.bundle"))
         expect(type?.identifier == "objc", "an NSObject subclass with an @objc name resolves through the protocol, got \(String(describing: type))")
-    }
-
-    private static func testHostSourcePrefersABundleOverTheCompiledInTab() {
-        let folder = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: folder) }
-        expect((try? FileManager.default.createDirectory(at: folder.appendingPathComponent("CPU.bundle"), withIntermediateDirectories: true)) != nil, "setup: create CPU.bundle")
-        let bundles = BundleTabSource(builtInPlugInsURL: folder, homeDirectory: "/Users/x", loader: FakeBundleLoader(classes: ["CPU.bundle": FakeObjCTab.self]))
-        let source = HostTabSource(bundles: bundles, builtins: BuiltinTabSource())
-        expect((try? source.resolve(entry("CPU.bundle")))?.identifier == "objc", "a bundle in PlugIns wins over the compiled-in tab of the same name")
-        expect((try? source.resolve(entry("Network.bundle")))?.identifier == "network", "a name with no bundle still finds the compiled-in tab")
-        do {
-            _ = try source.resolve(entry("Weather.bundle"))
-            expect(false, "an unknown name fails")
-        } catch {
-            expect("\(error)".contains("Weather.bundle"), "the error names the entry, got: \(error)")
-        }
-        do {
-            _ = try source.resolve(pathEntry("/nowhere/X.bundle"))
-            expect(false, "a path entry never falls back to the compiled-in table")
-        } catch {
-            expect("\(error)".contains("nothing at"), "the path went to the bundle source, got: \(error)")
-        }
     }
 
     private static func testFoundationLoaderRefusesABareFolder() {
@@ -434,7 +373,7 @@ final class OtherFakeTab: TabPlugin {
     @MainActor func makeView() -> AnyView { AnyView(Text("other")) }
 }
 
-/// A source that knows a fixed set of names, standing in for built-ins and bundles.
+/// A source that knows a fixed set of names, standing in for the bundle source.
 struct MapTabSource: TabSource {
     let types: [String: TabPlugin.Type]
 

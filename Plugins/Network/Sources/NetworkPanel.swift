@@ -1,17 +1,16 @@
-import AppKit
 import Foundation
 import SwiftUI
 import SystemBarKit
 
 struct NetworkPanel: View {
-    @ObservedObject var monitor: UnifiedMonitor
+    @ObservedObject var plugin: NetworkPlugin
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    RateCard(title: "Down", value: rateString(monitor.currentDownloadRate), color: Palette.blue)
-                    RateCard(title: "Up", value: rateString(monitor.currentUploadRate), color: Palette.tangerine)
+                    RateCard(title: "Down", value: rateString(plugin.fastStats.currentDownloadRate), color: Palette.blue)
+                    RateCard(title: "Up", value: rateString(plugin.fastStats.currentUploadRate), color: Palette.tangerine)
                 }
 
                 HStack(spacing: 10) {
@@ -20,8 +19,8 @@ struct NetworkPanel: View {
                 }
 
                 DualSparkline(
-                    first: monitor.downloadHistory,
-                    second: monitor.uploadHistory,
+                    first: plugin.fastStats.downloadHistory,
+                    second: plugin.fastStats.uploadHistory,
                     firstColor: Palette.blue,
                     secondColor: Palette.tangerine
                 )
@@ -37,15 +36,15 @@ struct NetworkPanel: View {
                     HStack(spacing: 10) {
                         SectionTitle("Speed Test")
                         Spacer()
-                        Text(monitor.speedTestStatus)
+                        Text(plugin.speedTest.status)
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(monitor.speedTestHealth == .degraded ? Palette.warning : .secondary)
+                            .foregroundStyle(plugin.speedTest.health == .degraded ? Palette.warning : .secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                         Button {
-                            monitor.runSpeedTest()
+                            plugin.runSpeedTest()
                         } label: {
-                            if monitor.isSpeedTestRunning {
+                            if plugin.speedTest.isRunning {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
@@ -53,14 +52,14 @@ struct NetworkPanel: View {
                             }
                         }
                         .buttonStyle(.borderless)
-                        .disabled(monitor.isSpeedTestRunning)
+                        .disabled(plugin.speedTest.isRunning)
                         .help("Run networkQuality speed test")
                     }
 
                     HStack(spacing: 10) {
-                        SpeedTestMetric(label: "Test Down", value: speedTestRateText(monitor.speedTestResult?.downloadMbps), color: Palette.blue)
-                        SpeedTestMetric(label: "Test Up", value: speedTestRateText(monitor.speedTestResult?.uploadMbps), color: Palette.tangerine)
-                        SpeedTestMetric(label: "Latency", value: speedTestLatencyText(monitor.speedTestResult?.latencyMS), color: Palette.good)
+                        SpeedTestMetric(label: "Test Down", value: speedTestRateText(plugin.speedTest.result?.downloadMbps), color: Palette.blue)
+                        SpeedTestMetric(label: "Test Up", value: speedTestRateText(plugin.speedTest.result?.uploadMbps), color: Palette.tangerine)
+                        SpeedTestMetric(label: "Latency", value: speedTestLatencyText(plugin.speedTest.result?.latencyMS), color: Palette.good)
                     }
 
                 }
@@ -72,7 +71,7 @@ struct NetworkPanel: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(monitor.destinations.prefix(14)) { destination in
+                        ForEach(plugin.summary.destinations.prefix(14)) { destination in
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack {
                                     Text(destinationTitle(destination))
@@ -94,9 +93,9 @@ struct NetworkPanel: View {
                     }
                 }
 
-                Text(monitor.networkStatus)
+                Text(plugin.summary.status)
                     .font(.caption)
-                    .foregroundStyle(monitor.networkHealth == .ok ? .secondary : Palette.warning)
+                    .foregroundStyle(plugin.summary.health == .ok ? .secondary : Palette.warning)
             }
             .padding(18)
             .frame(maxWidth: .infinity)
@@ -106,9 +105,9 @@ struct NetworkPanel: View {
                 Divider().background(Color.white.opacity(0.08))
 
                 NetworkProcessList(
-                    rows: monitor.networkProcesses,
-                    totalCount: monitor.networkProcessCount,
-                    maxRate: monitor.networkMaxCombinedRate
+                    rows: plugin.summary.processes,
+                    totalCount: plugin.summary.totalProcessCount,
+                    maxRate: plugin.summary.maxCombinedRate
                 )
                 .padding(16)
                 .frame(width: 258)
@@ -117,7 +116,7 @@ struct NetworkPanel: View {
     }
 
     private var hasBandwidthRows: Bool {
-        !monitor.networkProcesses.isEmpty
+        !plugin.summary.processes.isEmpty
     }
 
     private func destinationTitle(_ destination: NetworkDestination) -> String {
@@ -125,12 +124,12 @@ struct NetworkPanel: View {
             .split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
             .first
             .map(String.init) ?? destination.remoteAddress
-        let hostname = monitor.resolvedHostnames[normalizedAddress] ?? ""
+        let hostname = plugin.summary.resolvedHostnames[normalizedAddress] ?? ""
         return hostname.isEmpty ? "\(serviceLabel(destination)) endpoint" : hostname
     }
 
     private func serviceLabel(_ destination: NetworkDestination) -> String {
-        UnifiedMonitor.serviceLabel(endpoint: destination.endpoint)
+        NetworkCollector.serviceLabel(endpoint: destination.endpoint)
     }
 }
 
