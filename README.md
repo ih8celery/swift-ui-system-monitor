@@ -51,7 +51,18 @@ A tab is a `.bundle` built in Swift against the SDK inside the app. `Examples/He
 ./build-plugin.sh Examples/HelloTab "$HOME/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" ~/Applications/SystemBar.app
 ```
 
-Then add `{ "path": "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" }` to `plugins.json` and press Relaunch. The plugin can run subprocesses through the host (an executable path and arguments, never a shell), read the shared process summary (`host.processes.value` now, or `host.processes.publisher` to follow it, as `Plugins/Power/` does), and use the app's palette and components. Give your plugin its own executable name in Info.plist (it doubles as the Swift module name, so make it a valid identifier) and its own `@objc(...)` class name; the app refuses a bundle whose class name another loaded bundle already defines. The six built-in tabs are being moved to the same shape; `Plugins/Power/` is the first.
+Then add `{ "path": "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" }` to `plugins.json` and press Relaunch. The plugin can run subprocesses through the host (an executable path and arguments, never a shell), read the shared process summary (`host.processes.value` now, or `host.processes.publisher` to follow it, as `Plugins/Power/` does), and use the app's palette and components. Give your plugin its own executable name in Info.plist (it doubles as the Swift module name, so make it a valid identifier) and its own `@objc(...)` class name; the app refuses a bundle whose class name another loaded bundle already defines.
+
+Every tab the app ships is built this way, under `Plugins/`: `Plugins/Power/` is the smallest, and `Plugins/Network/` shows following the 1-second feed and running slow work on a queue of its own.
+
+A plugin says in `sharedFeeds` which of the host's two shared readings it uses, and the host samples only what the showing tab asks for:
+
+| Feed | What it holds | When the host samples it |
+|---|---|---|
+| `.fastStats` | CPU percent and network rates, with 90 seconds of history | Every second while the window is open, whatever the tab, so the history has no gaps |
+| `.processes` | The top processes by CPU and by memory | Every 10 seconds, only while a tab that declares it is showing |
+
+Nothing is sampled while the window is closed.
 
 A plugin's `refreshInterval` is clamped to between 0.25 seconds and one day: NaN, zero, and negative values become 0.25 seconds, and infinity or anything larger becomes one day, with each substitution logged. Build your plugin with the same Xcode as the app, or a newer one — the SDK interface names types from that Xcode's SwiftUI, so an older Xcode cannot read it.
 
@@ -105,11 +116,11 @@ To uninstall:
 
 It's a system monitor, so it looks at your processes, disks, and network connections. Here is the complete list of what it runs and why — worth reading before you trust any tool like this.
 
-Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU, memory, and interface counters, SystemBar shells out to these stock macOS utilities:
+Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU, memory, and interface counters, SystemBar shells out to these stock macOS utilities. Every command below starts only while the window is open, and only while the tab that needs it is showing (a `du` scan or speed test already under way finishes even if you switch away).
 
 | Command | Used for | How often |
 |---|---|---|
-| `/bin/ps` | Process list, per-process CPU and memory | Every 10s; also every 60s for the Dev tab, with arguments, to work out which project each process belongs to |
+| `/bin/ps` | Process list, per-process CPU and memory | Every 10s while the Power, Memory or CPU tab is showing; also every 60s for the Dev tab, with arguments, to work out which project each process belongs to |
 | `/usr/bin/memory_pressure` | Memory pressure level | Every 30s |
 | `/usr/sbin/ioreg` | GPU (`AGXAccelerator`) info | Every 30s |
 | `/usr/bin/pmset` | Battery state and sleep assertions; thermal and performance warnings | Every 60s |
@@ -126,7 +137,22 @@ Three things worth calling out:
 - **The disk scan reads directory sizes only.** It measures a fixed list of well-known space hogs (Xcode DerivedData, `~/Library/Caches`, `~/Downloads`, `~/.Trash`, npm/Cargo/Gradle/Maven/Go caches, and similar). It reads sizes, never file contents, and it never deletes anything — the hints in the UI are suggestions for you to act on yourself. Because `~/Downloads` is on the list, macOS may ask for Files and Folders permission the first time. Each directory is measured by its own `du`, capped at 45s, with the whole scan capped at 4 minutes — so one huge or unreadable tree costs only its own row, and rows appear in the list as they finish. The status line under the list says how many were measured and what happened to the rest.
 - **The speed test is the only thing that leaves your machine.** Pressing it runs Apple's built-in `networkQuality`, which measures throughput against Apple's servers (`mensura.cdn-apple.com`). Nothing else here sends data anywhere; every other reading is computed locally and stays on your Mac. There is no telemetry, analytics, or crash reporting.
 
-SystemBar runs entirely as your user. It never asks for `sudo` or elevated privileges, and the built-in tabs and the host itself launch every subprocess with an explicit executable path and argument array — never through a shell. A loaded plugin is not held to that rule and can run whatever it likes with your privileges, which is why you should only install plugins you trust.
+SystemBar runs entirely as your user. It never asks for `sudo` or elevated privileges, and the tabs that ship with the app and the host itself launch every subprocess with an explicit executable path and argument array — never through a shell. A loaded plugin is not held to that rule and can run whatever it likes with your privileges, which is why you should only install plugins you trust.
+
+### How often each tab samples
+
+Each interval lives in that tab's plugin, next to the code that uses it.
+
+| Tab | Its own sampling | Where the number lives |
+|---|---|---|
+| Power | `pmset` every 60s | `PowerPlugin.refreshInterval` |
+| Dev | `ps`, `lsof`, `pmset` and two usage reads a second apart, every 60s | `DevSampling` in `Plugins/Dev/Sources/CapacityModels.swift` |
+| Memory | Kernel counters every 3s; `memory_pressure` and `ioreg` every 30s | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
+| Disk | Volumes and `tmutil` every 30s; the `du` scan every 10 min or on demand | `DiskSampling` in `Plugins/Disk/Sources/DiskModels.swift` |
+| Network | `nettop` and `lsof` every 30s; `networkQuality` only on the button | `NetworkSampling` in `Plugins/Network/Sources/NetworkModels.swift` |
+| CPU | Nothing of its own: everything it shows comes from the two shared feeds | `CPUPlugin.refreshInterval` (one day, so its empty collect almost never runs) |
+
+The shared feeds' intervals are `HostSamplers.fastInterval` and `HostSamplers.processInterval` in `Sources/Host/HostSamplers.swift`.
 
 ## Test
 
@@ -134,7 +160,7 @@ SystemBar runs entirely as your user. It never asks for `sudo` or elevated privi
 ./test.sh
 ```
 
-`./test.sh` ends with the boundary check: it builds `Examples/HelloTab` against the SDK inside the `SystemBar.app` it just built, then runs `--list-plugins` against a temporary config naming Power, that HelloTab bundle by path, a missing path, and a duplicate — the one test that crosses a real dylib boundary, loading a bundle built separately from the app through the same loader a user's bundle goes through.
+After the in-process tests, `./test.sh` runs the boundary check: it builds `Examples/HelloTab` against the SDK inside the `SystemBar.app` it just built, then runs `--list-plugins` against a temporary config naming Power, that HelloTab bundle by path, a missing path, and a duplicate — the one test that crosses a real dylib boundary, loading a bundle built separately from the app through the same loader a user's bundle goes through. It then runs `--list-plugins` once more against a `plugins.json` that does not exist yet, as on a new user's first launch, and expects all six tabs to load from the bundles inside the app, in the default order. Last, it searches the sources for the names of the types the move to plugins deleted, and fails if any of them is back.
 
 You can also check the plugin loader from a script, without opening the app: `./SystemBar.app/Contents/MacOS/SystemBar --list-plugins` prints what it would show and exits 0 regardless of whether any line reports an error, so the boundary check in `test.sh` compares the printed lines rather than the exit status. Point `SYSTEMBAR_PLUGINS_FILE` at a temporary file first, so the check reads and writes that instead of your real `plugins.json`.
 

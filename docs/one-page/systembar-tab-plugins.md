@@ -3,18 +3,18 @@
 - **Date:** 2026-09-23
 - **Epic:** swift-ui-system-monitor-2ik
 - **Blocks:** swift-ui-system-monitor-jhi (Power) and 17o.7 (drop file), which wait for it
-- **Status:** approved in conversation 2026-09-23; Stage 1 shipped; Stage 2 is implemented
+- **Status:** approved in conversation 2026-09-23; Stages 1 and 2 shipped; Stage 3 is implemented
 
 ## Goal
 
 Let the person running SystemBar choose which tabs the app has, in what order,
 and add tabs of their own, by editing one file and restarting the app.
 
-Today the six tabs are hard-coded: `RootView` switches over a `MonitorMode`
-enum, `UnifiedMonitor` owns every collector, every timer and every published
-snapshot, and `MonitorSamplingPlan.jobs` is the one place that knows which
-shared samplers each tab needs. Adding a tab means editing four files in the
-host, and nobody but the repository can add one.
+Before this change the six tabs were hard-coded: `RootView` switched over a
+`MonitorMode` enum, `UnifiedMonitor` owned every collector, every timer and
+every published snapshot, and `MonitorSamplingPlan.jobs` was the one place that
+knew which shared samplers each tab needed. Adding a tab meant editing four
+files in the host, and nobody but the repository could add one.
 
 After this change a tab is a bundle on disk. The app ships six of them, a
 config file lists which to load, and a person can build their own against a
@@ -181,7 +181,7 @@ What the host hands every plugin:
 
 ```swift
 public final class HostServices {
-    /// The only way built-in plugins run a subprocess: explicit path, argument array, no shell.
+    /// The way a plugin runs a subprocess: explicit path, argument array, no shell.
     /// `environment` exists because an app started by launchd has almost no PATH. A non-nil
     /// `environment` replaces the child's inherited environment entirely; it does not merge.
     public func run(path: String, arguments: [String],
@@ -199,17 +199,23 @@ public final class HostServices {
 Also exported from the SDK, because every tab uses them: `Palette`,
 `EvidenceRow`, `StatPill`, `RateCard`, `SectionTitle`, `SegmentedBar`,
 `BarSegment`, `SegmentedLegend`, `ChartUnitLabel`, `LegendLabel`,
-`ProgressBar`, `Sparkline`, `DualSparkline`, `Feed`, `ProcessRunner`,
-`ProcessCPUScale`, the formatting helpers in `ViewFormatting`, and the models
-that more than one tab reads (`ProcessSnapshot`, `ProcessSummary`,
-`FastStatsSnapshot`, `SampleHealth`, `BoundedHistory`, `CommandOutput`).
-`ProcessSummary` also exposes `memoryDisplayLimit`, `cpuDisplayLimit`, and
-three initializers.
+`ProgressBar`, `Sparkline`, `DualSparkline`, `ProcessList` (the top-N process
+list), `Feed`, `ProcessRunner`, `ProcessCPUScale`, `ProcessTable` (the `ps`
+path, its arguments, and `parse`, which turns that output into `PidRecord`s),
+the formatting helpers in `ViewFormatting`, and the models that more than one
+tab reads (`ProcessSnapshot`, `ProcessSummary`, `FastStatsSnapshot`,
+`SampleHealth`, `BoundedHistory`, `CommandOutput`). `ProcessSummary` also
+exposes `memoryDisplayLimit`, `cpuDisplayLimit`, and three initializers. Two
+bundles can share code only through the SDK, so anything two tabs both need
+joins it or, when it is a line or two, is copied.
 
-A shared feed's sampler runs while at least one visible plugin declares it and
-stops when none does. With one tab visible at a time, that is the same rule as
-today's `jobs(isVisible:mode:)`, and the host keeps the existing behaviour that
-the one-second fast stats run whenever the window is open at all.
+The host runs two shared samplers of its own, in `HostSamplers`. The 1-second
+sampler (CPU percent and network rates, with 90 seconds of history) runs
+whenever the window is open, whatever the tab, so switching tabs leaves no gap
+in the histories. The 10-second `ps` sampler runs only while the showing tab
+declares `.processes`. With the window closed, or an error tab showing,
+neither runs. A sampler samples at once when it starts, and one that keeps
+running across a tab switch keeps its rhythm.
 
 ## Config Contract
 
@@ -242,7 +248,15 @@ the one-second fast stats run whenever the window is open at all.
 For each enabled entry, in order: resolve the path; `Bundle(url:)`; `load()`;
 `principalClass as? TabPlugin.Type`; check the id is not already loaded;
 `init(host:)`. Each step that fails yields an error tab in that position with
-the path and the reason. Nothing loaded before a failure is undone.
+the path and the reason. Nothing loaded before a failure is undone. Every
+entry resolves to a bundle; no tab is compiled into the host, and a missing
+`plugins.json` is written from `DefaultPlugins.names`, the six bundles the app
+ships, in their default order.
+
+`TabPresenter` is the one place that hears what is showing: the window opening
+or closing, and the selection moving. It tells the tab (`visibilityChanged`),
+`PluginScheduler` (which runs that tab's `collect()` on its own queue while it
+is visible) and `HostSamplers`.
 
 `SystemBar --list-plugins` performs the same loading, prints one line per entry
 (`ok <id> <title> <location as written>` or `error <location as written>:
@@ -274,8 +288,7 @@ build-plugin.sh   <source dir> <output .bundle> [<app or SDK dir>]; what a user 
 
 Still no package manager. `toolchain.env` holds the `-target`, `-swift-version`,
 and `-package-name` that `build.sh` and `test.sh` both source, so the SDK, the
-app, and the tests always agree. `build.sh` grows from one `swiftc` call to one
-per part: `Sources/Kit` becomes the dylib, `Sources/Host` becomes the app, and
+app, and the tests always agree. `build.sh` makes one `swiftc` call per part: `Sources/Kit` becomes the dylib, `Sources/Host` becomes the app, and
 each `Plugins/<Name>/` becomes a bundle via `build-plugin.sh`. The app ships
 only the SDK's textual interface at `Contents/Resources/SDK/SystemBarKit.swiftinterface`,
 not a binary `.swiftmodule`; `build/SDK/` keeps the binary module the app and
@@ -287,13 +300,13 @@ that directory with its own module cache under `$TMPDIR`, never passes
 `-package-name` (a plugin only ever sees the SDK's public interface), and
 exits 64 on a usage error.
 
-`UnifiedMonitor` is deleted when the last tab moves out. Each
-`UnifiedMonitor+X.swift` and `Views/XPanel.swift` pair becomes `Plugins/X/`.
-`MonitorSamplingPlan` goes with it: intervals become each plugin's
-`refreshInterval`, and the fast and process intervals belong to the host. The
-README's interval table is regrouped by plugin, and `AGENTS.md` and
-`CLAUDE.md` describe the new layout, including that the "explicit path, no
-shell" subprocess rule is now `HostServices.run`.
+Nothing in `Sources/Host/` names a tab. A tab's intervals live in its plugin:
+its `refreshInterval`, and any slower cadences in its `<Name>Sampling` enum
+next to its models. The host owns only the shared feeds' intervals,
+`HostSamplers.fastInterval` and `HostSamplers.processInterval`. The README's
+interval table is grouped by tab, and `AGENTS.md` and `CLAUDE.md` describe the
+layout, including that the "explicit path, no shell" subprocess rule is
+`HostServices.run`.
 
 ## Test Contract
 
@@ -301,9 +314,10 @@ Tests are written first at every stage, as the project's rules require.
 
 - **One in-process test binary, as now.** `test.sh` links the SDK dylib that
   `build.sh` just built and compiles the host, every plugin's `Sources/` and
-  `Tests/`, and the test files into one binary, `build/SystemBarTests`. The
-  existing capacity and performance tests move into `Plugins/Dev/Tests/` and
-  the relevant plugin's `Tests/` and keep running unchanged. The dylib
+  `Tests/`, and the test files into one binary, `build/SystemBarTests`. Each
+  tab's tests live in its own `Plugins/<Name>/Tests/` (the capacity tests in
+  `Plugins/Dev/Tests/`); the host's, the loader's and the samplers' tests stay
+  in the test files at the top of the repository. The dylib
   boundary a real plugin crosses — a separately built bundle, loaded at
   runtime — is deliberately absent here; these tests are about behaviour.
 - **Unit tests that exist before their code:** config decoding, including every
@@ -312,7 +326,7 @@ Tests are written first at every stage, as the project's rules require.
   driven by a fake bundle source so no real dylib is needed.
 - **One boundary check in `test.sh`.** After `build.sh`, build
   `Examples/HelloTab` with `build-plugin.sh` against the SDK inside the
-  just-built `SystemBar.app`, write a temporary config naming the built-in
+  just-built `SystemBar.app`, write a temporary config naming the app's own
   `Power.bundle`, that HelloTab bundle by `path`, a missing path, and
   `Power.bundle` again as a duplicate, run
   `./SystemBar.app/Contents/MacOS/SystemBar --list-plugins` against it, and
@@ -320,6 +334,12 @@ Tests are written first at every stage, as the project's rules require.
   boundary — a bundle built separately from the app, loaded by the same
   loader a user's bundle goes through — and it runs in CI on the existing
   macOS runner.
+- **A fresh-file check in `test.sh`.** Run `--list-plugins` once more against
+  a `plugins.json` that does not exist yet, as on a new user's first launch,
+  and expect the file to be written and all six tabs to load from the bundles
+  inside the app, in the default order.
+- **A name check in `test.sh`.** Search the sources for the names of the types
+  Stage 3 deleted, and fail if any of them is back.
 
 ## A User Plugin, Walked Through
 
@@ -439,3 +459,29 @@ leaving a working, buildable, tested app:
 - 2026-09-24 — The host times each `init(host:)` and logs when it passes 100
   ms: Adam asked that the no-slow-work rule be enforced, and a log line is the
   lightest enforcement that never refuses a working plugin — Adam.
+- 2026-09-24 — Stage 3 landed: CPU, Memory, Disk, Network and Dev load from
+  `Contents/PlugIns/` through the same loader as Power; `UnifiedMonitor`,
+  `MonitorMode`, `MonitorSamplingPlan` and the compiled-in table are gone,
+  and nothing in `Sources/Host/` names a tab. The host keeps two samplers of
+  its own, for the two shared feeds — Claude, recorded for Adam.
+- 2026-09-24 — `PidRecord`/`ProcessTable.parse` and `ProcessList` joined the
+  SDK: CPU and Dev both parse `ps`, Memory and CPU both show the top-N list,
+  and two bundles can share code only through the SDK. `ProcessTable` also
+  carries the `ps` path and arguments, because its parser understands only
+  that one column order. A helper of a line or two (`port(from:)`) is copied
+  instead of widening the SDK — Claude, from the Stage 3 plan, for Adam to
+  confirm.
+- 2026-09-24 — CPU's `collect()` is empty and its `refreshInterval` is one
+  day, the scheduler's ceiling: everything it shows comes from the two shared
+  feeds, so there is nothing for it to collect — Claude, from the Stage 3
+  plan, for Adam to confirm.
+- 2026-09-24 — The 1-second sampler runs for every visible tab, not only
+  those that declare `.fastStats`: the CPU and network histories are 90
+  seconds long, and stopping it on a tab switch would leave gaps in them. A
+  sampler samples at once when it starts and keeps its rhythm while it keeps
+  running; an error tab pauses both — Claude, from the Stage 3 plan, for Adam
+  to confirm.
+- 2026-09-24 — Dev declares `sharedFeeds = [.fastStats]`, where its old
+  adapter said nothing: its capacity grade reads the 1-second CPU figure. It
+  changes nothing at run time, but the declaration is now true — Claude, from
+  the Stage 3 plan.
