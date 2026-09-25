@@ -10,7 +10,7 @@ import SystemBarKit
 ///
 /// Main thread only. Each sampler has its own serial queue, so a slow `ps` (it can take up to
 /// its 15-second timeout) cannot stall the 1-second ticks and leave a gap in their history.
-/// Each sampler's own state is only ever touched from its own queue.
+/// Each collector's own state is only ever touched from its queue; the handles live on main.
 @MainActor
 final class HostSamplers {
     nonisolated static let fastInterval: TimeInterval = 1
