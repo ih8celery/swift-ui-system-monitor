@@ -330,6 +330,8 @@ struct MonitorSamplingPlan {
     static let diskHogPathTimeout: TimeInterval = 45
     /// Whole-scan ceiling, kept well under the refresh interval so scans never overlap.
     static let diskHogScanBudget: TimeInterval = 240
+    /// The floor under any plugin's declared refreshInterval, so a bad bundle cannot spin a core or trap.
+    static let minimumRefreshInterval: TimeInterval = 0.25
 
     /// What runs for the selected tab: the compiled-in plan for its mode, if it has one, plus
     /// the shared samplers the plugin declares. A tab from a bundle has no mode.

@@ -122,8 +122,10 @@ struct RootView: View {
     private func present(index: Int, isVisible: Bool) {
         let plugin = loadedPlugin(at: index)
         plugin?.visibilityChanged(isVisible: isVisible)
-        if let plugin {
-            scheduler.setVisible(plugin, isVisible)
+        if isVisible, let plugin {
+            scheduler.show(plugin)
+        } else {
+            scheduler.hide()
         }
         monitor.updatePresentation(
             isVisible: isVisible && plugin != nil,

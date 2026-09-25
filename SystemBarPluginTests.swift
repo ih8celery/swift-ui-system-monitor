@@ -69,7 +69,20 @@ struct SystemBarPluginTests {
         testHostServicesCarriesTheFeedsItWasBuiltWith()
         testSchedulerCollectsOnlyWhileVisibleAndNeverOverlaps()
         testSchedulerCollectsAtOnceWhenATabAppears()
+        testSchedulerStopsThePreviousPluginWhenAnotherIsShown()
+        testSchedulerNeverOverlapsACollectInterruptedByHideAndShow()
+        testSchedulerClampsABadRefreshInterval()
         testSamplingPlanAddsTheProcessesJobForAPluginThatDeclaresIt()
+    }
+
+    /// Spins the run loop until `condition` holds or `timeout` elapses, so a scheduler test
+    /// waits only as long as the machine actually needs rather than a fixed guess that either
+    /// flakes under load or wastes time when the machine is fast.
+    private static func waitUntil(_ timeout: TimeInterval = 1, _ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
     }
 
     static func makeHost(
@@ -762,12 +775,12 @@ struct SystemBarPluginTests {
     private static func testSchedulerCollectsOnlyWhileVisibleAndNeverOverlaps() {
         let plugin = TickingTab(host: makeHost())
         let scheduler = PluginScheduler()
-        scheduler.setVisible(plugin, true)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        scheduler.show(plugin)
+        waitUntil { plugin.count >= 3 }
         let whileVisible = plugin.count
-        expect(whileVisible >= 3, "a visible tab is collected every refreshInterval, got \(whileVisible) in 0.4s at 0.05s")
+        expect(whileVisible >= 3, "a visible tab is collected every refreshInterval, got \(whileVisible) collects")
         expect(!plugin.overlapped, "collect never runs concurrently with itself")
-        scheduler.setVisible(plugin, false)
+        scheduler.hide()
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         let afterHiding = plugin.count
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
@@ -777,10 +790,47 @@ struct SystemBarPluginTests {
     private static func testSchedulerCollectsAtOnceWhenATabAppears() {
         let plugin = TickingTab(host: makeHost())
         let scheduler = PluginScheduler()
-        scheduler.setVisible(plugin, true)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        scheduler.show(plugin)
+        waitUntil { plugin.count >= 1 }
         expect(plugin.count >= 1, "showing a tab collects immediately, not after the first interval")
-        scheduler.setVisible(plugin, false)
+        scheduler.hide()
+    }
+
+    private static func testSchedulerStopsThePreviousPluginWhenAnotherIsShown() {
+        let a = TickingTab(host: makeHost())
+        let b = TickingTab(host: makeHost())
+        let scheduler = PluginScheduler()
+        scheduler.show(a)
+        waitUntil { a.count >= 1 }
+        scheduler.show(b)
+        let aCountAtSwitch = a.count
+        waitUntil { b.count >= 1 }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        expect(a.count == aCountAtSwitch, "showing another tab stops the previous one's timer, got \(a.count - aCountAtSwitch) more collects on the old tab")
+        expect(b.count >= 1, "the newly shown tab is collected")
+        scheduler.hide()
+    }
+
+    private static func testSchedulerNeverOverlapsACollectInterruptedByHideAndShow() {
+        let plugin = SlowTickingTab(host: makeHost())
+        let scheduler = PluginScheduler()
+        scheduler.show(plugin)
+        waitUntil { plugin.count >= 1 }
+        scheduler.hide()
+        scheduler.show(plugin)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        expect(!plugin.overlapped, "a collect interrupted by hide, then resumed by show, must not overlap the next one")
+        scheduler.hide()
+    }
+
+    private static func testSchedulerClampsABadRefreshInterval() {
+        for bad in [0, -1, .nan, .infinity, 0.1] as [TimeInterval] {
+            expect(PluginScheduler.effectiveInterval(bad) == MonitorSamplingPlan.minimumRefreshInterval,
+                   "a refreshInterval of \(bad) must be clamped to the minimum, got \(PluginScheduler.effectiveInterval(bad))")
+        }
+        for ok in [5, 60] as [TimeInterval] {
+            expect(PluginScheduler.effectiveInterval(ok) == ok, "a sane refreshInterval of \(ok) must pass through unchanged")
+        }
     }
 
     private static func testSamplingPlanAddsTheProcessesJobForAPluginThatDeclaresIt() {
@@ -922,4 +972,35 @@ final class TickingTab: TabPlugin {
 
     var count: Int { lock.withLock { collects } }
     @MainActor func makeView() -> AnyView { AnyView(Text("ticking")) }
+}
+
+/// Like `TickingTab` but with a `collect()` long enough to still be running when `hide()`
+/// cancels its timer mid-tick — the case that stresses whether a queue interrupted by
+/// hide-then-show still serializes rather than overlapping the resumed collect.
+final class SlowTickingTab: TabPlugin {
+    static let identifier = "slow-ticking"
+    let title = "Slow Ticking"
+    let systemImage = "hare"
+    let accent = Color.gray
+    let refreshInterval: TimeInterval = 0.05
+    let sharedFeeds: Set<SharedFeed> = []
+    private let lock = NSLock()
+    private var inFlight = false
+    private(set) var collects = 0
+    private(set) var overlapped = false
+
+    init(host: HostServices) {}
+
+    func collect() {
+        lock.withLock {
+            if inFlight { overlapped = true }
+            inFlight = true
+            collects += 1
+        }
+        Thread.sleep(forTimeInterval: 0.1)
+        lock.withLock { inFlight = false }
+    }
+
+    var count: Int { lock.withLock { collects } }
+    @MainActor func makeView() -> AnyView { AnyView(Text("slow-ticking")) }
 }

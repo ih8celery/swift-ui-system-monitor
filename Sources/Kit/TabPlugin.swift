@@ -24,7 +24,8 @@ public protocol TabPlugin: AnyObject {
     var title: String { get }
     var systemImage: String { get }
     var accent: Color { get }
-    /// How often the host calls `collect()` while this tab is showing.
+    /// How often the host calls `collect()` while this tab is showing. A `collect()` that runs
+    /// longer than the interval is not queued up again; missed ticks merge into the next call.
     var refreshInterval: TimeInterval { get }
     /// Which shared samplers must run while this tab is showing. The set is not frozen: a host
     /// switching over it needs `@unknown default`.
