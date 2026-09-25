@@ -46,10 +46,9 @@ struct BuiltinTabSource: TabSource {
     }
 }
 
-// Each adapter's refreshInterval and sharedFeeds restate what MonitorSamplingPlan says about
-// that tab today, plus the 1-second fast feed wherever the panel reads it (today that feed runs
-// for every visible tab, so the plan never lists it). The host scheduler reads both now, the same
-// way it reads them from a bundle.
+// Each adapter's refreshInterval restates MonitorSamplingPlan's interval for that tab; its
+// sharedFeeds are what HostSamplers reads to decide which shared samplers run while it is
+// visible, exactly as for a bundle.
 
 final class DevTab: MonitorBackedTab {
     static let identifier = "dev"
