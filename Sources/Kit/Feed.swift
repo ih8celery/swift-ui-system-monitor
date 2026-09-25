@@ -24,6 +24,15 @@ public final class Feed<Value: Sendable>: @unchecked Sendable {
         subject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
+    /// A feed and the one way to write it, for a plugin's tests: the closure records a reading
+    /// and tells subscribers, exactly as the host does, from any thread. A plugin can never get a
+    /// writer for the host's feeds this way, because the writer belongs to the feed this call
+    /// makes.
+    public static func forTesting(initial: Value) -> (feed: Feed<Value>, send: @Sendable (Value) -> Void) {
+        let feed = Feed(initial: initial)
+        return (feed, { feed.send($0) })
+    }
+
     /// The host's side: record a reading and tell subscribers. Any thread. Package-only: a
     /// plugin may read `value` and observe `publisher`, but only the host writes.
     package func send(_ value: Value) {

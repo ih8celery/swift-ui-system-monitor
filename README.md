@@ -64,6 +64,29 @@ A plugin says in `sharedFeeds` which of the host's two shared readings it uses, 
 
 Nothing is sampled while the window is closed.
 
+To test a plugin that follows a feed, make the feed with `Feed.forTesting(initial:)`. It returns a new feed and a closure that writes to that feed alone, the way the host writes its own; a plugin cannot write the host's feeds, so this is the only writer it gets. Hand the feed to a `HostServices` you build yourself, push a reading, and let the main run loop turn once, because a feed delivers on the main thread:
+
+```swift
+@MainActor func testFollowsTheProcessFeed() {
+    let (processes, sendProcesses) = Feed.forTesting(initial: ProcessSummary())
+    let host = HostServices(
+        homeDirectory: NSTemporaryDirectory(),
+        processes: processes,
+        fastStats: Feed(initial: FastStatsSnapshot()),
+        runner: { _, _, _, _ in CommandOutput(output: "", error: "", status: 0, didTimeout: false) },
+        log: { print($0) }
+    )
+    let plugin = MyPlugin(host: host)
+
+    sendProcesses(ProcessSummary(rows: [
+        ProcessSnapshot(name: "clang", count: 4, physical: 2_000_000_000, virtualSize: 0, cpu: 250)
+    ]))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+    assert(plugin.busiest == "clang")
+}
+```
+
 A plugin's `refreshInterval` is clamped to between 0.25 seconds and one day: NaN, zero, and negative values become 0.25 seconds, and infinity or anything larger becomes one day, with each substitution logged. Build your plugin with the same Xcode as the app, or a newer one — the SDK interface names types from that Xcode's SwiftUI, so an older Xcode cannot read it.
 
 The host times how long your plugin's `init(host:)` takes and logs a warning once it passes 100 ms, so put slow work in `collect()` instead of `init(host:)`.

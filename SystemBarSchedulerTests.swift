@@ -9,6 +9,7 @@ import SystemBarKit
 struct SystemBarSchedulerTests {
     static func runAll() {
         testFeedHoldsTheLatestValueAndPublishesTheNext()
+        testFeedForTestingWritesOnlyTheFeedItMade()
         testHostServicesCarriesTheFeedsItWasBuiltWith()
         testSchedulerCollectsOnlyWhileVisibleAndNeverOverlaps()
         testSchedulerCollectsAtOnceWhenATabAppears()
@@ -55,6 +56,27 @@ struct SystemBarSchedulerTests {
         expect(received.map(\.value) == [2, 3], "the publisher delivers every reading after subscription, in order, got \(received.map(\.value))")
         expect(received.allSatisfy(\.wasOnMain), "every delivery lands on the main thread")
         expect(feed.value == 3, "value is the latest reading, got \(feed.value)")
+        subscription.cancel()
+    }
+
+    private static func testFeedForTestingWritesOnlyTheFeedItMade() {
+        let (feed, send) = Feed.forTesting(initial: 1)
+        let other = Feed(initial: 1)
+        expect(feed.value == 1, "the new feed holds the initial value, got \(feed.value)")
+
+        var received: [(value: Int, wasOnMain: Bool)] = []
+        let subscription = feed.publisher.sink { value in
+            received.append((value, Thread.isMainThread))
+        }
+        DispatchQueue.global().async { send(2) }
+        let deadline = Date().addingTimeInterval(2)
+        while received.isEmpty && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        expect(received.map(\.value) == [2], "the closure's reading reaches a subscriber, got \(received.map(\.value))")
+        expect(received.allSatisfy(\.wasOnMain), "and lands on the main thread")
+        expect(feed.value == 2, "the closure's reading becomes value, got \(feed.value)")
+        expect(other.value == 1, "another feed is untouched, got \(other.value)")
         subscription.cancel()
     }
 
