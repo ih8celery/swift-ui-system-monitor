@@ -1808,7 +1808,9 @@ import SwiftUI
 import SystemBarKit
 
 /// The smallest tab that loads. Copy this directory to start your own; the README's "Writing a
-/// plugin" section walks through it.
+/// plugin" section walks through it. Two names must be unique to your plugin: the executable
+/// name in Info.plist (it is also the Swift module name, so a valid identifier) and the
+/// `@objc(...)` class name, because every loaded bundle shares one Objective-C runtime.
 ///
 /// The host builds one of these at launch, calls `collect()` on a queue it owns for this plugin
 /// every `refreshInterval` seconds while the tab is showing, and puts `makeView()` in the window.
@@ -1822,7 +1824,7 @@ public final class HelloTabPlugin: NSObject, TabPlugin, ObservableObject {
     public let refreshInterval: TimeInterval = 5
     public let sharedFeeds: Set<SharedFeed> = []
 
-    @Published var greeting = "Collecting…"
+    @Published private(set) var greeting = "Collecting…"
     private let host: HostServices
 
     /// Main thread, once, at launch.
@@ -1948,7 +1950,7 @@ A tab is a `.bundle` built in Swift against the SDK inside the app. `Examples/He
 ./build-plugin.sh Examples/HelloTab "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" ~/Applications/SystemBar.app
 ```
 
-Then add `{ "path": "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" }` to `plugins.json` and press Relaunch. The plugin can run subprocesses through the host (an executable path and arguments, never a shell), read the shared process summary, and use the app's palette and components. The six built-in tabs are being moved to the same shape; `Plugins/Power/` is the first.
+Then add `{ "path": "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" }` to `plugins.json` and press Relaunch. The plugin can run subprocesses through the host (an executable path and arguments, never a shell), read the shared process summary (`host.processes.value` now, or `host.processes.publisher` to follow it, as `Plugins/Power/` does), and use the app's palette and components. Give your plugin its own executable name in Info.plist (it doubles as the Swift module name, so make it a valid identifier) and its own `@objc(...)` class name; the app refuses a bundle whose class name another loaded bundle already defines. The six built-in tabs are being moved to the same shape; `Plugins/Power/` is the first.
 
 A bundle runs inside the app with its privileges. Nothing checks or sandboxes it, so load only bundles you built or trust.
 ````
