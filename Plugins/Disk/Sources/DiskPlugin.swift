@@ -3,6 +3,10 @@ import Foundation
 import SwiftUI
 import SystemBarKit
 
+/// The Disk tab as a bundle. The host calls `collect()` on this plugin's queue every 30 s while
+/// the tab shows; each collect reads the volumes and asks the collector for a hog scan, which runs
+/// on the collector's own queue at most every ten minutes unless the panel's rescan button forces
+/// one. Both publish on main, and the panel observes `snapshot`.
 @objc(SystemBarDiskPlugin)
 public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     public static let identifier = "disk"

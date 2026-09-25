@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import SystemBarKit
 
@@ -15,8 +14,8 @@ final class DiskCollector: @unchecked Sendable {
         self.host = host
     }
 
-    func readVolumes(at date: Date = Date()) -> DiskVolumeReading {
-        DiskVolumeReading(volumes: Self.collectDiskVolumes(), localSnapshotCount: collectLocalSnapshotCount(), sampledAt: date)
+    func readVolumes() -> DiskVolumeReading {
+        DiskVolumeReading(volumes: Self.collectDiskVolumes(), localSnapshotCount: collectLocalSnapshotCount(), sampledAt: Date())
     }
 
     /// Starts a hog scan if one is due. Every volume read asks; the rescan button passes
