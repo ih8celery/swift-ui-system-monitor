@@ -36,13 +36,27 @@ struct FoundationBundleLoader: BundleLoading {
             throw TabLoadError(description: reason)
         }
         // Bundle.classNamed only finds a class in this bundle's own code: when two bundles export
-        // the same @objc class name, the ObjC runtime keeps whichever loaded first, and the
-        // second bundle is refused right here with "its code has no class by that name" — so a
-        // plugin's class name must be unique to it.
-        guard let cls = bundle.classNamed(name) else {
-            throw TabLoadError(description: "\(url.lastPathComponent) names the class \"\(name)\" in NSPrincipalClass, but its code has no class by that name")
+        // the same @objc name, the ObjC runtime keeps whichever loaded first, so a later bundle's
+        // own class becomes invisible to classNamed under that name. NSClassFromString reaches
+        // the runtime's global name table instead, so a nil from classNamed here is checked
+        // against it before giving up — that turns the collision into an "already defined by"
+        // error naming the other bundle, rather than the misleading "its code has no class by
+        // that name". The same collision can also show up as classNamed succeeding with a class
+        // that belongs to a different bundle (one loaded under this name before this one), so
+        // that is checked too. A plugin's @objc name must be unique to it.
+        func alreadyDefinedError(by other: AnyClass) -> TabLoadError {
+            TabLoadError(description: "\(url.lastPathComponent) names the class \"\(name)\", but that class is already defined by \(Bundle(for: other).bundlePath); give this plugin a unique @objc name")
         }
-        return cls
+        if let cls = bundle.classNamed(name) {
+            guard Bundle(for: cls).bundleURL.standardizedFileURL == url.standardizedFileURL else {
+                throw alreadyDefinedError(by: cls)
+            }
+            return cls
+        }
+        if let existing = NSClassFromString(name) {
+            throw alreadyDefinedError(by: existing)
+        }
+        throw TabLoadError(description: "\(url.lastPathComponent) names the class \"\(name)\" in NSPrincipalClass, but its code has no class by that name")
     }
 }
 

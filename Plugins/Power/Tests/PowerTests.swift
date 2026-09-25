@@ -8,6 +8,9 @@ enum PowerTests {
         testBatteryParsing()
         testParseSleepAssertions()
         testContributorsComeFromTheProcessFeed()
+        testCollectRunsPmsetTwiceAndReadsTheAnswers()
+        testCollectSaysWhatIsUnavailableWhenPmsetFails()
+        testContributorsFollowTheProcessFeed()
         testPluginIdentityMatchesTheOldTab()
     }
 
@@ -46,16 +49,89 @@ enum PowerTests {
         expect(contributors[0].evidence.contains("CPU") && contributors[0].evidence.contains("memory"), "each contributor says why, got \(contributors[0].evidence)")
     }
 
-    private static func testPluginIdentityMatchesTheOldTab() {
-        let host = HostServices(
-            homeDirectory: "/tmp",
-            processes: Feed(initial: ProcessSummary()),
-            fastStats: Feed(initial: FastStatsSnapshot()),
-            runner: ProcessRunner.run,
-            log: { _ in }
-        )
+    private static func testCollectRunsPmsetTwiceAndReadsTheAnswers() {
+        let recorder = PowerCallRecorder()
+        let batteryOutput = """
+        Now drawing from 'AC Power'
+         -InternalBattery-0 (id=1234567)\t77%; charging; 0:20 remaining present: true
+        """
+        let assertionsOutput = """
+                PreventUserIdleSystemSleep     1
+        """
+        let host = SystemBarPluginTests.makeHost { path, arguments, _, _ in
+            recorder.record((path: path, arguments: arguments))
+            if arguments == ["-g", "batt"] {
+                return CommandOutput(output: batteryOutput, error: "", status: 0, didTimeout: false)
+            }
+            if arguments == ["-g", "assertions"] {
+                return CommandOutput(output: assertionsOutput, error: "", status: 0, didTimeout: false)
+            }
+            return CommandOutput(output: "", error: "unexpected arguments", status: 1, didTimeout: false)
+        }
+
+        let snapshot = PowerCollector.collect(using: host)
+        let seen = recorder.seen
+
+        expect(seen.count == 2, "collect reads battery and assertions, got \(seen.count) calls")
+        expect(seen.allSatisfy { $0.path == "/usr/bin/pmset" }, "both reads go through pmset, got \(seen.map(\.path))")
+        expect(seen.contains { $0.arguments == ["-g", "batt"] }, "one read asks pmset for battery status")
+        expect(seen.contains { $0.arguments == ["-g", "assertions"] }, "the other asks pmset for sleep assertions")
+        expect(snapshot.batteryPercent == 77, "the snapshot carries the parsed battery percent, got \(String(describing: snapshot.batteryPercent))")
+        expect(snapshot.sleepAssertions.contains { $0.contains("PreventUserIdleSystemSleep") }, "the snapshot carries the parsed assertions, got \(snapshot.sleepAssertions)")
+        expect(snapshot.status == "Power sample OK", "both reads succeeding reports OK, got \(snapshot.status)")
+        expect(snapshot.health == .ok, "both reads succeeding is healthy")
+    }
+
+    private static func testCollectSaysWhatIsUnavailableWhenPmsetFails() {
+        let host = SystemBarPluginTests.makeHost { _, _, _, _ in
+            CommandOutput(output: "", error: "boom", status: 1, didTimeout: false)
+        }
+
+        let snapshot = PowerCollector.collect(using: host)
+
+        expect(snapshot.status == "battery unavailable, assertions unavailable", "both failures are named, got \(snapshot.status)")
+        expect(snapshot.health == .degraded, "a failed pmset read is degraded")
+    }
+
+    private static func testContributorsFollowTheProcessFeed() {
+        let feed = Feed(initial: ProcessSummary())
+        let host = SystemBarPluginTests.makeHost(processes: feed)
         let plugin = PowerPlugin(host: host)
+        let rows = [
+            ProcessSnapshot(name: "clang", count: 1, physical: 1_000, virtualSize: 0, cpu: 50),
+            ProcessSnapshot(name: "idle", count: 1, physical: 500, virtualSize: 0, cpu: 0),
+        ]
+
+        feed.send(ProcessSummary(rows: rows, limit: rows.count))
+
+        let deadline = Date().addingTimeInterval(1)
+        while plugin.contributors.isEmpty && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+
+        expect(plugin.contributors.map(\.name) == rows.map(\.name),
+               "contributors track the process feed in order, got \(plugin.contributors.map(\.name))")
+    }
+
+    private static func testPluginIdentityMatchesTheOldTab() {
+        let plugin = PowerPlugin(host: SystemBarPluginTests.makeHost())
         expect(PowerPlugin.identifier == "power" && plugin.title == "Power" && plugin.systemImage == "bolt.heart", "the bundle keeps the tab's id, title and icon")
         expect(plugin.refreshInterval == 60 && plugin.sharedFeeds == [.processes], "the bundle keeps the tab's interval and its need for the process feed")
+    }
+}
+
+/// Captures every `(path, arguments)` pair a `@Sendable` runner closure saw, under a lock,
+/// mirroring `Recorder` in SystemBarPluginTests.swift — but keeping every call, since a single
+/// `collect()` reads pmset twice and both calls need checking.
+private final class PowerCallRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls: [(path: String, arguments: [String])] = []
+
+    func record(_ call: (path: String, arguments: [String])) {
+        lock.withLock { calls.append(call) }
+    }
+
+    var seen: [(path: String, arguments: [String])] {
+        lock.withLock { calls }
     }
 }

@@ -18,10 +18,8 @@ enum PowerCollector {
             batteryPercent: parsedBattery.percent,
             isCharging: parsedBattery.isCharging,
             sleepAssertions: parsedAssertions,
-            contributors: [],
             status: status.isEmpty ? "Power sample OK" : status.joined(separator: ", "),
-            health: SampleHealth(isOK: status.isEmpty),
-            lastUpdated: Date()
+            health: SampleHealth(isOK: status.isEmpty)
         )
     }
 

@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import SwiftUI
 import SystemBarKit
@@ -45,7 +44,7 @@ struct PowerPanel: View {
                 SectionTitle("Likely Contributors")
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(plugin.snapshot.contributors) { contributor in
+                        ForEach(plugin.contributors) { contributor in
                             EvidenceRow(label: contributor.name, value: "Activity", detail: contributor.evidence)
                         }
                     }

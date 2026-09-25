@@ -13,8 +13,6 @@ struct PowerSnapshot {
     var batteryPercent: Int?
     var isCharging: Bool?
     var sleepAssertions: [String] = []
-    var contributors: [PowerContributor] = []
     var status = "Waiting for power sample"
     var health = SampleHealth.degraded
-    var lastUpdated: Date?
 }

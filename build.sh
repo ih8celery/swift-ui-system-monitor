@@ -44,7 +44,9 @@ cp -f build/Frameworks/libSystemBarKit.dylib SystemBar.app/Contents/Frameworks/
 cp -f build/SDK/SystemBarKit.swiftinterface SystemBar.app/Contents/Resources/SDK/
 
 # 4. Every plugin directory, into the app's PlugIns folder, the way a user's would be built.
-for dir in Plugins/*/; do
+# The (N) glob qualifier means zero matches is an empty list, not the literal pattern, so a
+# checkout with no Plugins/ subdirectories yet does not abort the build.
+for dir in Plugins/*/(N); do
   name=$(basename "$dir")
   ./build-plugin.sh "$dir" "SystemBar.app/Contents/PlugIns/$name.bundle" build
 done
