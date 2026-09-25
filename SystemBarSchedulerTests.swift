@@ -4,7 +4,7 @@ import SwiftUI
 import SystemBarKit
 
 /// Tests for what runs a tab once it is loaded: the feeds it reads, the scheduler that calls
-/// its collect(), and the host's two shared samplers.
+/// its collect(), the host's two shared samplers, and the presenter that tells them what is showing.
 @MainActor
 struct SystemBarSchedulerTests {
     static func runAll() {
@@ -26,6 +26,10 @@ struct SystemBarSchedulerTests {
         testProcessSamplerGroupsRowsAndDropsTinyOnes()
         testProcessSamplerUsesTheFootprintOnlyForShownGroups()
         testProcessSamplerRunsPsThroughTheRunner()
+        testPresenterRunsNothingWhileTheWindowIsClosed()
+        testPresenterSwitchRunsOnlyTheShownTabsSamplers()
+        testPresenterPausesEverythingForAnErrorTab()
+        testPresenterStopsEverythingWhenTheWindowCloses()
     }
 
     // MARK: - Feed
@@ -262,6 +266,85 @@ struct SystemBarSchedulerTests {
         samplers.update(isVisible: false, feeds: [])
     }
 
+    // MARK: - Presenter
+
+    /// A presenter over a fast scheduler and fast samplers, whose collectors count their calls.
+    private static func makeTestPresenter(fast: CallCounter, processes: CallCounter) -> (TabPresenter, HostSamplers) {
+        let samplers = makeTestSamplers(fast: fast, processes: processes)
+        return (TabPresenter(scheduler: makeTestScheduler(), samplers: samplers), samplers)
+    }
+
+    private static func testPresenterRunsNothingWhileTheWindowIsClosed() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let (presenter, samplers) = makeTestPresenter(fast: fast, processes: processes)
+        let tab = DeclaringTab(feeds: [.processes, .fastStats])
+        presenter.present(plugin: tab, isVisible: false)
+        spinRunLoop(for: 0.2)
+        expect(tab.count == 0 && fast.count == 0 && processes.count == 0,
+               "a closed window collects nothing and samples nothing, got collect \(tab.count) fast \(fast.count) processes \(processes.count)")
+        expect(samplers.running.isEmpty, "and no sampler is left running, got \(samplers.running)")
+        expect(tab.visibility == [false], "the tab is told it is hidden, got \(tab.visibility)")
+    }
+
+    private static func testPresenterSwitchRunsOnlyTheShownTabsSamplers() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let (presenter, samplers) = makeTestPresenter(fast: fast, processes: processes)
+        let first = DeclaringTab(feeds: [.processes])
+        let second = DeclaringTab(feeds: [])
+
+        presenter.present(plugin: first, isVisible: true)
+        waitUntil { first.count >= 1 && processes.count >= 1 }
+        expect(samplers.running == [.fastStats, .processes], "a tab that declares the process feed gets both samplers, got \(samplers.running)")
+
+        presenter.switching(from: first, to: second)
+        expect(samplers.running == [.fastStats], "switching to a tab that declares nothing stops ps and keeps the 1-second sampler, got \(samplers.running)")
+        expect(first.visibility == [true, false] && second.visibility == [true], "each tab is told when it is shown and hidden, got \(first.visibility) and \(second.visibility)")
+        waitUntil { second.count >= 1 }
+        spinRunLoop(for: 0.1)
+        let firstAfter = first.count
+        let processesAfter = processes.count
+        spinRunLoop(for: 0.2)
+        expect(first.count == firstAfter, "the tab switched away from is no longer collected, got \(first.count - firstAfter) more")
+        expect(processes.count == processesAfter, "and ps no longer runs, got \(processes.count - processesAfter) more")
+        expect(second.count >= 2, "the shown tab is collected on its interval, got \(second.count)")
+        presenter.present(plugin: second, isVisible: false)
+    }
+
+    private static func testPresenterPausesEverythingForAnErrorTab() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let (presenter, samplers) = makeTestPresenter(fast: fast, processes: processes)
+        let tab = DeclaringTab(feeds: [.processes])
+        presenter.present(plugin: tab, isVisible: true)
+        waitUntil { tab.count >= 1 }
+
+        presenter.switching(from: tab, to: nil)
+        expect(samplers.running.isEmpty, "an error tab has nothing to feed, so no sampler runs, got \(samplers.running)")
+        spinRunLoop(for: 0.1)
+        let collected = tab.count
+        spinRunLoop(for: 0.2)
+        expect(tab.count == collected, "and the tab switched away from stops, got \(tab.count - collected) more")
+        expect(tab.visibility == [true, false], "it is told it is hidden, got \(tab.visibility)")
+    }
+
+    private static func testPresenterStopsEverythingWhenTheWindowCloses() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let (presenter, samplers) = makeTestPresenter(fast: fast, processes: processes)
+        let tab = DeclaringTab(feeds: [.processes])
+        presenter.present(plugin: tab, isVisible: true)
+        waitUntil { tab.count >= 1 && fast.count >= 1 && processes.count >= 1 }
+
+        presenter.present(plugin: tab, isVisible: false)
+        expect(samplers.running.isEmpty, "closing the window stops both samplers, got \(samplers.running)")
+        spinRunLoop(for: 0.1)
+        let counts = (tab.count, fast.count, processes.count)
+        spinRunLoop(for: 0.2)
+        expect((tab.count, fast.count, processes.count) == counts, "and nothing runs after it closes, got \((tab.count, fast.count, processes.count)) after \(counts)")
+    }
+
     // MARK: - Fast stats
 
     private static func testFastStatsSamplerTurnsCountersIntoRates() {
@@ -426,4 +509,38 @@ final class CallCounter: @unchecked Sendable {
     }
 
     var count: Int { lock.withLock { calls } }
+}
+
+/// A tab that declares whatever feeds a test gives it, counts its collects, and records each
+/// visibility change it is told about, in order.
+final class DeclaringTab: TabPlugin {
+    static let identifier = "declaring"
+    let title = "Declaring"
+    let systemImage = "list.bullet"
+    let accent = Color.gray
+    let refreshInterval: TimeInterval = 0.05
+    let sharedFeeds: Set<SharedFeed>
+    private let lock = NSLock()
+    private var collects = 0
+    /// Main thread only: the presenter calls visibilityChanged there.
+    private(set) var visibility: [Bool] = []
+
+    init(host: HostServices) {
+        sharedFeeds = []
+    }
+
+    init(feeds: Set<SharedFeed>) {
+        sharedFeeds = feeds
+    }
+
+    func collect() {
+        lock.withLock { collects += 1 }
+    }
+
+    func visibilityChanged(isVisible: Bool) {
+        visibility = visibility + [isVisible]
+    }
+
+    var count: Int { lock.withLock { collects } }
+    @MainActor func makeView() -> AnyView { AnyView(Text("declaring")) }
 }

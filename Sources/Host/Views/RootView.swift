@@ -6,8 +6,7 @@ import SystemBarKit
 struct RootView: View {
     let tabs: [LoadedTab]
     let configPath: String
-    let scheduler: PluginScheduler
-    let samplers: HostSamplers
+    let presenter: TabPresenter
     /// An index, not an id: a failed tab has no id, and two failures may share a location.
     @State private var selection = 0
     @State private var isRelaunching = false
@@ -27,14 +26,13 @@ struct RootView: View {
         .background(Palette.background)
         .foregroundStyle(Palette.foreground)
         .onAppear {
-            present(index: selection, isVisible: true)
+            presenter.present(plugin: loadedPlugin(at: selection), isVisible: true)
         }
         .onDisappear {
-            present(index: selection, isVisible: false)
+            presenter.present(plugin: loadedPlugin(at: selection), isVisible: false)
         }
         .onChange(of: selection) { previous, current in
-            loadedPlugin(at: previous)?.visibilityChanged(isVisible: false)
-            present(index: current, isVisible: true)
+            presenter.switching(from: loadedPlugin(at: previous), to: loadedPlugin(at: current))
         }
     }
 
@@ -113,18 +111,5 @@ struct RootView: View {
             Relauncher.relaunch(log: { NSLog("%@", $0) })
             DispatchQueue.main.async { isRelaunching = false }
         }
-    }
-
-    /// Tells the scheduler and the host samplers what the selected tab needs. An error tab or an
-    /// empty list needs nothing.
-    private func present(index: Int, isVisible: Bool) {
-        let plugin = loadedPlugin(at: index)
-        plugin?.visibilityChanged(isVisible: isVisible)
-        if isVisible, let plugin {
-            scheduler.show(plugin)
-        } else {
-            scheduler.hide()
-        }
-        samplers.update(isVisible: isVisible && plugin != nil, feeds: plugin?.sharedFeeds ?? [])
     }
 }

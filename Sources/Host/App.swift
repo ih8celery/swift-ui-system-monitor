@@ -10,8 +10,7 @@ struct SystemBarApp: App {
     private let configPath: String
     private let processes = Feed(initial: ProcessSummary())
     private let fastStats = Feed(initial: FastStatsSnapshot())
-    private let scheduler = PluginScheduler()
-    private let samplers: HostSamplers
+    private let presenter: TabPresenter
 
     init() {
         let store = PluginConfigStore.standard()
@@ -22,7 +21,10 @@ struct SystemBarApp: App {
             runner: ProcessRunner.run,
             log: { NSLog("%@", $0) }
         )
-        samplers = HostSamplers.standard(processes: processes, fastStats: fastStats)
+        presenter = TabPresenter(
+            scheduler: PluginScheduler(),
+            samplers: HostSamplers.standard(processes: processes, fastStats: fastStats)
+        )
         let source = BundleTabSource.standard()
         let loaded = TabLoader.load(store: store, source: source, host: host)
         tabs = loaded
@@ -38,7 +40,7 @@ struct SystemBarApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            RootView(tabs: tabs, configPath: configPath, scheduler: scheduler, samplers: samplers)
+            RootView(tabs: tabs, configPath: configPath, presenter: presenter)
         } label: {
             Image(systemName: "percent")
         }
