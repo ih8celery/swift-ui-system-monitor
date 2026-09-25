@@ -14,7 +14,7 @@ There is no package manager. `build.sh` and `test.sh` source `toolchain.env` for
 
 ## Architecture Overview
 
-SystemBar is a single-file-per-concern SwiftUI menu bar app. `Sources/UnifiedMonitor.swift` plus its `UnifiedMonitor+*.swift` extensions collect system stats (CPU, memory, disk, network, power, developer processes); `Sources/Views/` renders them as tabs behind one `MenuBarExtra` icon.
+SystemBar is a single-file-per-concern SwiftUI menu bar app. `Sources/Host/UnifiedMonitor.swift` plus its `UnifiedMonitor+*.swift` extensions collect system stats (CPU, memory, disk, network, developer processes); `Sources/Host/Views/` renders them as tabs behind one `MenuBarExtra` icon. Power is no longer collected here — it is a plugin, in `Plugins/Power/`.
 
 The tab bar is being converted to plugins (spec: `docs/one-page/systembar-tab-plugins.md`). `Sources/Kit/` is the SDK: the `TabPlugin` contract, `HostServices` with its `processes` and `fastStats` feeds, `ProcessRunner`, the shared models and the shared views, all public and built as a dylib whose `.swiftinterface` ships in the app. `Sources/Host/` is the app: it reads `~/Library/Application Support/SystemBar/plugins.json`, resolves each entry to a class (a bundle in `Contents/PlugIns/`, a bundle at a path, or one of the five tabs still compiled in through `BuiltinTabs.swift`), constructs it after the duplicate-id check, and runs its `collect()` on its own queue while visible (`PluginScheduler`). `Plugins/Power/` is the first real bundle. `RootView` renders the loaded list and never names a tab. `UnifiedMonitor.shared` still samples for the compiled-in tabs and feeds the process summary to plugins; it is deleted in Stage 3.
 
@@ -24,7 +24,7 @@ No SPM — built directly via `swiftc` in `build.sh`. Keep it that way unless th
 
 Subprocesses go through `ProcessRunner.run` in `Sources/Kit/` (plugins reach it as `HostServices.run`; `UnifiedMonitor.runProcess` is a thin forwarder that goes away with the class), which launches an explicit executable path with an argument array and never invokes a shell. Keep it that way — this app reads process and network state, so shell interpolation would be a genuine hazard rather than a style nit.
 
-Sampling intervals live together in `MonitorSamplingPlan` in `Sources/Models.swift`. The README documents them, so changing one means updating both.
+A plugin's sampling interval is its own `refreshInterval` — Power's 60-second interval lives in `PowerPlugin.refreshInterval` (`Plugins/Power/Sources/PowerPlugin.swift`). The still-compiled-in tabs' intervals live together in `MonitorSamplingPlan` in `Sources/Host/Models.swift`. The README documents both, so changing either means updating both.
 
 The config parser is deliberately strict: a key it does not recognize, or a value of the wrong type, is an error that names its place in the file. So adding a new config key needs a parser change and a test for it, not just a new field on the struct. Tests must never touch the real `~/Library/Application Support/SystemBar/`: `PluginConfigStore` takes the full file URL, `standard()` derives it from `SYSTEMBAR_PLUGINS_FILE` or Application Support, and the tests build their own path inside a temporary folder.
 
