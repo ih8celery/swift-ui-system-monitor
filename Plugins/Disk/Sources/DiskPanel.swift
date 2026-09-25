@@ -4,7 +4,7 @@ import SwiftUI
 import SystemBarKit
 
 struct DiskPanel: View {
-    @ObservedObject var monitor: UnifiedMonitor
+    @ObservedObject var plugin: DiskPlugin
 
     var body: some View {
         HStack(spacing: 0) {
@@ -16,23 +16,23 @@ struct DiskPanel: View {
                     .minimumScaleFactor(0.7)
 
                 HStack(spacing: 10) {
-                    StatPill(label: "Purgeable", value: byteString(monitor.disk.boot?.purgeable ?? 0))
-                    StatPill(label: "Snapshots", value: "\(monitor.disk.localSnapshotCount)")
-                    StatPill(label: "Cleanup", value: byteString(monitor.disk.reclaimableTotal))
+                    StatPill(label: "Purgeable", value: byteString(plugin.snapshot.boot?.purgeable ?? 0))
+                    StatPill(label: "Snapshots", value: "\(plugin.snapshot.localSnapshotCount)")
+                    StatPill(label: "Cleanup", value: byteString(plugin.snapshot.reclaimableTotal))
                 }
 
-                if let boot = monitor.disk.boot {
+                if let boot = plugin.snapshot.boot {
                     CapacityBar(volume: boot)
                         .frame(height: 34)
 
                     CapacityLegend(volume: boot)
                 }
 
-                if !monitor.disk.otherVolumes.isEmpty {
+                if !plugin.snapshot.otherVolumes.isEmpty {
                     SectionTitle("Other Volumes")
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(monitor.disk.otherVolumes) { volume in
+                            ForEach(plugin.snapshot.otherVolumes) { volume in
                                 EvidenceRow(
                                     label: volume.name,
                                     value: byteString(volume.importantAvailable),
@@ -45,9 +45,9 @@ struct DiskPanel: View {
 
                 Spacer(minLength: 0)
 
-                Text(monitor.disk.status)
+                Text(plugin.snapshot.status)
                     .font(.caption)
-                    .foregroundStyle(monitor.disk.health == .ok ? .secondary : Palette.warning)
+                    .foregroundStyle(plugin.snapshot.health == .ok ? .secondary : Palette.warning)
             }
             .padding(18)
             .frame(width: 430)
@@ -60,23 +60,23 @@ struct DiskPanel: View {
                     SectionTitle("Reclaimable Space")
                     Spacer()
                     Button {
-                        monitor.scanDiskHogs(force: true)
+                        plugin.scanHogs(force: true)
                     } label: {
-                        if monitor.disk.isScanningHogs {
+                        if plugin.snapshot.isScanningHogs {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
                     .buttonStyle(.borderless)
-                    .disabled(monitor.disk.isScanningHogs)
+                    .disabled(plugin.snapshot.isScanningHogs)
                     .help("Rescan reclaimable paths")
                 }
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(monitor.disk.hogs) { hog in
-                            DiskHogRow(hog: hog, fraction: Double(hog.size) / Double(monitor.disk.maxHogSize))
+                        ForEach(plugin.snapshot.hogs) { hog in
+                            DiskHogRow(hog: hog, fraction: Double(hog.size) / Double(plugin.snapshot.maxHogSize))
                         }
                     }
                 }
@@ -95,20 +95,20 @@ struct DiskPanel: View {
     }
 
     private var headlineText: String {
-        guard let boot = monitor.disk.boot else { return "Reading volumes" }
+        guard let boot = plugin.snapshot.boot else { return "Reading volumes" }
         return "\(byteString(boot.importantAvailable)) Available"
     }
 
     private var headlineColor: Color {
-        guard let boot = monitor.disk.boot else { return .secondary }
+        guard let boot = plugin.snapshot.boot else { return .secondary }
         if boot.availableRatio > 0.20 { return Palette.good }
         if boot.availableRatio > 0.10 { return Palette.caution }
         return Palette.critical
     }
 
     private func hogFooterText(now: Date) -> String {
-        guard let lastScan = monitor.disk.lastHogScan else { return monitor.disk.hogStatus }
-        return "\(monitor.disk.hogStatus) - \(relativeTimeString(lastScan, now: now)) ago"
+        guard let lastScan = plugin.snapshot.lastHogScan else { return plugin.snapshot.hogStatus }
+        return "\(plugin.snapshot.hogStatus) - \(relativeTimeString(lastScan, now: now)) ago"
     }
 }
 

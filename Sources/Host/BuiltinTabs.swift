@@ -22,7 +22,6 @@ struct BuiltinTabSource: TabSource {
     static let builtins: [(name: String, type: TabPlugin.Type)] = [
         ("Dev.bundle", DevTab.self),
         ("Memory.bundle", MemoryTab.self),
-        ("Disk.bundle", DiskTab.self),
         ("Network.bundle", NetworkTab.self),
         ("CPU.bundle", CPUTab.self),
     ]
@@ -76,20 +75,6 @@ final class MemoryTab: MonitorBackedTab {
     init(host: HostServices) {}
     func collect() {}
     @MainActor func makeView() -> AnyView { AnyView(MemoryPanel(monitor: .shared)) }
-}
-
-final class DiskTab: MonitorBackedTab {
-    static let identifier = "disk"
-    let title = "Disk"
-    let systemImage = "internaldrive"
-    let accent = Palette.cyan
-    let refreshInterval = MonitorSamplingPlan.diskRefreshInterval
-    let sharedFeeds: Set<SharedFeed> = []
-    let monitorMode = MonitorMode.disk
-
-    init(host: HostServices) {}
-    func collect() {}
-    @MainActor func makeView() -> AnyView { AnyView(DiskPanel(monitor: .shared)) }
 }
 
 final class NetworkTab: MonitorBackedTab {

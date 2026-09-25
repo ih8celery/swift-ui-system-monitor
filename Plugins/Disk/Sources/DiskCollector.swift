@@ -1,79 +1,42 @@
-import AppKit
 import Darwin
 import Foundation
-import SwiftUI
 import SystemBarKit
 
-extension UnifiedMonitor {
-    func collectDisk() {
-        guard !isCollectingDisk else { return }
-        isCollectingDisk = true
-        defer { isCollectingDisk = false }
+/// The Disk tab's two samplers: a cheap volume read every 30 seconds, and a `du` scan of the
+/// usual space hogs at most every ten minutes. The volume read runs on the plugin's queue. The
+/// scan gets its own serial queue because it can run for minutes, and sharing would freeze the
+/// volume read behind it; that queue alone touches `lastScan`.
+final class DiskCollector: @unchecked Sendable {
+    private let host: HostServices
+    private let hogQueue = DispatchQueue(label: "systembar.disk.hogs", qos: .utility)
+    private var lastScan = Date.distantPast
 
-        let sampleDate = Date()
-        let volumes = Self.collectDiskVolumes()
-        let snapshotCount = Self.collectLocalSnapshotCount()
-        let status = volumes.isEmpty ? "No readable volumes found" : "Disk sample OK"
-        let health = SampleHealth(isOK: !volumes.isEmpty)
+    init(host: HostServices) {
+        self.host = host
+    }
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            var snapshot = self.diskSnapshot
-            snapshot.volumes = volumes
-            snapshot.localSnapshotCount = snapshotCount
-            snapshot.status = status
-            snapshot.health = health
-            snapshot.lastUpdated = sampleDate
-            self.diskSnapshot = snapshot
+    func readVolumes(at date: Date = Date()) -> DiskVolumeReading {
+        DiskVolumeReading(volumes: Self.collectDiskVolumes(), localSnapshotCount: collectLocalSnapshotCount(), sampledAt: date)
+    }
+
+    /// Starts a hog scan if one is due. Every volume read asks; the rescan button passes
+    /// `force: true`. A scan runs inside one block on the serial queue, so a request made while
+    /// one is running waits, then finds the scan not due. `publish` is called on the scan queue.
+    func scanHogsIfDue(force: Bool, publish: @escaping (DiskHogUpdate) -> Void) {
+        hogQueue.async { [self] in
+            guard Self.isDiskHogScanDue(force: force, lastScan: lastScan, now: Date(), interval: DiskSampling.hogRefreshInterval) else { return }
+            lastScan = Date()
+            publish(.started)
+            // A full scan can run for minutes, so each tree lands in the list as it finishes
+            // rather than leaving the panel empty until the last one is done.
+            let result = collectDiskHogs { publish(.progress($0)) }
+            publish(.finished(hogs: result.hogs, status: result.status, at: Date()))
         }
-
-        scanDiskHogs()
     }
 
     static func isDiskHogScanDue(force: Bool, lastScan: Date, now: Date, interval: TimeInterval) -> Bool {
         force || now.timeIntervalSince(lastScan) >= interval
     }
-
-    /// Walks the candidate trees with `du`. Every capacity read calls this; the interval check
-    /// happens on diskHogQueue so the scan's own bookkeeping is never read from another queue.
-    /// The Disk tab's rescan button passes `force: true`.
-    func scanDiskHogs(force: Bool = false) {
-        diskHogQueue.async { [weak self] in
-            guard let self else { return }
-            guard !self.isScanningDiskHogs else { return }
-            guard Self.isDiskHogScanDue(
-                force: force,
-                lastScan: self.lastDiskHogScan,
-                now: Date(),
-                interval: MonitorSamplingPlan.diskHogRefreshInterval
-            ) else { return }
-
-            self.isScanningDiskHogs = true
-            self.lastDiskHogScan = Date()
-
-            DispatchQueue.main.async {
-                self.diskSnapshot.isScanningHogs = true
-                self.diskSnapshot.hogStatus = "Measuring reclaimable paths"
-            }
-
-            // A full scan can run for minutes, so each tree lands in the list as it finishes
-            // rather than leaving the panel empty until the last one is done.
-            let result = Self.collectDiskHogs { measuredSoFar in
-                DispatchQueue.main.async { self.diskSnapshot.hogs = measuredSoFar }
-            }
-            self.isScanningDiskHogs = false
-
-            DispatchQueue.main.async {
-                var snapshot = self.diskSnapshot
-                snapshot.hogs = result.hogs
-                snapshot.hogStatus = result.status
-                snapshot.isScanningHogs = false
-                snapshot.lastHogScan = Date()
-                self.diskSnapshot = snapshot
-            }
-        }
-    }
-
 
     static func collectDiskVolumes() -> [DiskVolume] {
         let keys: [URLResourceKey] = [
@@ -118,10 +81,10 @@ extension UnifiedMonitor {
         }
     }
 
-    static func collectLocalSnapshotCount() -> Int {
-        let result = runProcess(path: "/usr/bin/tmutil", arguments: ["listlocalsnapshots", "/"])
+    func collectLocalSnapshotCount() -> Int {
+        let result = host.run(path: "/usr/bin/tmutil", arguments: ["listlocalsnapshots", "/"])
         guard result.status == 0 else { return 0 }
-        return parseLocalSnapshotCount(result.output)
+        return Self.parseLocalSnapshotCount(result.output)
     }
 
     /// Output is a header line followed by one identifier per snapshot. Both Time Machine and
@@ -146,21 +109,18 @@ extension UnifiedMonitor {
         }
     }
 
-    static func collectDiskHogs(onProgress: ([DiskHog]) -> Void = { _ in }) -> (hogs: [DiskHog], status: String) {
+    func collectDiskHogs(onProgress: ([DiskHog]) -> Void = { _ in }) -> (hogs: [DiskHog], status: String) {
         let start = Date()
-        return measureDiskHogs(
+        let host = self.host
+        return Self.measureDiskHogs(
             candidates: DiskHogCandidate.all,
-            homeDirectory: NSHomeDirectory(),
-            budget: MonitorSamplingPlan.diskHogScanBudget,
+            homeDirectory: host.homeDirectory,
+            budget: DiskSampling.hogScanBudget,
             pathExists: { FileManager.default.fileExists(atPath: $0) },
             elapsed: { Date().timeIntervalSince(start) },
             measure: { path in
                 // -x keeps du on one filesystem; -k normalises to KiB across macOS versions.
-                runProcess(
-                    path: "/usr/bin/du",
-                    arguments: ["-s", "-k", "-x", path],
-                    timeout: MonitorSamplingPlan.diskHogPathTimeout
-                )
+                host.run(path: "/usr/bin/du", arguments: ["-s", "-k", "-x", path], timeout: DiskSampling.hogPathTimeout)
             },
             onProgress: onProgress
         )
@@ -237,11 +197,4 @@ extension UnifiedMonitor {
         if unmeasured > 0 { parts.append("\(unmeasured) not measured, scan budget spent") }
         return parts.joined(separator: ", ")
     }
-
-    // Reading stdout to EOF and then stderr to EOF deadlocks if the child
-    // fills the unread pipe's buffer first: it blocks on that write while
-    // this call blocks on the other read. Draining both pipes concurrently
-    // via readabilityHandler, plus a wall-clock timeout that terminates a
-    // child which never exits, closes both hangs.
-
 }

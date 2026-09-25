@@ -7,7 +7,7 @@ import SystemBarKit
 @MainActor
 struct SystemBarLoaderTests {
     static func runAll() {
-        testLoaderWritesTheDefaultAndLoadsFiveTabsAndOneErrorOnFirstRun()
+        testLoaderWritesTheDefaultAndLoadsWhatTheSourceKnowsOnFirstRun()
         testLoaderTurnsAnUnparseableFileIntoOneErrorTab()
         testLoaderReportsNothingForAnEmptyList()
         testCatalogKeepsOrderAndSkipsDisabledEntries()
@@ -40,13 +40,14 @@ struct SystemBarLoaderTests {
 
     // MARK: - Loader
 
-    private static func testLoaderWritesTheDefaultAndLoadsFiveTabsAndOneErrorOnFirstRun() {
+    private static func testLoaderWritesTheDefaultAndLoadsWhatTheSourceKnowsOnFirstRun() {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         let loaded = TabLoader.load(store: store, source: BuiltinTabSource(), host: makeHost())
-        expect(loaded.map(\.title) == ["Error", "Dev", "Memory", "Disk", "Network", "CPU"],
-               "a fresh file lists every default: the five compiled-in tabs load, and Power, now a bundle, cannot come from the built-in table so it is the one error tab, got \(loaded.map(\.title))")
+        let expected = DefaultPlugins.names.map { BuiltinTabSource.types[$0] != nil }
+        expect(loaded.map { $0.plugin != nil } == expected,
+               "a fresh file lists all six defaults in order; each tab still compiled in loads, and each that is now a bundle cannot come from the built-in table so it is an error tab in its place, got \(loaded.map(\.title))")
         if case let .failed(_, reason)? = loaded.first {
             expect(reason.contains("Power.bundle"), "the failure names the entry, got \(reason)")
         }
@@ -171,9 +172,9 @@ struct SystemBarLoaderTests {
         let config = PluginConfig.builtins(named: DefaultPlugins.names)
         let tabs = TabCatalog.build(config: config, source: BuiltinTabSource(), host: makeHost())
         let plugins = tabs.compactMap(\.plugin)
-        expect(plugins.count == 5, "all five compiled-in tabs load, got \(PluginListReport.lines(for: tabs))")
+        expect(plugins.count == BuiltinTabSource.builtins.count, "every compiled-in tab loads, got \(PluginListReport.lines(for: tabs))")
         let ids = Set(plugins.map { type(of: $0).identifier })
-        expect(ids.count == 5, "the five built-ins have five different ids, got \(ids)")
+        expect(ids.count == BuiltinTabSource.builtins.count, "the built-ins have different ids, got \(ids)")
         for plugin in plugins {
             guard let backed = plugin as? MonitorBackedTab else {
                 expect(false, "\(plugin.title) must say which MonitorMode drives its sampling until it owns a collector")
@@ -191,7 +192,7 @@ struct SystemBarLoaderTests {
             _ = try BuiltinTabSource().resolve(entry("Weather.bundle"))
             expect(false, "an unknown name throws")
         } catch {
-            expect("\(error)".contains("Weather.bundle") && "\(error)".contains("CPU.bundle"),
+            expect("\(error)".contains("Weather.bundle") && BuiltinTabSource.types.keys.allSatisfy { "\(error)".contains($0) },
                    "the error names the bad name and lists the real ones, got: \(error)")
         }
     }

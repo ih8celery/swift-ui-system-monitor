@@ -13,7 +13,6 @@ final class UnifiedMonitor: ObservableObject {
     @Published var processSummary = ProcessSummary()
     @Published var networkSummary = NetworkSummary()
     @Published var capacitySnapshot = CapacitySnapshot()
-    @Published var diskSnapshot = DiskSnapshot()
     @Published var isSpeedTestRunning = false
     @Published var speedTestStatus = "Ready"
     @Published var speedTestHealth = SampleHealth.ok
@@ -28,19 +27,11 @@ final class UnifiedMonitor: ObservableObject {
     private let memoryQueue = DispatchQueue(label: "systembar.monitor.memory", qos: .utility)
     private let networkQueue = DispatchQueue(label: "systembar.monitor.network", qos: .utility)
     private let developerQueue = DispatchQueue(label: "systembar.monitor.developer", qos: .utility)
-    let diskQueue = DispatchQueue(label: "systembar.monitor.disk", qos: .utility)
-    /// The hog scan gets its own queue: it can run for minutes, and sharing diskQueue would
-    /// stall the 30s capacity read behind it — freezing the rest of the Disk tab. It also
-    /// owns `isScanningDiskHogs` and `lastDiskHogScan`, which are touched from nowhere else.
-    let diskHogQueue = DispatchQueue(label: "systembar.monitor.diskhogs", qos: .utility)
     private var timers: [DispatchSourceTimer] = []
     private var feedSinks: [AnyCancellable] = []
     var isCollectingMemory = false
     var isCollectingNetwork = false
     var isCollectingCapacity = false
-    var isCollectingDisk = false
-    var isScanningDiskHogs = false
-    var lastDiskHogScan = Date.distantPast
     var lastPressureRefresh = Date.distantPast
     var cachedPressure: Double?
     var cachedGPU = GPUSnapshot()
@@ -72,7 +63,6 @@ final class UnifiedMonitor: ObservableObject {
     var networkStatus: String { networkSummary.status }
     var networkHealth: SampleHealth { networkSummary.health }
     var capacity: CapacitySnapshot { capacitySnapshot }
-    var disk: DiskSnapshot { diskSnapshot }
 
     /// The compiled-in tabs reach the one monitor through this until each owns its own
     /// collector. Deleted with the class.
@@ -83,7 +73,6 @@ final class UnifiedMonitor: ObservableObject {
             makeTimer(every: MonitorSamplingPlan.memoryRefreshInterval, leeway: .seconds(1), job: .memory),
             makeTimer(every: MonitorSamplingPlan.networkRefreshInterval, leeway: .seconds(5), job: .network),
             makeTimer(every: MonitorSamplingPlan.capacityRefreshInterval, leeway: .seconds(10), job: .capacity),
-            makeTimer(every: MonitorSamplingPlan.diskRefreshInterval, leeway: .seconds(5), job: .disk),
         ]
     }
 
@@ -142,7 +131,6 @@ final class UnifiedMonitor: ObservableObject {
         case .memory: memoryQueue.async { [weak self] in self?.collectMemory() }
         case .network: networkQueue.async { [weak self] in self?.collectNetwork() }
         case .capacity: developerQueue.async { [weak self] in self?.collectCapacity() }
-        case .disk: diskQueue.async { [weak self] in self?.collectDisk() }
         }
     }
 }
