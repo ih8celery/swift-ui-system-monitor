@@ -4,7 +4,9 @@ import Foundation
 /// process table — CPU to explain a tapped group, Dev to trace work to projects — and two
 /// bundles can share code only through the SDK.
 public struct PidRecord: Sendable {
+    /// The process's id.
     public let pid: Int32
+    /// The id of the process that started it; 1 (launchd) once its real parent has exited.
     public let ppid: Int32
     /// Raw ps pcpu: percent of a single core, so a busy multi-threaded process can exceed 100.
     public let cpu: Double
@@ -24,6 +26,7 @@ public struct PidRecord: Sendable {
     /// right as `path`, so see its note for the fallback.
     public var name: String { URL(fileURLWithPath: path).lastPathComponent }
 
+    /// Builds a record by hand, e.g. for a test; `ProcessTable.parse` makes the real ones.
     public init(pid: Int32, ppid: Int32, cpu: Double, memory: UInt64, etime: String, path: String, args: String) {
         self.pid = pid
         self.ppid = ppid

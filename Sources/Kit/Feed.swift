@@ -9,6 +9,7 @@ public final class Feed<Value: Sendable>: @unchecked Sendable {
     private var current: Value
     private let subject = PassthroughSubject<Value, Never>()
 
+    /// A feed that holds `initial` until the first reading arrives.
     public init(initial: Value) {
         current = initial
     }

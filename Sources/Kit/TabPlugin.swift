@@ -21,8 +21,12 @@ public enum SharedFeed: Hashable, Sendable {
 public protocol TabPlugin: AnyObject {
     /// Stable, unique, lowercase. Two loaded plugins sharing one is an error the host shows.
     static var identifier: String { get }
+    /// The tab's name, shown in the tab picker, e.g. "Network".
     var title: String { get }
+    /// The SF Symbols name of the tab's icon, shown in the tab picker and the window header.
     var systemImage: String { get }
+    /// The tab's colour: the host tints the header icon with it while this tab is selected. One
+    /// of the `Palette` colours keeps it in step with the other tabs.
     var accent: Color { get }
     /// How often the host calls `collect()` while this tab is showing. A `collect()` that runs
     /// longer than the interval is not queued up again; missed ticks merge into the next call.
@@ -42,6 +46,9 @@ public protocol TabPlugin: AnyObject {
     @MainActor func makeView() -> AnyView
 }
 
+/// Defaults, so a plugin implements only what it needs and a requirement added to the protocol
+/// later does not stop an older bundle from loading.
 public extension TabPlugin {
+    /// Does nothing: most plugins need no notice beyond `collect()` starting and stopping.
     @MainActor func visibilityChanged(isVisible: Bool) {}
 }
