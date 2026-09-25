@@ -82,9 +82,9 @@ if [[ ! -f "$tmp/fresh/plugins.json" ]]; then
 fi
 echo "Fresh-file check passed: a new plugins.json loads all six tabs from the app's bundles"
 
-# The old central sampler and the compiled-in tab table are gone; nothing may bring their names
-# back. The brackets keep this pattern from matching its own line in this file.
-deleted_names='Unified[M]onitor|Monitor[M]ode|Monitor[S]amplingPlan|Monitor[B]ackedTab|Builtin[T]abSource|Host[T]abSource'
+# The old central sampler, its job type, the compiled-in tab table and the five adapter tabs are gone;
+# nothing may bring their names back. The brackets keep this pattern from matching its own line.
+deleted_names='Unified[M]onitor|Monitor[M]ode|Monitor[J]ob|Monitor[S]amplingPlan|Monitor[B]ackedTab|Builtin[T]abSource|Host[T]abSource|(Dev|Memory|Disk|Network|CPU)[T]ab([^A-Za-z]|$)'
 found_names=$(grep -rnE "$deleted_names" Sources Plugins *.swift *.sh) && grep_status=0 || grep_status=$?
 if (( grep_status == 0 )); then
   echo "Name check failed: a deleted name is back:" >&2
