@@ -176,10 +176,11 @@ What the host hands every plugin:
 ```swift
 public final class HostServices {
     /// The only way built-in plugins run a subprocess: explicit path, argument array, no shell.
-    /// `environment` exists because an app started by launchd has almost no PATH.
+    /// `environment` exists because an app started by launchd has almost no PATH. A non-nil
+    /// `environment` replaces the child's inherited environment entirely; it does not merge.
     public func run(path: String, arguments: [String],
                     environment: [String: String]? = nil,
-                    timeout: TimeInterval = 15) -> CommandOutput
+                    timeout: TimeInterval = ProcessRunner.defaultTimeout) -> CommandOutput
     /// Latest value plus a publisher. Reading one does not start the sampler; declaring it
     /// in `sharedFeeds` does.
     public let processes: Feed<ProcessSummary>
@@ -257,9 +258,20 @@ build.sh          builds the Kit, the host, and every directory under Plugins/
 build-plugin.sh   <source dir> <output .bundle> [<app or SDK dir>]; what a user runs
 ```
 
-Still no package manager. `build.sh` grows from one `swiftc` call to one per
-part, and `build-plugin.sh` is the one call a user needs, pointed at the SDK
-directory inside a built app.
+Still no package manager. `toolchain.env` holds the `-target`, `-swift-version`,
+and `-package-name` that `build.sh` and `test.sh` both source, so the SDK, the
+app, and the tests always agree. `build.sh` grows from one `swiftc` call to one
+per part: `Sources/Kit` becomes the dylib, `Sources/Host` becomes the app, and
+each `Plugins/<Name>/` becomes a bundle via `build-plugin.sh`. The app ships
+only the SDK's textual interface at `Contents/Resources/SDK/SystemBarKit.swiftinterface`,
+not a binary `.swiftmodule`; `build/SDK/` keeps the binary module the app and
+the tests build against directly. `build-plugin.sh <plugin dir> <out.bundle>
+[SystemBar.app | build dir]` is the one call a user needs: it reads the
+`-target` and `-swift-version` that a built app's or build directory's
+`.swiftinterface` was made with, builds against the SDK and frameworks under
+that directory with its own module cache under `$TMPDIR`, never passes
+`-package-name` (a plugin only ever sees the SDK's public interface), and
+exits 64 on a usage error.
 
 `UnifiedMonitor` is deleted when the last tab moves out. Each
 `UnifiedMonitor+X.swift` and `Views/XPanel.swift` pair becomes `Plugins/X/`.
@@ -273,21 +285,27 @@ shell" subprocess rule is now `HostServices.run`.
 
 Tests are written first at every stage, as the project's rules require.
 
-- **One in-process test binary, as now.** `test.sh` compiles the Kit, the host
-  without its `@main`, every plugin's `Sources/` and `Tests/`, and the shared
-  `expect` helper into one binary. The existing capacity and performance tests
-  move into `Plugins/Dev/Tests/` and the relevant plugin's `Tests/` and keep
-  running unchanged. The dylib boundary is deliberately absent here; these
-  tests are about behaviour.
+- **One in-process test binary, as now.** `test.sh` links the SDK dylib that
+  `build.sh` just built and compiles the host, every plugin's `Sources/` and
+  `Tests/`, and the test files into one binary, `build/SystemBarTests`. The
+  existing capacity and performance tests move into `Plugins/Dev/Tests/` and
+  the relevant plugin's `Tests/` and keep running unchanged. The dylib
+  boundary a real plugin crosses — a separately built bundle, loaded at
+  runtime — is deliberately absent here; these tests are about behaviour.
 - **Unit tests that exist before their code:** config decoding, including every
   error case above; path resolution for `name`, absolute and `~` forms; the
   shared-feed start-and-stop rule; the loader's outcome for each failure step,
   driven by a fake bundle source so no real dylib is needed.
-- **One boundary check in `test.sh`.** After `build.sh`, write a temporary
-  config naming a built-in, a missing path and a duplicate, run
-  `SystemBar --list-plugins` against it, and compare the printed lines. This is
-  the only test that crosses a real dylib boundary, and it runs in CI on the
-  existing macOS runner.
+- **One boundary check in `test.sh`.** After `build.sh`, build
+  `Examples/HelloTab` with `build-plugin.sh` against the SDK inside the
+  just-built `SystemBar.app`, write a temporary config naming the built-in
+  `Power.bundle`, that HelloTab bundle by `path`, a missing path, and
+  `Power.bundle` again as a duplicate, run
+  `./SystemBar.app/Contents/MacOS/SystemBar --list-plugins` against it, and
+  compare the printed lines. This is the only test that crosses a real dylib
+  boundary — a bundle built separately from the app, loaded by the same
+  loader a user's bundle goes through — and it runs in CI on the existing
+  macOS runner.
 
 ## A User Plugin, Walked Through
 
@@ -371,3 +389,28 @@ leaving a working, buildable, tested app:
 - 2026-09-24 — Stage 1: the popover opens on the first listed tab (Power in a
   fresh file, where it was Memory before); Relaunch is launchd-aware. —
   Claude, recorded for Adam
+- 2026-09-24 — Stage 2 SDK rules: `makeView` and `visibilityChanged` are
+  `@MainActor`, `collect` runs on the plugin's queue, `HostServices` and its
+  closures are `Sendable`, everything builds in Swift 5 mode; adding these later
+  would change mangled names — Adam.
+- 2026-09-24 — `HostServices.init` is public and the no-shell rule is a
+  documented convention; plugins are not sandboxed, so an internal init
+  protected nothing — Adam.
+- 2026-09-24 — Minimum macOS is 14: the SDK interface records a target, and the
+  code already used a macOS 14 API — Adam.
+- 2026-09-24 — `init(host:)` is `@MainActor`: the host already constructs on
+  main, a plugin's model objects usually are main-actor, and adding the
+  attribute after the freeze would break every existing bundle — Claude,
+  from code review, for Adam to confirm.
+- 2026-09-24 — `Feed.send` is `package` access, not public: a plugin reads a
+  shared feed and can never overwrite it for the others — Claude, from code
+  review, for Adam to confirm.
+- 2026-09-24 — The app ships only the SDK's textual `.swiftinterface`, not the
+  binary `.swiftmodule`: the binary would expose `package`-access members to
+  anyone who also passed `-package-name SystemBar`, and would let a plugin
+  skip the exact compile path a real plugin author uses — Claude, from code
+  review, for Adam to confirm.
+- 2026-09-24 — Stage 2 landed: Power loads from `Contents/PlugIns/Power.bundle`
+  through the same loader as a user's bundle; a plugin's published changes were
+  seen redrawing the host window before any of it was built — Claude, recorded
+  for Adam.

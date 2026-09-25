@@ -35,13 +35,27 @@ It lists the six tabs above. Reorder the entries to reorder the tabs, set `"enab
 ] }
 ```
 
+A `"path"` entry points at a bundle anywhere on disk (absolute, or starting with `~/`), which is how a tab you built yourself is added.
+
 An entry the app cannot load, say a misspelt name, still gets a tab: it is titled Error and shows the entry, what went wrong, and where the file is, so a typo is never silent. A file that cannot be read or parsed at all gives one Error tab and nothing else. A key the app does not know, or a value of the wrong type, is reported with its place in the file. Two things the parser cannot catch: a trailing comma is accepted, and if a key appears twice the first one wins.
 
-`SystemBar --list-plugins` prints the same outcome to the terminal, one line per enabled entry, and exits without opening a window (on a fresh machine it creates the file, just like a normal launch). `SYSTEMBAR_PLUGINS_FILE=/some/other.json` points one run at a different file.
+`./SystemBar.app/Contents/MacOS/SystemBar --list-plugins` prints the same outcome to the terminal, one line per enabled entry, and exits without opening a window (on a fresh machine it creates the file, just like a normal launch). `SYSTEMBAR_PLUGINS_FILE=/some/other.json` points one run at a different file.
 
 Relaunch restarts the app in place: when SystemBar was installed as a login item it asks launchd to restart it, and otherwise it starts a fresh copy and quits. If a relaunch fails, the reason goes to the system log.
 
-Tabs built outside this repository are the next step; see `docs/one-page/systembar-tab-plugins.md`.
+## Writing a plugin
+
+A tab is a `.bundle` built in Swift against the SDK inside the app. `Examples/HelloTab/` is the smallest one that loads: an `Info.plist` naming the class, and one Swift file with a class that adopts `TabPlugin`, collects on a schedule the app runs for it, and returns a SwiftUI view.
+
+```bash
+./build-plugin.sh Examples/HelloTab "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" ~/Applications/SystemBar.app
+```
+
+Then add `{ "path": "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" }` to `plugins.json` and press Relaunch. The plugin can run subprocesses through the host (an executable path and arguments, never a shell), read the shared process summary (`host.processes.value` now, or `host.processes.publisher` to follow it, as `Plugins/Power/` does), and use the app's palette and components. Give your plugin its own executable name in Info.plist (it doubles as the Swift module name, so make it a valid identifier) and its own `@objc(...)` class name; the app refuses a bundle whose class name another loaded bundle already defines. The six built-in tabs are being moved to the same shape; `Plugins/Power/` is the first.
+
+A bundle runs inside the app with its privileges. Nothing checks or sandboxes it, so load only bundles you built or trust.
+
+See `docs/one-page/systembar-tab-plugins.md` for the full contract.
 
 ## Requirements
 
@@ -59,7 +73,7 @@ There are no third-party dependencies and no package manager. `build.sh` calls `
 ./build.sh
 ```
 
-This produces a `SystemBar` binary and a `SystemBar.app` bundle in the repo directory.
+`./build.sh` builds the SDK (`libSystemBarKit.dylib` and its `.swiftinterface`), the app, and every tab under `Plugins/`, into a `SystemBar.app` bundle in the repo directory; the SDK ships inside the app at `Contents/Frameworks` and `Contents/Resources/SDK`.
 
 The app is **not code-signed or notarized**. Building it yourself is fine — locally compiled binaries aren't quarantined, so Gatekeeper stays out of the way. But copying the built `.app` to another Mac will trip Gatekeeper there, and rebuilding changes the binary's identity, so macOS may re-ask for any permissions you previously granted.
 
@@ -116,7 +130,9 @@ SystemBar runs entirely as your user. It never asks for `sudo` or elevated privi
 ./test.sh
 ```
 
-You can also check the plugin loader from a script, without opening the app: `SystemBar --list-plugins` prints what it would show and exits. Point `SYSTEMBAR_PLUGINS_FILE` at a temporary file first, so the check reads and writes that instead of your real `plugins.json`.
+`./test.sh` ends with the boundary check: it builds `Examples/HelloTab` against the SDK inside the `SystemBar.app` it just built, then runs `--list-plugins` against a temporary config naming Power, that HelloTab bundle by path, a missing path, and a duplicate — the one test that crosses a real dylib boundary, loading a bundle built separately from the app through the same loader a user's bundle goes through.
+
+You can also check the plugin loader from a script, without opening the app: `./SystemBar.app/Contents/MacOS/SystemBar --list-plugins` prints what it would show and exits. Point `SYSTEMBAR_PLUGINS_FILE` at a temporary file first, so the check reads and writes that instead of your real `plugins.json`.
 
 ## Status
 
