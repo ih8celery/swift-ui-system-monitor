@@ -31,7 +31,7 @@ final class PluginScheduler {
 
     /// A declared interval clamped to this scheduler's minimum: zero would spin its queue's
     /// thread, and a negative, NaN, or infinite value would trap the timer, so either is floored
-    /// instead, and the substitution is logged once.
+    /// instead, and the substitution is logged each time it is applied.
     func effectiveInterval(_ declared: TimeInterval, identifier: String) -> TimeInterval {
         let clamped = declared.isFinite ? max(declared, minimumRefreshInterval) : minimumRefreshInterval
         if clamped != declared {
