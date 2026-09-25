@@ -157,6 +157,8 @@ public protocol TabPlugin: AnyObject {
     /// Which shared samplers must be running while this tab is showing.
     var sharedFeeds: Set<SharedFeed> { get }
 
+    /// @MainActor, and must not do slow work: the host times this call and logs a warning when
+    /// it passes 100 ms, so slow work belongs in collect() instead.
     init(host: HostServices)
     /// Runs on this plugin's own queue, never concurrently with itself, only while visible.
     func collect()
@@ -434,3 +436,4 @@ leaving a working, buildable, tested app:
 - 2026-09-24 — `refreshInterval` is clamped to 0.25s to one day: NaN, zero and
   negative values become 0.25s, infinity and anything larger become one day,
   and each substitution is logged — Claude, from code review.
+- 2026-09-24 — The host times each `init(host:)` and logs when it passes 100 ms: Adam asked that the no-slow-work rule be enforced, and a log line is the lightest enforcement that never refuses a working plugin — Adam.

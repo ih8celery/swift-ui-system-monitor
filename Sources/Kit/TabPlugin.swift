@@ -31,6 +31,8 @@ public protocol TabPlugin: AnyObject {
     /// switching over it needs `@unknown default`.
     var sharedFeeds: Set<SharedFeed> { get }
 
+    /// The host times this call and logs a warning once it passes 100 ms, so slow work belongs
+    /// in `collect()` instead.
     @MainActor init(host: HostServices)
     /// This plugin's own queue, never concurrently with itself, only while visible.
     func collect()

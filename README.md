@@ -55,6 +55,8 @@ Then add `{ "path": "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bu
 
 A plugin's `refreshInterval` is clamped to between 0.25 seconds and one day: NaN, zero, and negative values become 0.25 seconds, and infinity or anything larger becomes one day, with each substitution logged. Build your plugin with the same Xcode as the app, or a newer one — the SDK interface names types from that Xcode's SwiftUI, so an older Xcode cannot read it.
 
+The host times how long your plugin's `init(host:)` takes and logs a warning once it passes 100 ms, so put slow work in `collect()` instead of `init(host:)`.
+
 A bundle runs inside the app with its privileges. Nothing checks or sandboxes it, so load only bundles you built or trust.
 
 See `docs/one-page/systembar-tab-plugins.md` for the full contract.
