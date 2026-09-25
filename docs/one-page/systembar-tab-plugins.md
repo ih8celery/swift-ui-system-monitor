@@ -3,7 +3,7 @@
 - **Date:** 2026-09-23
 - **Epic:** swift-ui-system-monitor-2ik
 - **Blocks:** swift-ui-system-monitor-jhi (Power) and 17o.7 (drop file), which wait for it
-- **Status:** approved in conversation 2026-09-23, spec awaiting review
+- **Status:** approved in conversation 2026-09-23; Stage 1 shipped; Stage 2 is implemented
 
 ## Goal
 
@@ -35,11 +35,12 @@ package manager.
 | Construction across the boundary | `cls.init(host:)` with a host-owned `HostServices` object | Works; the plugin called the host's process runner and got the output back |
 | SwiftUI across the boundary | `makeView() -> AnyView` | Returns a view built from an `ObservableObject` that lives in the plugin |
 
-Not yet verified, and the first thing Stage 2 must do: that a plugin's
-`@Published` changes redraw the host's window at runtime, not just compile. The
-spike never opened a window. Everything about Combine and SwiftUI says it will,
-because both sides link the same SwiftUI and the same SDK dylib, but it is a
-claim until a tab is seen updating.
+Verified in the Stage 2 Task 1 spike, using a plain window: a plugin's
+`@Published` changes do redraw the host's window at runtime, not just compile.
+The original spike never opened a window; everything about Combine and SwiftUI
+said it would, because both sides link the same SwiftUI and the same SDK
+dylib, but it stayed a claim until that spike put a tab on screen and watched
+it update.
 
 ## Decisions
 
@@ -148,7 +149,10 @@ public protocol TabPlugin: AnyObject {
     var title: String { get }
     var systemImage: String { get }
     var accent: Color { get }
-    /// How often the host calls collect() while this tab is showing.
+    /// How often the host calls collect() while this tab is showing. Clamped
+    /// to 0.25s...86,400s (one day): NaN, zero and negative values become
+    /// 0.25s, infinity and anything larger become one day, and each
+    /// substitution is logged.
     var refreshInterval: TimeInterval { get }
     /// Which shared samplers must be running while this tab is showing.
     var sharedFeeds: Set<SharedFeed> { get }
@@ -191,10 +195,14 @@ public final class HostServices {
 ```
 
 Also exported from the SDK, because every tab uses them: `Palette`,
-`EvidenceRow`, `StatPill`, `RateCard`, `SectionTitle`, `SegmentedBar`, the
-formatting helpers in `ViewFormatting`, and the models that more than one tab
-reads (`ProcessSnapshot`, `ProcessSummary`, `FastStatsSnapshot`,
-`SampleHealth`, `BoundedHistory`, `CommandOutput`).
+`EvidenceRow`, `StatPill`, `RateCard`, `SectionTitle`, `SegmentedBar`,
+`BarSegment`, `SegmentedLegend`, `ChartUnitLabel`, `LegendLabel`,
+`ProgressBar`, `Sparkline`, `DualSparkline`, `Feed`, `ProcessRunner`,
+`ProcessCPUScale`, the formatting helpers in `ViewFormatting`, and the models
+that more than one tab reads (`ProcessSnapshot`, `ProcessSummary`,
+`FastStatsSnapshot`, `SampleHealth`, `BoundedHistory`, `CommandOutput`).
+`ProcessSummary` also exposes `memoryDisplayLimit`, `cpuDisplayLimit`, and
+three initializers.
 
 A shared feed's sampler runs while at least one visible plugin declares it and
 stops when none does. With one tab visible at a time, that is the same rule as
@@ -235,8 +243,12 @@ For each enabled entry, in order: resolve the path; `Bundle(url:)`; `load()`;
 the path and the reason. Nothing loaded before a failure is undone.
 
 `SystemBar --list-plugins` performs the same loading, prints one line per entry
-(`ok <id> <title> <path>` or `error <path>: <reason>`), and exits without
-opening a window. It exists so the boundary can be tested in CI.
+(`ok <id> <title> <location as written>` or `error <location as written>:
+<reason>` — the location is the entry exactly as written in `plugins.json`,
+so a `name` entry prints the name, not the resolved path), and exits without
+opening a window. It always exits 0, even when some lines start with `error`,
+so a script must read the lines rather than the exit status. It exists so the
+boundary can be tested in CI.
 
 The header keeps its Quit button and gains a Relaunch button. Under the
 login-item LaunchAgent, Relaunch asks launchd to restart the app
@@ -325,7 +337,7 @@ Simulator, an Android emulator, a build slot) are leased and by whom.
   — 2 of 3 in use" with the holders as detail, all from the SDK. Because the
   panel is the plugin's own SwiftUI, a "release stale leases" button that runs
   `mc resource release --stale` is the plugin's decision, not the host's.
-- **Install.** `./build-plugin.sh ~/proj/mc-leases-tab "~/Library/Application
+- **Install.** `./build-plugin.sh ~/proj/mc-leases-tab "$HOME/Library/Application
   Support/SystemBar/PlugIns/LeaseMonitor.bundle"`, add a `path` entry to
   `plugins.json`, press Relaunch.
 
@@ -412,5 +424,10 @@ leaving a working, buildable, tested app:
   review, for Adam to confirm.
 - 2026-09-24 — Stage 2 landed: Power loads from `Contents/PlugIns/Power.bundle`
   through the same loader as a user's bundle; a plugin's published changes were
-  seen redrawing the host window before any of it was built — Claude, recorded
-  for Adam.
+  seen redrawing the host window before any of it was built. The popover
+  itself showing `Power.bundle`'s tab was not looked at during Stage 2 — the
+  dev build's menu bar icon sat off-screen in the notch overflow — so a
+  person should still look once — Claude, recorded for Adam.
+- 2026-09-24 — `refreshInterval` is clamped to 0.25s to one day: NaN, zero and
+  negative values become 0.25s, infinity and anything larger become one day,
+  and each substitution is logged — Claude, from code review.
