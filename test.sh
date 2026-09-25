@@ -57,3 +57,41 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 echo "Boundary check passed: a bundle built against the shipped SDK loads through the real loader"
+
+# A new user's first launch: no plugins.json yet. The app writes the default list, and every
+# entry in it loads from a bundle inside the app, in the order a new user sees.
+expected_fresh="ok power Power Power.bundle
+ok dev Dev Dev.bundle
+ok memory Memory Memory.bundle
+ok disk Disk Disk.bundle
+ok network Network Network.bundle
+ok cpu CPU CPU.bundle"
+actual_fresh=$(SYSTEMBAR_PLUGINS_FILE="$tmp/fresh/plugins.json" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
+  || { echo "Fresh-file check failed: SystemBar --list-plugins exited $?" >&2; exit 1; }
+
+if [[ "$actual_fresh" != "$expected_fresh" ]]; then
+  echo "Fresh-file check failed. Expected:" >&2
+  echo "$expected_fresh" >&2
+  echo "Got:" >&2
+  echo "$actual_fresh" >&2
+  exit 1
+fi
+if [[ ! -f "$tmp/fresh/plugins.json" ]]; then
+  echo "Fresh-file check failed: no plugins.json was written at $tmp/fresh/plugins.json" >&2
+  exit 1
+fi
+echo "Fresh-file check passed: a new plugins.json loads all six tabs from the app's bundles"
+
+# The old central sampler and the compiled-in tab table are gone; nothing may bring their names
+# back. The brackets keep this pattern from matching its own line in this file.
+deleted_names='Unified[M]onitor|Monitor[M]ode|Monitor[S]amplingPlan|Monitor[B]ackedTab|Builtin[T]abSource|Host[T]abSource'
+found_names=$(grep -rnE "$deleted_names" Sources Plugins *.swift *.sh) && grep_status=0 || grep_status=$?
+if (( grep_status == 0 )); then
+  echo "Name check failed: a deleted name is back:" >&2
+  echo "$found_names" >&2
+  exit 1
+elif (( grep_status != 1 )); then
+  echo "Name check failed: grep exited $grep_status" >&2
+  exit 1
+fi
+echo "Name check passed: no source names the deleted sampler or the compiled-in tab table"
