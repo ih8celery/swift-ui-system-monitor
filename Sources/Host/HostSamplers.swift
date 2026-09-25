@@ -22,20 +22,23 @@ final class HostSamplers {
     private let sampleProcesses: @Sendable () -> ProcessSummary
     private let fastInterval: TimeInterval
     private let processInterval: TimeInterval
-    private let fastQueue = DispatchQueue(label: "systembar.host.fast", qos: .utility)
-    private let processQueue = DispatchQueue(label: "systembar.host.processes", qos: .utility)
-    private var fastTimer: DispatchSourceTimer?
-    private var processTimer: DispatchSourceTimer?
+    private let fastQueue: DispatchQueue
+    private let processQueue: DispatchQueue
+    private var fastSampler: RunningSampler?
+    private var processSampler: RunningSampler?
 
-    /// The collectors and intervals are parameters so a test can count calls on a short
-    /// interval; the app uses `standard(processes:fastStats:)`.
+    /// The collectors, intervals and queues are parameters so a test can count calls on a short
+    /// interval, or hold a queue still to see what it would have run; the app uses
+    /// `standard(processes:fastStats:)`.
     init(
         processes: Feed<ProcessSummary>,
         fastStats: Feed<FastStatsSnapshot>,
         sampleFast: @escaping @Sendable () -> FastStatsSnapshot,
         sampleProcesses: @escaping @Sendable () -> ProcessSummary,
         fastInterval: TimeInterval = HostSamplers.fastInterval,
-        processInterval: TimeInterval = HostSamplers.processInterval
+        processInterval: TimeInterval = HostSamplers.processInterval,
+        fastQueue: DispatchQueue = DispatchQueue(label: "systembar.host.fast", qos: .utility),
+        processQueue: DispatchQueue = DispatchQueue(label: "systembar.host.processes", qos: .utility)
     ) {
         self.processes = processes
         self.fastStats = fastStats
@@ -43,6 +46,8 @@ final class HostSamplers {
         self.sampleProcesses = sampleProcesses
         self.fastInterval = fastInterval
         self.processInterval = processInterval
+        self.fastQueue = fastQueue
+        self.processQueue = processQueue
     }
 
     /// The real samplers: the kernel's counters every second, and `ps` through the real runner.
@@ -64,34 +69,36 @@ final class HostSamplers {
 
     /// Which samplers are running now.
     var running: Set<SharedFeed> {
-        Set([fastTimer.map { _ in SharedFeed.fastStats }, processTimer.map { _ in SharedFeed.processes }].compactMap { $0 })
+        Set([fastSampler.map { _ in SharedFeed.fastStats }, processSampler.map { _ in SharedFeed.processes }].compactMap { $0 })
     }
 
     /// Starts what the visible tab now needs and stops what it no longer does. A sampler that
     /// starts reads at once, so a tab never opens on a stale feed; one that keeps running keeps
-    /// its rhythm, so calling this on every tab switch costs nothing extra.
+    /// its rhythm, so calling this on every tab switch costs nothing extra. Stopping a sampler
+    /// also takes back its first reading if that has not started yet, so opening the window and
+    /// closing it straight away runs nothing.
     func update(isVisible: Bool, feeds: Set<SharedFeed>) {
         let wanted = Self.wanted(isVisible: isVisible, feeds: feeds)
         let fastStats = self.fastStats
         let sampleFast = self.sampleFast
-        fastTimer = reconciled(fastTimer, isWanted: wanted.contains(.fastStats), interval: fastInterval, on: fastQueue) {
+        fastSampler = reconciled(fastSampler, isWanted: wanted.contains(.fastStats), interval: fastInterval, on: fastQueue) {
             fastStats.send(sampleFast())
         }
         let processes = self.processes
         let sampleProcesses = self.sampleProcesses
-        processTimer = reconciled(processTimer, isWanted: wanted.contains(.processes), interval: processInterval, on: processQueue) {
+        processSampler = reconciled(processSampler, isWanted: wanted.contains(.processes), interval: processInterval, on: processQueue) {
             processes.send(sampleProcesses())
         }
     }
 
     private func reconciled(
-        _ timer: DispatchSourceTimer?,
+        _ sampler: RunningSampler?,
         isWanted: Bool,
         interval: TimeInterval,
         on queue: DispatchQueue,
         tick: @escaping @Sendable () -> Void
-    ) -> DispatchSourceTimer? {
-        switch (timer, isWanted) {
+    ) -> RunningSampler? {
+        switch (sampler, isWanted) {
         case (let running?, true):
             return running
         case (let running?, false):
@@ -107,13 +114,30 @@ final class HostSamplers {
     /// Reads once straight away, then every `interval` with a tenth of it as leeway — the same
     /// allowance PluginScheduler gives a plugin's timer. The first reading is queued directly
     /// rather than left to the timer, whose leeway would let the system defer it by up to a
-    /// second on the 10-second sampler.
-    private func started(interval: TimeInterval, on queue: DispatchQueue, tick: @escaping @Sendable () -> Void) -> DispatchSourceTimer {
-        queue.async(execute: tick)
+    /// second on the 10-second sampler. It is queued as a work item kept with the timer, so if
+    /// the window closes before it runs, it is cancelled with the timer.
+    private func started(interval: TimeInterval, on queue: DispatchQueue, tick: @escaping @Sendable () -> Void) -> RunningSampler {
+        let firstTick = DispatchWorkItem(block: tick)
+        queue.async(execute: firstTick)
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(Int(interval * 100)))
         timer.setEventHandler(handler: tick)
         timer.resume()
-        return timer
+        return RunningSampler(firstTick: firstTick, timer: timer)
+    }
+}
+
+/// One started sampler: the first reading it queued and the timer that reads after that.
+/// Stopping a sampler has to stop both, or a reading queued just before a close still runs.
+private struct RunningSampler {
+    let firstTick: DispatchWorkItem
+    let timer: DispatchSourceTimer
+
+    /// Cancels the timer, and the first reading if it has not started. A first reading that has
+    /// already started cannot be stopped and finishes; that is harmless, as it only refreshes a
+    /// feed nobody is looking at.
+    func cancel() {
+        firstTick.cancel()
+        timer.cancel()
     }
 }

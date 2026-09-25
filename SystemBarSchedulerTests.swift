@@ -21,6 +21,8 @@ struct SystemBarSchedulerTests {
         testSamplersRunTheProcessSamplerOnlyWhileATabDeclaresIt()
         testSamplersSampleAtOnceWhenStartedAndKeepTheirRhythm()
         testSamplersFillTheFeeds()
+        testSamplersRunNothingWhenClosedBeforeTheFirstReadingRuns()
+        testSamplersStillSampleAfterAQuickCloseAndReopen()
         testFastStatsSamplerTurnsCountersIntoRates()
         testFastStatsSamplerKeepsNinetySeconds()
         testProcessSamplerGroupsRowsAndDropsTinyOnes()
@@ -166,7 +168,9 @@ struct SystemBarSchedulerTests {
         fastFeed: Feed<FastStatsSnapshot> = Feed(initial: FastStatsSnapshot()),
         fastReading: FastStatsSnapshot = FastStatsSnapshot(),
         processReading: ProcessSummary = ProcessSummary(),
-        interval: TimeInterval = 0.05
+        interval: TimeInterval = 0.05,
+        fastQueue: DispatchQueue = DispatchQueue(label: "test.samplers.fast"),
+        processQueue: DispatchQueue = DispatchQueue(label: "test.samplers.processes")
     ) -> HostSamplers {
         HostSamplers(
             processes: processFeed,
@@ -174,8 +178,20 @@ struct SystemBarSchedulerTests {
             sampleFast: { fast.increment(); return fastReading },
             sampleProcesses: { processes.increment(); return processReading },
             fastInterval: interval,
-            processInterval: interval
+            processInterval: interval,
+            fastQueue: fastQueue,
+            processQueue: processQueue
         )
+    }
+
+    /// Two sampler queues that start suspended, so a test can open and close the window before
+    /// either queue runs anything, then resume them and see what was left to run.
+    private static func makeHeldQueues() -> (fast: DispatchQueue, processes: DispatchQueue) {
+        let fast = DispatchQueue(label: "test.samplers.held.fast")
+        let processes = DispatchQueue(label: "test.samplers.held.processes")
+        fast.suspend()
+        processes.suspend()
+        return (fast, processes)
     }
 
     private static func testSamplersWantNothingWhileTheWindowIsClosed() {
@@ -263,6 +279,42 @@ struct SystemBarSchedulerTests {
         waitUntil { fastFeed.value.cpuUsagePercent == 42 && processFeed.value.totalCount == 1 }
         expect(fastFeed.value.cpuUsagePercent == 42, "the 1-second reading lands in the fastStats feed plugins read")
         expect(processFeed.value.topCPU.map(\.name) == ["clang"], "the process reading lands in the processes feed plugins read")
+        samplers.update(isVisible: false, feeds: [])
+    }
+
+    private static func testSamplersRunNothingWhenClosedBeforeTheFirstReadingRuns() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let queues = makeHeldQueues()
+        let samplers = makeTestSamplers(fast: fast, processes: processes, fastQueue: queues.fast, processQueue: queues.processes)
+
+        samplers.update(isVisible: true, feeds: [.processes])
+        samplers.update(isVisible: false, feeds: [])
+        queues.fast.resume()
+        queues.processes.resume()
+        spinRunLoop(for: 0.2)
+
+        expect(fast.count == 0 && processes.count == 0, "a window closed before the first reading runs takes that reading back, got fast \(fast.count) processes \(processes.count)")
+        expect(samplers.running.isEmpty, "and reports none running, got \(samplers.running)")
+    }
+
+    private static func testSamplersStillSampleAfterAQuickCloseAndReopen() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let queues = makeHeldQueues()
+        // A minute between ticks: anything seen within the test is an at-once reading on start.
+        let samplers = makeTestSamplers(fast: fast, processes: processes, interval: 60, fastQueue: queues.fast, processQueue: queues.processes)
+
+        samplers.update(isVisible: true, feeds: [.processes])
+        samplers.update(isVisible: false, feeds: [])
+        samplers.update(isVisible: true, feeds: [.processes])
+        queues.fast.resume()
+        queues.processes.resume()
+        waitUntil { fast.count >= 1 && processes.count >= 1 }
+        spinRunLoop(for: 0.1)
+
+        expect(fast.count == 1 && processes.count == 1, "closing takes back only that start's first reading, so the reopen still reads once, got fast \(fast.count) processes \(processes.count)")
+        expect(samplers.running == [.fastStats, .processes], "and both samplers are running again, got \(samplers.running)")
         samplers.update(isVisible: false, feeds: [])
     }
 
