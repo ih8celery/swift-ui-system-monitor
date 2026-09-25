@@ -200,21 +200,23 @@ struct SystemBarPerformanceTests {
         expect(tooLong[15]?.path == "/p", "a path of \(cap + 1) words falls back to the first word, got \(String(describing: tooLong[15]?.path))")
     }
 
-    /// The real check, against the real disk, in a folder of the test's own that it removes after.
+    /// The real check, against the real disk, in a folder of the test's own. The folder is removed
+    /// before any assertion, because a failed `expect` exits without running `defer`.
     private static func testRegularFileCheckAcceptsOnlyRegularFiles() {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("systembar-regular-file-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        } catch {
-            expect(false, "could not create the test folder: \(error)")
-        }
         let file = folder.appendingPathComponent("tool with spaces")
-        expect(FileManager.default.createFile(atPath: file.path, contents: Data("x".utf8)), "could not create the test file")
+        let created = (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
+            && FileManager.default.createFile(atPath: file.path, contents: Data("x".utf8))
 
-        expect(!ProcessTable.isExistingRegularFile(atPath: folder.path), "a folder is not a regular file")
-        expect(ProcessTable.isExistingRegularFile(atPath: file.path), "a regular file is one")
-        expect(!ProcessTable.isExistingRegularFile(atPath: folder.appendingPathComponent("missing").path), "a missing path is not a regular file")
+        let folderIsRegular = ProcessTable.isExistingRegularFile(atPath: folder.path)
+        let fileIsRegular = ProcessTable.isExistingRegularFile(atPath: file.path)
+        let missingIsRegular = ProcessTable.isExistingRegularFile(atPath: folder.appendingPathComponent("missing").path)
+        try? FileManager.default.removeItem(at: folder)
+
+        expect(created, "could not create the test folder and file")
+        expect(!folderIsRegular, "a folder is not a regular file")
+        expect(fileIsRegular, "a regular file is one")
+        expect(!missingIsRegular, "a missing path is not a regular file")
         expect(!ProcessTable.isExistingRegularFile(atPath: "/dev/null"), "a device such as /dev/null is not a regular file")
     }
 
