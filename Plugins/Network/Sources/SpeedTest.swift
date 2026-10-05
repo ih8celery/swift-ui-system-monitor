@@ -6,16 +6,21 @@ enum SpeedTest {
     /// -M 20 caps the test itself at about 20 seconds; this leaves room to start up and report.
     static let timeout: TimeInterval = 30
 
-    /// Blocks for up to `timeout`, so the plugin calls it on its speed-test queue.
+    /// Blocks for up to `timeout`, so the plugin calls it on its speed-test queue. A run that
+    /// timed out, failed, or reported an error has no result, even if it measured something:
+    /// the panel then keeps the last good result on screen.
     static func measure(using host: HostServices, startedAt: Date) -> SpeedTestOutcome {
         let output = host.run(path: "/usr/bin/networkQuality", arguments: ["-c", "-M", "20"], timeout: timeout)
         let finishedAt = Date()
-        let parsed = output.status == 0 ? parseNetworkQualityOutput(
+        if let failure = speedTestFailureMessage(output) {
+            return SpeedTestOutcome(result: nil, failure: failure)
+        }
+        let parsed = parseNetworkQualityOutput(
             output.output,
             measuredAt: finishedAt,
             duration: finishedAt.timeIntervalSince(startedAt)
-        ) : nil
-        return SpeedTestOutcome(result: parsed, failure: speedTestFailureMessage(output))
+        )
+        return SpeedTestOutcome(result: parsed, failure: "Speed test output unreadable")
     }
 
     private static func parseNetworkQualityOutput(_ output: String, measuredAt: Date, duration: TimeInterval) -> SpeedTestResult? {
@@ -80,14 +85,45 @@ enum SpeedTest {
         )
     }
 
-    private static func speedTestFailureMessage(_ output: CommandOutput) -> String {
-        guard output.status != 0 else { return "Speed test output unreadable" }
+    /// Why a run has no usable result, or nil when its output is worth parsing. On a bad link
+    /// networkQuality ignores -M and runs until the host kills it.
+    private static func speedTestFailureMessage(_ output: CommandOutput) -> String? {
+        if output.didTimeout {
+            return "Failed: timed out after \(Int(timeout)) s"
+        }
+        if output.status == 0 {
+            return reportedError(in: output.output).map { "Failed: \($0)" }
+        }
         let message = [output.error, output.output]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty } ?? "networkQuality exited \(output.status)"
         let firstLine = message.split(whereSeparator: \.isNewline).first.map(String.init) ?? message
         return "Failed: \(firstLine)"
     }
+
+    /// networkQuality exits 0 even when it could not finish, and puts the reason in its JSON as
+    /// `error_code` and `error_domain`, e.g. -1003 in NSURLErrorDomain for "server not found".
+    private static func reportedError(in output: String) -> String? {
+        guard let data = output.data(using: .utf8),
+              let dictionary = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let code = (dictionary["error_code"] as? NSNumber)?.intValue else {
+            return nil
+        }
+        let domain = stringValue(dictionary["error_domain"]) ?? "error"
+        guard domain == NSURLErrorDomain, let meaning = urlErrorMeanings[code] else {
+            return "\(domain) \(code)"
+        }
+        return "\(meaning) (\(code))"
+    }
+
+    /// The NSURLError codes a bad connection produces.
+    private static let urlErrorMeanings: [Int: String] = [
+        NSURLErrorTimedOut: "request timed out",
+        NSURLErrorCannotFindHost: "test server not found",
+        NSURLErrorCannotConnectToHost: "cannot connect to test server",
+        NSURLErrorNetworkConnectionLost: "connection lost",
+        NSURLErrorNotConnectedToInternet: "offline",
+    ]
 
     private static func megabitsPerSecond(from line: String) -> Double? {
         guard let value = firstNumber(in: line) else { return nil }
