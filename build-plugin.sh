@@ -8,7 +8,8 @@ set -euo pipefail
 # The plugin dir holds Info.plist (CFBundleExecutable names the binary, NSPrincipalClass names
 # the @objc class) and Sources/*.swift. The third argument is where the SDK is: a built
 # SystemBar.app (Contents/Resources/SDK and Contents/Frameworks), or this repository's build/
-# directory. It defaults to SystemBar.app next to this script.
+# directory. It defaults to the app this script sits in, when it is the copy shipped in an app's
+# Contents/Resources, and otherwise to SystemBar.app next to this script.
 
 (( $# >= 2 )) || {
   echo "usage: build-plugin.sh <plugin dir> <out.bundle> [SystemBar.app | build dir]" >&2
@@ -17,7 +18,13 @@ set -euo pipefail
 
 src="$1"
 out="$2"
-base="${3:-$(cd "$(dirname "$0")" && pwd)/SystemBar.app}"
+here=$(cd "$(dirname "$0")" && pwd)
+if [[ "$here" == */Contents/Resources && -d "$here/SDK" ]]; then
+  default_base="${here:h:h}"
+else
+  default_base="$here/SystemBar.app"
+fi
+base="${3:-$default_base}"
 
 [[ -f "$src/Info.plist" ]] || {
   echo "build-plugin.sh: no Info.plist at $src/Info.plist" >&2

@@ -58,6 +58,21 @@ if [[ "$actual" != "$expected" ]]; then
 fi
 echo "Boundary check passed: a bundle built against the shipped SDK loads through the real loader"
 
+# An outside project runs the copy of build-plugin.sh inside an installed app, from its own
+# directory, with no SDK argument; the script must find the app it sits in. The copy of the app
+# has no SystemBar.app beside the script, so only the enclosing-app default can succeed.
+repo=$PWD
+shipped="$tmp/Shipped.app"
+cp -R SystemBar.app "$shipped"
+cp -f build-plugin.sh "$shipped/Contents/Resources/build-plugin.sh"
+(cd "$tmp" && "$shipped/Contents/Resources/build-plugin.sh" "$repo/Examples/HelloTab" "$tmp/FromApp.bundle" > /dev/null) \
+  || { echo "Shipped-script check failed: the copy inside an app could not build with two arguments" >&2; exit 1; }
+if [[ ! -x "$tmp/FromApp.bundle/Contents/MacOS/HelloTab" ]]; then
+  echo "Shipped-script check failed: no binary at $tmp/FromApp.bundle/Contents/MacOS/HelloTab" >&2
+  exit 1
+fi
+echo "Shipped-script check passed: build-plugin.sh inside an app builds against that app"
+
 # A new user's first launch: no plugins.json yet. The app writes the default list, and every
 # entry in it loads from a bundle inside the app, in the order a new user sees.
 expected_fresh="ok power Power Power.bundle
