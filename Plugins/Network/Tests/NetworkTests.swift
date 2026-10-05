@@ -18,6 +18,9 @@ enum NetworkTests {
         testSummaryKeepsResolvedNamesAcrossSamples()
         testSpeedTestRunsNetworkQualityThroughTheHost()
         testSpeedTestStateShowsEachStage()
+        testSpeedTestSaysItTimedOut()
+        testSpeedTestReportsNetworkQualitysOwnError()
+        testSpeedTestPartialRunKeepsTheLastGoodThroughput()
         testPluginRunsTheSpeedTestOffTheMainThread()
         testPluginPublishesWhatItCollected()
         testPluginFollowsTheFastFeed()
@@ -223,6 +226,39 @@ enum NetworkTests {
         let failed = done.started().finished(with: SpeedTestOutcome(result: nil, failure: "Failed: offline"))
         expect(failed.status == "Failed: offline" && failed.health == .degraded, "a failed run says why")
         expect(failed.result?.downloadMbps == 100, "and keeps the last good result on screen")
+    }
+
+    /// On a bad link networkQuality ignores -M and runs until the host kills it.
+    private static func testSpeedTestSaysItTimedOut() {
+        let killed = makeHost(runner: { _, _, _, _ in
+            CommandOutput(output: "", error: "", status: -1, didTimeout: true)
+        })
+        let outcome = SpeedTest.measure(using: killed, startedAt: Date())
+        expect(outcome.result == nil, "a killed run has no result")
+        expect(outcome.failure.localizedCaseInsensitiveContains("timed out"), "a killed run says it timed out, got \(outcome.failure)")
+    }
+
+    /// What networkQuality really printed, exit 0, when it could not reach its server.
+    private static func testSpeedTestReportsNetworkQualitysOwnError() {
+        let json = """
+        {"end_date": "2026-09-30 16:16:01.185", "error_code": -1003, "error_domain": "NSURLErrorDomain", "os_version": "Version 26.6 (Build 25G72)", "start_date": "2026-09-30 16:16:01.173"}
+        """
+        let outcome = SpeedTest.measure(using: makeHost(runner: recordingRunner(LogRecorder(), answers: [speedTestCommand: json])), startedAt: Date())
+        expect(outcome.result == nil, "an error run has no result")
+        expect(outcome.failure != "Speed test output unreadable" && outcome.failure.contains("-1003"), "the error networkQuality reported is shown, got \(outcome.failure)")
+    }
+
+    /// Latency measured, then the throughput phase failed.
+    private static func testSpeedTestPartialRunKeepsTheLastGoodThroughput() {
+        let json = """
+        {"base_rtt": 850.0, "error_code": -1001, "error_domain": "NSURLErrorDomain", "interface_name": "en0"}
+        """
+        let outcome = SpeedTest.measure(using: makeHost(runner: recordingRunner(LogRecorder(), answers: [speedTestCommand: json])), startedAt: Date())
+        let good = SpeedTestResult(downloadMbps: 100, uploadMbps: 10, latencyMS: 9, interfaceName: "en0", endpoint: "x", measuredAt: Date(timeIntervalSince1970: 0), duration: 12)
+        let before = SpeedTestState().started().finished(with: SpeedTestOutcome(result: good, failure: "unused"))
+        let after = before.started().finished(with: outcome)
+        expect(after.health == .degraded, "a run that reported an error is not shown as healthy, got \(after.status)")
+        expect(after.result?.downloadMbps == 100, "and the last good throughput stays on screen, got \(String(describing: after.result))")
     }
 
     private static func testPluginRunsTheSpeedTestOffTheMainThread() {
