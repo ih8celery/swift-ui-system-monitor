@@ -37,6 +37,10 @@ struct SystemBarConfigTests {
         testStoreReportsAnUnwritableLocation()
         testStoreExpandsTildeInTheOverride()
         testStoreSaysWhenAFolderSitsWhereTheFileShouldBe()
+        testPluginFolderUsesApplicationSupportByDefault()
+        testPluginFolderHonoursTheEnvironmentOverride()
+        testPluginFolderExpandsTildeInTheOverride()
+        testPluginFolderIgnoresAnEmptyOverride()
     }
 
     // MARK: - Contract
@@ -322,6 +326,39 @@ struct SystemBarConfigTests {
             return
         }
         expect(error.description.contains("is a folder"), "the message says what is actually there, got: \(error.description)")
+    }
+
+    // MARK: - Shared plugins folder
+
+    private static func testPluginFolderUsesApplicationSupportByDefault() {
+        let support = URL(fileURLWithPath: "/Users/someone/Library/Application Support")
+        let folder = PluginFolder.standard(environment: [:], applicationSupport: support)
+        expect(folder.path == "/Users/someone/Library/Application Support/SystemBar/PlugIns",
+               "other projects install bundles beside plugins.json, in PlugIns, got \(folder.path)")
+    }
+
+    private static func testPluginFolderHonoursTheEnvironmentOverride() {
+        let folder = PluginFolder.standard(
+            environment: [PluginFolder.environmentOverride: "/tmp/other/PlugIns"],
+            applicationSupport: URL(fileURLWithPath: "/ignored")
+        )
+        expect(folder.path == "/tmp/other/PlugIns", "SYSTEMBAR_PLUGINS_DIR points the app at another folder, got \(folder.path)")
+    }
+
+    private static func testPluginFolderExpandsTildeInTheOverride() {
+        let folder = PluginFolder.standard(
+            environment: [PluginFolder.environmentOverride: "~/somewhere/PlugIns"],
+            applicationSupport: URL(fileURLWithPath: "/ignored")
+        )
+        expect(folder.path == NSHomeDirectory() + "/somewhere/PlugIns",
+               "a ~ in SYSTEMBAR_PLUGINS_DIR means the home directory, even with no shell to expand it, got \(folder.path)")
+    }
+
+    private static func testPluginFolderIgnoresAnEmptyOverride() {
+        let support = URL(fileURLWithPath: "/Users/someone/Library/Application Support")
+        let folder = PluginFolder.standard(environment: [PluginFolder.environmentOverride: ""], applicationSupport: support)
+        expect(folder.path == "/Users/someone/Library/Application Support/SystemBar/PlugIns",
+               "an empty SYSTEMBAR_PLUGINS_DIR is the same as none, as it is for SYSTEMBAR_PLUGINS_FILE, got \(folder.path)")
     }
 }
 
