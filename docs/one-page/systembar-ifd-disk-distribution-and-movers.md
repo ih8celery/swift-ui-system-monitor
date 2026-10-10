@@ -60,11 +60,16 @@ fires during sleep. Adam, 2026-10-10.
 | Developer | 6 hours | first wake, then once mid-afternoon if still logged in |
 | Simulators | 6 hours | right after Developer |
 
-The host ticks background plugins at wake, at screen unlock, and every 15
-minutes while awake. The first tick after a wake waits two minutes so login
-settles. The plugin runs each plan whose newest sample is older than its
-cadence, one plan at a time, in the order above. The panel's button runs every
-plan now. A scan under way when the popover closes finishes.
+The Disk plugin declares a 15-minute `backgroundInterval` (the CPU epic's SDK
+contract, see D6), so the host calls its `collect()` every 15 minutes while the
+tab is hidden and every 30 seconds while it shows. Each call reads the volumes
+and runs every plan whose newest sample is older than its cadence, one plan at
+a time, in the order above, on the plugin's own scan queue. The scheduler
+restarts background timers two minutes after the Mac wakes, so a scan never
+lands on the login moment. Screen unlock is not a trigger: a wake plus the
+15-minute cadence covers the morning, and an unlock without a sleep is not a
+moment worth scanning at (agreed with the CPU pane, 2026-10-10). The panel's
+button runs every plan now. A scan under way when the popover closes finishes.
 
 ### D3: How far does the scan reach?
 
@@ -168,13 +173,18 @@ Adam, 2026-10-10.
    `~/Library/Application Support/SystemBar/Plugins/<identifier>/`, created
    on first use, with `SYSTEMBAR_PLUGIN_DATA_ROOT` overriding the root for
    tests. The ledger lives there as `disk-ledger.json`.
-3. **A background tick.** `TabPlugin` gains `var wantsBackgroundTicks: Bool`
-   (default false) and `func backgroundTick()` (default nothing), called on
-   the plugin's own queue, never concurrently with `collect()` or itself. A
-   new `BackgroundTicker` in the host listens for `NSWorkspace.didWakeNotification`
-   and the screen-unlock distributed notification, waits two minutes after a
-   wake, and ticks every 15 minutes while awake. Only plugins that opted in
-   are ticked. `--list-plugins` marks them.
+3. **Background sampling, owned by the CPU epic (ewy.1).** The two specs
+   written on 2026-10-10 each proposed a contract; the CPU spec's won, and this
+   spec adopts it unchanged: `TabPlugin.backgroundInterval: TimeInterval?`,
+   nil by default, makes the scheduler call `collect()` on the plugin's own
+   serial queue at that cadence while the tab is hidden, clamped between 5
+   seconds and a day, reported by `--list-plugins` as `background every <n>s`.
+   One amendment came from this spec and is part of ewy.1: the scheduler
+   observes the Mac waking and restarts every background timer with its first
+   tick `PluginScheduler.backgroundSettleAfterWake` (120 s) later. The Disk
+   plugin declares 900 seconds. This epic depends on ewy.1; the CPU epic's
+   third stage depends on this epic's `dataDirectory`, where its baseline file
+   will live.
 
 The frozen interface rule applies: every new `TabPlugin` requirement gets a
 default in a protocol extension, and `HostServices` gains a new initializer
@@ -185,14 +195,15 @@ plugin's settings and data folder.
 
 ### D7: What does the README promise?
 
-Today: "Every command below starts only while the window is open." After this
-change: the same, with one named exception. The Disk tab's size scans run on
-the cadences in the interval table while the Mac is awake, read folder sizes
-only, never delete anything, write one JSON file in the app's data folder, and
-stop when `backgroundScans` is `false` in that tab's settings. The `du` row of
-the subprocess table and the Disk row of the interval table are rewritten to
-match, and the "disk scan reads directory sizes only" paragraph is rewritten
-around the plans. Adam, 2026-10-10.
+Today: "Every command below starts only while the window is open." The CPU
+epic's Stage 1 rewrites that sentence and the feeds table's closing line to say
+the guarantee is now opt-in per plugin, and adds a "While hidden" column to the
+per-tab sampling table. This epic owns the Disk specifics: the Disk row of
+that table (volumes and `tmutil` every 30 s showing, 15 min hidden; plans at 3 h
+and 6 h), the `du` row and a new `xcrun simctl` row of the subprocess table, the
+"disk scan" paragraph rewritten around the plans and the ledger file, and the
+`settings` key in the plugins.json section with `backgroundScans` as its first
+example. Adam, 2026-10-10.
 
 ## Measurement Contract
 
@@ -235,7 +246,7 @@ Children of swift-ui-system-monitor-ifd, to be created by the implementation pla
 
 1. SDK: per-plugin `settings` through the config parser and `HostServices`, with parser tests.
 2. SDK: `HostServices.dataDirectory` with the environment override, one `HostServices` per plugin.
-3. SDK and host: `wantsBackgroundTicks`, `backgroundTick()`, `BackgroundTicker` with injected clock and notifications.
+3. (Owned by ewy.1) `backgroundInterval`, the scheduler's slow timer and wake settle.
 4. Disk: ledger value type, derived views, retention, and the JSON store with atomic write and `.broken` handling.
 5. Disk: scan plans, per-plan budgets, simulator plan from a `simctl` fixture, due rule.
 6. Disk: panel rewrite (left distribution, right Biggest and Movers), removal of purgeable and hints.
@@ -244,9 +255,9 @@ Children of swift-ui-system-monitor-ifd, to be created by the implementation pla
 ## Decision Log
 
 - 2026-10-10 — D1: a map of where the space went, not a cleanup list. Adam.
-- 2026-10-10 — D2: scans run in the menu-bar app while awake; overview 3 h, developer and simulators 6 h; ticks at wake, unlock and every 15 min. Adam.
+- 2026-10-10 — D2: scans run in the menu-bar app while awake; overview 3 h, developer and simulators 6 h; a 15-minute background collect, two-minute wake settle, no unlock trigger. Adam.
 - 2026-10-10 — D3: tiered roots, one level each; simulators per device. Adam.
 - 2026-10-10 — D4: JSON ledger, 2 days full then daily to 30 days. Claude proposed, Adam approved.
 - 2026-10-10 — D5: left distribution, right Biggest and Movers; purgeable removed. Adam.
-- 2026-10-10 — D6: change the SDK: settings, data folder, background tick. Adam.
+- 2026-10-10 — D6: change the SDK: settings, data folder; background sampling adopts the CPU epic's `backgroundInterval` contract plus a wake settle, agreed between the two panes. Adam.
 - 2026-10-10 — D7: README names the one exception and its off switch. Claude proposed, Adam approved.
