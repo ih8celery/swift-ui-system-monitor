@@ -11,7 +11,7 @@ SystemBar replaces a cluttered row of individual menu bar monitors with one icon
 | Tab | What it shows |
 |---|---|
 | **CPU** | Total load, process count, a 90-second history graph, and the top processes by CPU with their memory |
-| **Memory** | Pressure and its history, the wired/active/inactive/compressed/free breakdown, swap, GPU usage, and top processes by memory |
+| **Memory** | Used and available the way Activity Monitor counts them, the kernel's pressure level, the wired/active/inactive/compressed/free breakdown, swap, how busy the GPU is and how much memory it holds, and top processes by memory |
 | **Disk** | Capacity, free and purgeable space per volume, Time Machine local snapshots, and reclaimable space — caches, DerivedData, Downloads — with a hint on what each is safe to do about |
 | **Network** | Live up/down bandwidth, which processes are talking and where to, latency, and an on-demand speed test |
 | **Power** | Battery and power source, and the sleep assertions keeping your Mac awake with their likely causes |
@@ -146,7 +146,6 @@ Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU
 | Command | Used for | How often |
 |---|---|---|
 | `/bin/ps` | Process list, per-process CPU and memory | Every 10s while the Power, Memory or CPU tab is showing; also every 60s for the Dev tab, with arguments, to work out which project each process belongs to |
-| `/usr/bin/memory_pressure` | Memory pressure level | Every 30s |
 | `/usr/sbin/ioreg` | GPU (`AGXAccelerator`) info | Every 30s |
 | `/usr/bin/pmset` | Battery state and sleep assertions; thermal and performance warnings | Every 60s |
 | `/usr/bin/nettop` | Per-process network throughput | Every 30s |
@@ -172,7 +171,7 @@ Each interval lives in that tab's plugin, next to the code that uses it.
 |---|---|---|
 | Power | `pmset` every 60s | `PowerPlugin.refreshInterval` |
 | Dev | `ps`, `lsof`, `pmset` and two usage reads a second apart, every 60s | `DevSampling` in `Plugins/Dev/Sources/CapacityModels.swift` |
-| Memory | Kernel counters every 3s; `memory_pressure` and `ioreg` every 30s | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
+| Memory | Kernel counters and pressure level every 3s; `ioreg` every 30s | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
 | Disk | Volumes and `tmutil` every 30s; the `du` scan every 10 min or on demand | `DiskSampling` in `Plugins/Disk/Sources/DiskModels.swift` |
 | Network | `nettop` and `lsof` every 30s; `networkQuality` only on the button | `NetworkSampling` in `Plugins/Network/Sources/NetworkModels.swift` |
 | CPU | Nothing of its own: everything it shows comes from the two shared feeds | `CPUPlugin.refreshInterval` (one day, so its empty collect almost never runs) |

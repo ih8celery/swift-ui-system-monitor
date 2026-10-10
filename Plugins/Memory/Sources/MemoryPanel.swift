@@ -13,22 +13,32 @@ struct MemoryPanel: View {
                     .foregroundStyle(memoryColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+                    .help(usedBreakdownText(memory: plugin.stats.memory))
 
                 HStack(spacing: 10) {
                     StatPill(label: "Swap", value: swapStatText(used: plugin.stats.memory.swapUsed, total: plugin.stats.memory.swapTotal))
                         .help("macOS grows this reserved amount dynamically as needed, so the total is what's currently set aside, not a fixed cap.")
                     StatPill(label: "Pressure", value: pressureText)
+                        .help("The kernel's own memory pressure level, the signal behind Activity Monitor's pressure graph. Warning means macOS has started compressing or swapping to keep up; Critical means it is struggling.")
                 }
 
-                HStack(spacing: 10) {
-                    Text("GPU")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text(percentString(plugin.stats.gpu.deviceUtilization))
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Palette.blue)
-                    Spacer()
-                    StatPill(label: "GPU in use", value: byteString(plugin.stats.gpu.inUseMemory))
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Text("GPU busy")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text(percentString(plugin.stats.gpu.deviceUtilization))
+                            .font(.system(size: 18, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Palette.blue)
+                        Spacer()
+                    }
+                    .help("How hard the GPU's compute units were working at the last 30-second check. It is not a memory figure.")
+
+                    HStack(spacing: 10) {
+                        StatPill(label: "GPU memory in use", value: byteString(plugin.stats.gpu.inUseMemory))
+                        StatPill(label: "GPU memory allocated", value: byteString(plugin.stats.gpu.allocatedMemory))
+                    }
+                    .help("What the GPU driver is using now, and what it has set aside. The allocation is wired RAM that no process in the list owns, so it is part of the gap between used memory and the processes shown.")
                 }
                 .padding(10)
                 .background(Color.white.opacity(0.055))
@@ -38,16 +48,6 @@ struct MemoryPanel: View {
                     .frame(height: 34)
 
                 MemoryLegend(memory: plugin.stats.memory)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        SectionTitle("Pressure History")
-                        Spacer()
-                        ChartUnitLabel("% pressure - recent")
-                    }
-                    Sparkline(values: plugin.stats.pressureHistory, maxValue: 100, color: pressureColor, fill: true)
-                        .frame(height: 100)
-                }
 
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(updatedAgoText(lastUpdated: plugin.stats.lastUpdated, now: context.date))
@@ -85,20 +85,13 @@ struct MemoryPanel: View {
     }
 
     private var pressureText: String {
-        guard let pressure = plugin.stats.pressure else { return "Unknown" }
-        return "\(Int(pressure.rounded()))%"
-    }
-
-    private var pressureColor: Color {
-        guard let pressure = plugin.stats.pressure else { return .secondary }
-        if pressure < 50 { return Palette.good }
-        if pressure < 75 { return Palette.caution }
-        return Palette.critical
+        plugin.stats.pressure?.label ?? "Unknown"
     }
 
     private var memoryNeedsAction: Bool {
         let availableRatio = Double(plugin.stats.memory.available) / Double(max(plugin.stats.memory.total, 1))
-        return availableRatio < 0.25 || plugin.stats.memory.swapUsed > 1_073_741_824 || (plugin.stats.pressure ?? 0) >= 75
+        let pressureIsRaised = (plugin.stats.pressure ?? .normal) != .normal
+        return availableRatio < 0.25 || plugin.stats.memory.swapUsed > 1_073_741_824 || pressureIsRaised
     }
 
 }
