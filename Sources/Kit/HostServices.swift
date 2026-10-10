@@ -8,6 +8,8 @@ public typealias CommandRunner = @Sendable (
 /// What the host hands every plugin at construction. A plugin keeps it for its lifetime and may
 /// use it from any thread.
 public final class HostServices: Sendable {
+    /// The signed-in user's home folder as an absolute path with no trailing slash, e.g.
+    /// `/Users/ada`. Use it to resolve paths such as `~/proj` without asking the environment.
     public let homeDirectory: String
     /// The 10-second process summary: top by CPU, top by memory, counts. Sampled only while a
     /// visible plugin lists `.processes` in its `sharedFeeds`.
@@ -49,6 +51,8 @@ public final class HostServices: Sendable {
         runner(path, arguments, environment, timeout)
     }
 
+    /// Writes one line to the app's log (the system log, through `NSLog`, in the shipped app).
+    /// For things a person debugging a plugin would want to find later, not for every sample.
     public func log(_ message: String) {
         logger(message)
     }

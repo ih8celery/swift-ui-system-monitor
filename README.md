@@ -11,7 +11,7 @@ SystemBar replaces a cluttered row of individual menu bar monitors with one icon
 | Tab | What it shows |
 |---|---|
 | **CPU** | Total load, process count, a 90-second history graph, and the top processes by CPU with their memory |
-| **Memory** | Pressure and its history, the wired/active/inactive/compressed/free breakdown, swap, GPU usage, and top processes by memory |
+| **Memory** | Used and available the way Activity Monitor counts them, the kernel's pressure level, the wired/active/inactive/compressed/free breakdown, swap, how busy the GPU is and how much memory it holds, and top processes by memory |
 | **Disk** | Capacity, free and purgeable space per volume, Time Machine local snapshots, and reclaimable space — caches, DerivedData, Downloads — with a hint on what each is safe to do about |
 | **Network** | Live up/down bandwidth, which processes are talking and where to, latency, and an on-demand speed test |
 | **Power** | Battery and power source, and the sleep assertions keeping your Mac awake with their likely causes |
@@ -64,7 +64,32 @@ A plugin says in `sharedFeeds` which of the host's two shared readings it uses, 
 
 Nothing is sampled while the window is closed.
 
+To test a plugin that follows a feed, make the feed with `Feed.forTesting(initial:)`. It returns a new feed and a closure that writes to that feed alone, the way the host writes its own; a plugin cannot write the host's feeds, so this is the only writer it gets. Hand the feed to a `HostServices` you build yourself, push a reading, and let the main run loop turn once, because a feed delivers on the main thread:
+
+```swift
+@MainActor func testFollowsTheProcessFeed() {
+    let (processes, sendProcesses) = Feed.forTesting(initial: ProcessSummary())
+    let host = HostServices(
+        homeDirectory: "/Users/test",
+        processes: processes,
+        fastStats: Feed(initial: FastStatsSnapshot()),
+        runner: { _, _, _, _ in CommandOutput(output: "", error: "", status: 0, didTimeout: false) },
+        log: { print($0) }
+    )
+    let plugin = MyPlugin(host: host)  // keeps the top CPU group's name in `busiest`
+
+    sendProcesses(ProcessSummary(rows: [
+        ProcessSnapshot(name: "clang", count: 4, physical: 2_000_000_000, virtualSize: 0, cpu: 250)
+    ]))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+
+    assert(plugin.busiest == "clang")
+}
+```
+
 A plugin's `refreshInterval` is clamped to between 0.25 seconds and one day: NaN, zero, and negative values become 0.25 seconds, and infinity or anything larger becomes one day, with each substitution logged. Build your plugin with the same Xcode as the app, or a newer one — the SDK interface names types from that Xcode's SwiftUI, so an older Xcode cannot read it.
+
+The SDK's documentation is the doc comments in `Sources/Kit/`. The app ships them beside the interface, as `Contents/Resources/SDK/SystemBarKit.swiftdoc`, so tools that read a module's documentation through the compiler, such as `swift-symbolgraph-extract` (and so DocC), show them for a plugin built against the app. The `.swiftinterface` file itself holds only signatures; the comments themselves are in the repository under `Sources/Kit/`.
 
 The host times how long your plugin's `init(host:)` takes and logs a warning once it passes 100 ms, so put slow work in `collect()` instead of `init(host:)`.
 
@@ -121,7 +146,6 @@ Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU
 | Command | Used for | How often |
 |---|---|---|
 | `/bin/ps` | Process list, per-process CPU and memory | Every 10s while the Power, Memory or CPU tab is showing; also every 60s for the Dev tab, with arguments, to work out which project each process belongs to |
-| `/usr/bin/memory_pressure` | Memory pressure level | Every 30s |
 | `/usr/sbin/ioreg` | GPU (`AGXAccelerator`) info | Every 30s |
 | `/usr/bin/pmset` | Battery state and sleep assertions; thermal and performance warnings | Every 60s |
 | `/usr/bin/nettop` | Per-process network throughput | Every 30s |
@@ -147,7 +171,7 @@ Each interval lives in that tab's plugin, next to the code that uses it.
 |---|---|---|
 | Power | `pmset` every 60s | `PowerPlugin.refreshInterval` |
 | Dev | `ps`, `lsof`, `pmset` and two usage reads a second apart, every 60s | `DevSampling` in `Plugins/Dev/Sources/CapacityModels.swift` |
-| Memory | Kernel counters every 3s; `memory_pressure` and `ioreg` every 30s | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
+| Memory | Kernel counters and pressure level every 3s; `ioreg` every 30s | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
 | Disk | Volumes and `tmutil` every 30s; the `du` scan every 10 min or on demand | `DiskSampling` in `Plugins/Disk/Sources/DiskModels.swift` |
 | Network | `nettop` and `lsof` every 30s; `networkQuality` only on the button | `NetworkSampling` in `Plugins/Network/Sources/NetworkModels.swift` |
 | CPU | Nothing of its own: everything it shows comes from the two shared feeds | `CPUPlugin.refreshInterval` (one day, so its empty collect almost never runs) |

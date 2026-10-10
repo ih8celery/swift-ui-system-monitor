@@ -1,11 +1,17 @@
 import Foundation
 import SwiftUI
 
+/// A card for one finding: a bold label on the left, a short monospaced value on the right,
+/// and up to two lines of detail beneath, e.g. a sleep assertion and the process holding it.
 public struct EvidenceRow: View {
     let label: String
     let value: String
     let detail: String
 
+    /// - Parameters:
+    ///   - label: What the finding is about; one line, truncated if long.
+    ///   - value: A short verdict or figure; one line, shrunk to fit.
+    ///   - detail: The evidence behind it, in secondary text; at most two lines.
     public init(label: String, value: String, detail: String) {
         self.label = label
         self.value = value
@@ -35,12 +41,14 @@ public struct EvidenceRow: View {
     }
 }
 
-
+/// A headline figure in large coloured type under a small caption, e.g. "Down" over the current
+/// download rate. It fills the width it is given, so two side by side split a row evenly.
 public struct RateCard: View {
     let title: String
     let value: String
     let color: Color
 
+    /// `value` is already-formatted text, such as `rateString(_:)` returns; `color` tints it.
     public init(title: String, value: String, color: Color) {
         self.title = title
         self.value = value
@@ -65,10 +73,13 @@ public struct RateCard: View {
     }
 }
 
+/// A small rounded chip showing a label and a value on one line, e.g. "Swap 1.2 GB", for the row
+/// of quick facts at the top of a tab.
 public struct StatPill: View {
     let label: String
     let value: String
 
+    /// The label is drawn in secondary text, the value after it in monospaced type.
     public init(label: String, value: String) {
         self.label = label
         self.value = value
@@ -91,9 +102,11 @@ public struct StatPill: View {
     }
 }
 
+/// A section heading inside a tab, drawn small, bold and in capitals.
 public struct SectionTitle: View {
     let text: String
 
+    /// The heading as written; the view upper-cases it.
     public init(_ text: String) {
         self.text = text
     }
@@ -106,9 +119,12 @@ public struct SectionTitle: View {
     }
 }
 
+/// A small monospaced caption saying what a chart's values are and over what span, e.g.
+/// "% CPU - last 90s". It usually sits on the right of a chart's `SectionTitle`.
 public struct ChartUnitLabel: View {
     let text: String
 
+    /// The caption as written.
     public init(_ text: String) {
         self.text = text
     }
@@ -120,10 +136,13 @@ public struct ChartUnitLabel: View {
     }
 }
 
+/// One chart legend entry: a coloured dot and a caption, e.g. the download line's colour and
+/// "Download".
 public struct LegendLabel: View {
     let text: String
     let color: Color
 
+    /// A dot of `color` followed by `text`.
     public init(text: String, color: Color) {
         self.text = text
         self.color = color
@@ -141,10 +160,13 @@ public struct LegendLabel: View {
     }
 }
 
+/// A thin capsule bar filled from the left, over a faint track. It takes the size its container
+/// gives it, so set a height with `.frame(height:)`.
 public struct ProgressBar: View {
     let value: Double
     let color: Color
 
+    /// `value` is how full the bar is, from 0 to 1; anything outside that range is clamped.
     public init(value: Double, color: Color) {
         self.value = value
         self.color = color
@@ -162,12 +184,19 @@ public struct ProgressBar: View {
     }
 }
 
+/// A line chart of a short history on a rounded card, oldest value on the left. It draws
+/// nothing until there are at least two values, and takes the size its container gives it.
 public struct Sparkline: View {
     let values: [Double]
     let maxValue: Double
     let color: Color
     let fill: Bool
 
+    /// - Parameters:
+    ///   - values: The history, oldest first, spread evenly across the width.
+    ///   - maxValue: The value that reaches the top edge; higher values are clipped to it, and
+    ///     anything below 1 is treated as 1.
+    ///   - fill: Whether to shade the area under the line with a faint wash of `color`.
     public init(values: [Double], maxValue: Double, color: Color, fill: Bool) {
         self.values = values
         self.maxValue = maxValue
@@ -223,12 +252,16 @@ public struct Sparkline: View {
     }
 }
 
+/// Two histories on one sparkline card with a shared scale, e.g. download and upload rates. The
+/// scale's top is the larger of the two histories' peaks, and `first` is drawn filled beneath
+/// `second`'s plain line.
 public struct DualSparkline: View {
     let first: [Double]
     let second: [Double]
     let firstColor: Color
     let secondColor: Color
 
+    /// Each history is oldest first, as for `Sparkline`.
     public init(first: [Double], second: [Double], firstColor: Color, secondColor: Color) {
         self.first = first
         self.second = second

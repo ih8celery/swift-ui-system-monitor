@@ -9,6 +9,7 @@ import SystemBarKit
 struct SystemBarSchedulerTests {
     static func runAll() {
         testFeedHoldsTheLatestValueAndPublishesTheNext()
+        testFeedForTestingWritesTheFeedItMade()
         testHostServicesCarriesTheFeedsItWasBuiltWith()
         testSchedulerCollectsOnlyWhileVisibleAndNeverOverlaps()
         testSchedulerCollectsAtOnceWhenATabAppears()
@@ -21,6 +22,8 @@ struct SystemBarSchedulerTests {
         testSamplersRunTheProcessSamplerOnlyWhileATabDeclaresIt()
         testSamplersSampleAtOnceWhenStartedAndKeepTheirRhythm()
         testSamplersFillTheFeeds()
+        testSamplersRunNothingWhenClosedBeforeTheFirstReadingRuns()
+        testSamplersStillSampleAfterAQuickCloseAndReopen()
         testFastStatsSamplerTurnsCountersIntoRates()
         testFastStatsSamplerKeepsNinetySeconds()
         testProcessSamplerGroupsRowsAndDropsTinyOnes()
@@ -56,6 +59,25 @@ struct SystemBarSchedulerTests {
         subscription.cancel()
     }
 
+    private static func testFeedForTestingWritesTheFeedItMade() {
+        let (feed, send) = Feed.forTesting(initial: 1)
+        expect(feed.value == 1, "the new feed holds the initial value, got \(feed.value)")
+
+        var received: [(value: Int, wasOnMain: Bool)] = []
+        let subscription = feed.publisher.sink { value in
+            received.append((value, Thread.isMainThread))
+        }
+        DispatchQueue.global().async { send(2) }
+        let deadline = Date().addingTimeInterval(2)
+        while received.isEmpty && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        expect(received.map(\.value) == [2], "the closure's reading reaches a subscriber, got \(received.map(\.value))")
+        expect(received.allSatisfy(\.wasOnMain), "and lands on the main thread")
+        expect(feed.value == 2, "the closure's reading becomes value, got \(feed.value)")
+        subscription.cancel()
+    }
+
     private static func testHostServicesCarriesTheFeedsItWasBuiltWith() {
         let feed = Feed(initial: ProcessSummary())
         let host = HostServices(
@@ -67,7 +89,7 @@ struct SystemBarSchedulerTests {
         )
         expect(host.processes.value.totalCount == 0, "the feed a host is built with is the one plugins read")
         expect(host.fastStats.value.cpuUsagePercent == 0, "the 1-second feed is there too, starting empty")
-        feed.send(ProcessSummary(rows: [ProcessSnapshot(name: "x", count: 1, physical: 1, virtualSize: 1, cpu: 1)], limit: 1))
+        feed.send(ProcessSummary(rows: [ProcessSnapshot(name: "x", count: 1, physical: 1, virtualSize: 1, cpu: 1)], memoryLimit: 1, cpuLimit: 1))
         expect(host.processes.value.totalCount == 1, "a reading sent to the feed is visible through the host")
     }
 
@@ -166,7 +188,9 @@ struct SystemBarSchedulerTests {
         fastFeed: Feed<FastStatsSnapshot> = Feed(initial: FastStatsSnapshot()),
         fastReading: FastStatsSnapshot = FastStatsSnapshot(),
         processReading: ProcessSummary = ProcessSummary(),
-        interval: TimeInterval = 0.05
+        interval: TimeInterval = 0.05,
+        fastQueue: DispatchQueue = DispatchQueue(label: "test.samplers.fast"),
+        processQueue: DispatchQueue = DispatchQueue(label: "test.samplers.processes")
     ) -> HostSamplers {
         HostSamplers(
             processes: processFeed,
@@ -174,8 +198,20 @@ struct SystemBarSchedulerTests {
             sampleFast: { fast.increment(); return fastReading },
             sampleProcesses: { processes.increment(); return processReading },
             fastInterval: interval,
-            processInterval: interval
+            processInterval: interval,
+            fastQueue: fastQueue,
+            processQueue: processQueue
         )
+    }
+
+    /// Two sampler queues that start suspended, so a test can open and close the window before
+    /// either queue runs anything, then resume them and see what was left to run.
+    private static func makeHeldQueues() -> (fast: DispatchQueue, processes: DispatchQueue) {
+        let fast = DispatchQueue(label: "test.samplers.held.fast")
+        let processes = DispatchQueue(label: "test.samplers.held.processes")
+        fast.suspend()
+        processes.suspend()
+        return (fast, processes)
     }
 
     private static func testSamplersWantNothingWhileTheWindowIsClosed() {
@@ -257,12 +293,48 @@ struct SystemBarSchedulerTests {
             processFeed: processFeed,
             fastFeed: fastFeed,
             fastReading: reading,
-            processReading: ProcessSummary(rows: [row], limit: 1)
+            processReading: ProcessSummary(rows: [row], memoryLimit: 1, cpuLimit: 1)
         )
         samplers.update(isVisible: true, feeds: [.processes])
         waitUntil { fastFeed.value.cpuUsagePercent == 42 && processFeed.value.totalCount == 1 }
         expect(fastFeed.value.cpuUsagePercent == 42, "the 1-second reading lands in the fastStats feed plugins read")
         expect(processFeed.value.topCPU.map(\.name) == ["clang"], "the process reading lands in the processes feed plugins read")
+        samplers.update(isVisible: false, feeds: [])
+    }
+
+    private static func testSamplersRunNothingWhenClosedBeforeTheFirstReadingRuns() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let queues = makeHeldQueues()
+        let samplers = makeTestSamplers(fast: fast, processes: processes, fastQueue: queues.fast, processQueue: queues.processes)
+
+        samplers.update(isVisible: true, feeds: [.processes])
+        samplers.update(isVisible: false, feeds: [])
+        queues.fast.resume()
+        queues.processes.resume()
+        spinRunLoop(for: 0.2)
+
+        expect(fast.count == 0 && processes.count == 0, "a window closed before the first reading runs takes that reading back, got fast \(fast.count) processes \(processes.count)")
+        expect(samplers.running.isEmpty, "and reports none running, got \(samplers.running)")
+    }
+
+    private static func testSamplersStillSampleAfterAQuickCloseAndReopen() {
+        let fast = CallCounter()
+        let processes = CallCounter()
+        let queues = makeHeldQueues()
+        // A minute between ticks: anything seen within the test is an at-once reading on start.
+        let samplers = makeTestSamplers(fast: fast, processes: processes, interval: 60, fastQueue: queues.fast, processQueue: queues.processes)
+
+        samplers.update(isVisible: true, feeds: [.processes])
+        samplers.update(isVisible: false, feeds: [])
+        samplers.update(isVisible: true, feeds: [.processes])
+        queues.fast.resume()
+        queues.processes.resume()
+        waitUntil { fast.count >= 1 && processes.count >= 1 }
+        spinRunLoop(for: 0.1)
+
+        expect(fast.count == 1 && processes.count == 1, "closing takes back only that start's first reading, so the reopen still reads once, got fast \(fast.count) processes \(processes.count)")
+        expect(samplers.running == [.fastStats, .processes], "and both samplers are running again, got \(samplers.running)")
         samplers.update(isVisible: false, feeds: [])
     }
 

@@ -9,6 +9,7 @@ enum CPUTests {
         testGroupDetailRows()
         testProcessClassifier()
         testGroupDetailRunsPsThroughTheHost()
+        testGroupDetailFindsAnAppWhosePathHasSpaces()
         testPluginFollowsBothFeeds()
         testPluginIdentityMatchesTheOldTab()
     }
@@ -118,6 +119,23 @@ enum CPUTests {
         expect(failing.groupDetail(named: "clang").isEmpty, "a ps that fails gives an empty drill-in rather than a guess")
     }
 
+    private static func testGroupDetailFindsAnAppWhosePathHasSpaces() {
+        // The group a user taps is named from ps's comm column, so Chrome's group is "Google Chrome".
+        // The existence check is a fake so the test does not depend on Chrome being installed.
+        let chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        let table = """
+        PID  PPID %CPU   RSS     ELAPSED ARGS
+          1     0  0.0  20000 10-00:00:00 /sbin/launchd
+        300     1 12.0  90000    02:00:00 \(chrome) --restore-last-session
+        301   300  4.0  50000    01:00:00 /usr/bin/ssh-agent -l
+        """
+        let command = "/bin/ps -eo pid,ppid,pcpu,rss,etime,args"
+        let host = makeHost(runner: recordingRunner(LogRecorder(), answers: [command: table]))
+        let rows = ProcessDetail.fetchGroupDetail(name: "Google Chrome", using: host, fileExists: { [chrome, "/sbin/launchd", "/usr/bin/ssh-agent"].contains($0) })
+        expect(rows.map(\.pid) == [300], "tapping Google Chrome lists Chrome's process, got \(rows.map(\.pid))")
+        expect(rows.first?.path == chrome && rows.first?.parentName == "launchd", "the row carries the whole path and its parent, got \(String(describing: rows.first?.path))")
+    }
+
     private static func testPluginFollowsBothFeeds() {
         var start = FastStatsSnapshot()
         start.cpuUsagePercent = 10
@@ -131,7 +149,7 @@ enum CPUTests {
         busy.cpuHistory = [10, 73]
         fastStats.send(busy)
         let row = ProcessSnapshot(name: "swift-frontend", count: 3, physical: 1, virtualSize: 0, cpu: 250)
-        processes.send(ProcessSummary(rows: [row], limit: 1))
+        processes.send(ProcessSummary(rows: [row], memoryLimit: 1, cpuLimit: 1))
 
         waitUntil { plugin.fastStats.cpuUsagePercent == 73 && !plugin.processes.topCPU.isEmpty }
         expect(plugin.fastStats.cpuHistory == [10, 73], "the headline and graph follow the 1-second feed, got \(plugin.fastStats.cpuHistory)")

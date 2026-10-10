@@ -74,15 +74,21 @@ public enum ProcessRunner {
     }
 }
 
+/// What one subprocess run produced: its standard output and error as text, and how it ended.
 public struct CommandOutput: Sendable {
+    /// Everything the child wrote to standard output, decoded as UTF-8 (empty if it was not UTF-8).
     public let output: String
+    /// Everything the child wrote to standard error, decoded as UTF-8; when the executable
+    /// could not be started at all, the reason it could not.
     public let error: String
+    /// The child's exit status, or -1 when it could not be started or was killed for timing out.
     public let status: Int32
     /// True only when the wall-clock timeout killed the child. A killed child's stdio
     /// buffer dies with it, so callers must read an empty `output` as "no answer yet",
     /// not as "the command answered nothing".
     public let didTimeout: Bool
 
+    /// Builds a result by hand, e.g. for a fake `CommandRunner` in a test.
     public init(output: String, error: String, status: Int32, didTimeout: Bool) {
         self.output = output
         self.error = error

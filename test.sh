@@ -8,6 +8,13 @@ source ./toolchain.env
 # else (host without its @main, each plugin's sources and tests, the test files) is one module.
 ./build.sh
 
+# The SDK's doc comments ship beside its interface, where the compiler looks for a module's
+# documentation, so a plugin author's editor can show them.
+[[ -s SystemBar.app/Contents/Resources/SDK/SystemBarKit.swiftdoc ]] || {
+  echo "Doc check failed: SystemBar.app/Contents/Resources/SDK/SystemBarKit.swiftdoc is missing or empty" >&2
+  exit 1
+}
+
 swiftc \
   -D TESTING \
   -parse-as-library -module-name SystemBarTests \

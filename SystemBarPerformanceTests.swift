@@ -9,6 +9,12 @@ struct SystemBarPerformanceTests {
         testProcessCPUScale()
         testProcessTableParsing()
         testProcessTableCarriesTheColumnsItParses()
+        testProcessTableResolvesPathsWithSpaces()
+        testProcessTableStatsOnceForASpaceFreePath()
+        testProcessTableFallsBackWhenTheExecutableIsGone()
+        testProcessTableNeverStatsARelativeCommand()
+        testProcessTableCapCountsWords()
+        testRegularFileCheckAcceptsOnlyRegularFiles()
         MainActor.assumeIsolated { CPUTests.runAll() }
         MainActor.assumeIsolated { PowerTests.runAll() }
         MainActor.assumeIsolated { DiskTests.runAll() }
@@ -40,7 +46,7 @@ struct SystemBarPerformanceTests {
             ProcessSnapshot(name: "cpu", count: 2, physical: 30, virtualSize: 40, cpu: 8),
             ProcessSnapshot(name: "memory", count: 1, physical: 50, virtualSize: 60, cpu: 3)
         ]
-        let summary = ProcessSummary(rows: rows, limit: 2)
+        let summary = ProcessSummary(rows: rows, memoryLimit: 2, cpuLimit: 2)
         expect(summary.totalCount == 3, "summary should preserve total row count")
         expect(summary.topMemory.map(\.name) == ["memory", "cpu"], "summary should pre-sort memory rows")
         expect(summary.topCPU.map(\.name) == ["cpu", "memory"], "summary should pre-sort cpu rows")
@@ -81,7 +87,7 @@ struct SystemBarPerformanceTests {
 
         let clang = map[200]
         expect(clang?.ppid == 100, "parser should read ppid")
-        expect(clang?.path == "/Applications/Xcode.app/Contents/Developer/usr/bin/clang", "path is the first token of args")
+        expect(clang?.path == "/Applications/Xcode.app/Contents/Developer/usr/bin/clang", "a space-free path is the first token of args")
         expect(clang?.name == "clang", "name is the basename of the exe path")
         expect(clang?.args == "/Applications/Xcode.app/Contents/Developer/usr/bin/clang -x c foo.c", "args keeps the full command line with spaces")
         expect(clang?.memory == 40000 * 1024, "ps rss is kilobytes and must scale to bytes")
@@ -105,6 +111,113 @@ struct SystemBarPerformanceTests {
         expect(table[412]?.memory == 81_920 * 1024, "rss is in kilobytes and becomes bytes, got \(String(describing: table[412]?.memory))")
         expect(table[412]?.etime == "01:02:03", "etime is the fifth column, got \(String(describing: table[412]?.etime))")
         expect(table[412]?.args == "/Applications/Some App.app/Contents/MacOS/Some App --flag value", "args is the whole remainder, spaces included")
+    }
+
+    /// A fake existence check: answers from `existing` and writes every path it is asked about
+    /// into `asked`, so a test can count the stats without touching the disk.
+    private static func fakeFileExists(_ existing: Set<String>, asked: LogRecorder) -> (String) -> Bool {
+        { path in
+            asked.record(path)
+            return existing.contains(path)
+        }
+    }
+
+    private static func psRow(pid: Int32, args: String) -> String {
+        """
+          PID  PPID  %CPU    RSS     ELAPSED ARGS
+        \(pid)     1   2.0   4096    00:01:00 \(args)
+        """
+    }
+
+    private static func testProcessTableResolvesPathsWithSpaces() {
+        let chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        let oneSpace = ProcessTable.parse(
+            psRow(pid: 7, args: "\(chrome) --type=renderer --lang=en-US"),
+            fileExists: fakeFileExists([chrome], asked: LogRecorder())
+        )
+        expect(oneSpace[7]?.path == chrome, "a path with one space resolves to the existing file, got \(String(describing: oneSpace[7]?.path))")
+        expect(oneSpace[7]?.name == "Google Chrome", "name is the basename of the resolved path, got \(String(describing: oneSpace[7]?.name))")
+        expect(oneSpace[7]?.args == "\(chrome) --type=renderer --lang=en-US", "args is unchanged by path resolution")
+
+        let helper = "/Applications/Docker.app/Contents/MacOS/Docker Desktop.app/Contents/Frameworks/Docker Desktop Helper (Renderer).app/Contents/MacOS/Docker Desktop Helper (Renderer)"
+        let several = ProcessTable.parse(
+            psRow(pid: 8, args: "\(helper) --type=renderer"),
+            fileExists: fakeFileExists([helper], asked: LogRecorder())
+        )
+        expect(several[8]?.path == helper, "a path with several spaces resolves, got \(String(describing: several[8]?.path))")
+        expect(several[8]?.name == "Docker Desktop Helper (Renderer)", "and its name is the whole basename, got \(String(describing: several[8]?.name))")
+
+        let bare = ProcessTable.parse(psRow(pid: 9, args: chrome), fileExists: fakeFileExists([chrome], asked: LogRecorder()))
+        expect(bare[9]?.path == chrome, "a command line that is only the path resolves too, got \(String(describing: bare[9]?.path))")
+    }
+
+    private static func testProcessTableStatsOnceForASpaceFreePath() {
+        let asked = LogRecorder()
+        let table = ProcessTable.parse(
+            psRow(pid: 10, args: "/usr/bin/ssh-agent -l -a /tmp/agent socket"),
+            fileExists: fakeFileExists(["/usr/bin/ssh-agent"], asked: asked)
+        )
+        expect(table[10]?.path == "/usr/bin/ssh-agent" && table[10]?.name == "ssh-agent", "a space-free path is the first token, got \(String(describing: table[10]?.path))")
+        expect(asked.messages == ["/usr/bin/ssh-agent"], "the ordinary row costs exactly one existence check, got \(asked.messages)")
+    }
+
+    private static func testProcessTableFallsBackWhenTheExecutableIsGone() {
+        let short = LogRecorder()
+        let deleted = ProcessTable.parse(
+            psRow(pid: 11, args: "/Applications/Old App.app/Contents/MacOS/Old App --flag"),
+            fileExists: fakeFileExists([], asked: short)
+        )
+        expect(deleted[11]?.path == "/Applications/Old" && deleted[11]?.name == "Old", "an executable gone from disk falls back to the first token, got \(String(describing: deleted[11]?.path))")
+        expect(short.count == 4, "every prefix of a short command line is tried once, got \(short.messages)")
+
+        let long = LogRecorder()
+        let words = (1...40).map { "word\($0)" }.joined(separator: " ")
+        let gone = ProcessTable.parse(psRow(pid: 12, args: "/opt/gone/tool \(words)"), fileExists: fakeFileExists([], asked: long))
+        expect(gone[12]?.path == "/opt/gone/tool", "a long command line falls back to the first token, got \(String(describing: gone[12]?.path))")
+        expect(long.count == ProcessTable.maximumPathPrefixes, "no more prefixes are tried than the cap, got \(long.count)")
+    }
+
+    private static func testProcessTableNeverStatsARelativeCommand() {
+        let asked = LogRecorder()
+        let table = ProcessTable.parse(
+            psRow(pid: 13, args: "python3 script.py --watch"),
+            fileExists: fakeFileExists(["python3", "python3 script.py"], asked: asked)
+        )
+        expect(table[13]?.path == "python3" && table[13]?.name == "python3", "a relative command keeps its first token, got \(String(describing: table[13]?.path))")
+        expect(asked.messages.isEmpty, "a relative command is never looked up on disk, got \(asked.messages)")
+    }
+
+    /// The cap counts words: a path of exactly `maximumPathPrefixes` words (one fewer spaces)
+    /// still resolves, and one word more falls back to the first word.
+    private static func testProcessTableCapCountsWords() {
+        let cap = ProcessTable.maximumPathPrefixes
+        let atCap = "/p" + (1..<cap).map { " w\($0)" }.joined()
+        let fits = ProcessTable.parse(psRow(pid: 14, args: "\(atCap) --flag value"), fileExists: fakeFileExists([atCap], asked: LogRecorder()))
+        expect(fits[14]?.path == atCap, "a path of exactly \(cap) words resolves, got \(String(describing: fits[14]?.path))")
+
+        let pastCap = atCap + " w\(cap)"
+        let tooLong = ProcessTable.parse(psRow(pid: 15, args: "\(pastCap) --flag value"), fileExists: fakeFileExists([pastCap], asked: LogRecorder()))
+        expect(tooLong[15]?.path == "/p", "a path of \(cap + 1) words falls back to the first word, got \(String(describing: tooLong[15]?.path))")
+    }
+
+    /// The real check, against the real disk, in a folder of the test's own. The folder is removed
+    /// before any assertion, because a failed `expect` exits without running `defer`.
+    private static func testRegularFileCheckAcceptsOnlyRegularFiles() {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("systembar-regular-file-\(UUID().uuidString)")
+        let file = folder.appendingPathComponent("tool with spaces")
+        let created = (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
+            && FileManager.default.createFile(atPath: file.path, contents: Data("x".utf8))
+
+        let folderIsRegular = ProcessTable.isExistingRegularFile(atPath: folder.path)
+        let fileIsRegular = ProcessTable.isExistingRegularFile(atPath: file.path)
+        let missingIsRegular = ProcessTable.isExistingRegularFile(atPath: folder.appendingPathComponent("missing").path)
+        try? FileManager.default.removeItem(at: folder)
+
+        expect(created, "could not create the test folder and file")
+        expect(!folderIsRegular, "a folder is not a regular file")
+        expect(fileIsRegular, "a regular file is one")
+        expect(!missingIsRegular, "a missing path is not a regular file")
+        expect(!ProcessTable.isExistingRegularFile(atPath: "/dev/null"), "a device such as /dev/null is not a regular file")
     }
 
     private static func testRunProcessDrainsLargeStderrConcurrently() {

@@ -57,11 +57,17 @@ extension ProcessDetail {
     }
 
     /// Runs the on-demand `ps` snapshot through the host and returns the tapped group's rows.
-    /// Called on tap only — no cost to the idle sampling loop.
-    static func fetchGroupDetail(name: String, using host: HostServices) -> [ProcessDetail] {
+    /// Called on tap only — no cost to the idle sampling loop. `fileExists` is how the parser finds
+    /// an executable path with spaces in it, such as Chrome's; tests pass a fake so they do not
+    /// depend on what is installed.
+    static func fetchGroupDetail(
+        name: String,
+        using host: HostServices,
+        fileExists: (String) -> Bool = ProcessTable.isExistingRegularFile(atPath:)
+    ) -> [ProcessDetail] {
         let result = host.run(path: ProcessTable.executable, arguments: ProcessTable.arguments)
         guard result.status == 0 else { return [] }
-        let map = ProcessTable.parse(result.output)
+        let map = ProcessTable.parse(result.output, fileExists: fileExists)
         return groupDetail(name: name, in: map, coreCount: ProcessInfo.processInfo.activeProcessorCount)
     }
 }
