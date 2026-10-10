@@ -140,8 +140,10 @@ public protocol TabPlugin: AnyObject {
     /// on screen, as every tab did before this existed. A number is clamped to between 5 seconds
     /// and one day, and each substitution is logged. Shared feeds do not run for a hidden tab,
     /// so a `collect()` that runs in the background samples for itself; a feed value read then
-    /// is whatever the feed last held. Declare one only for work the person wants done while
-    /// they are not looking, and say in the README what runs and how often.
+    /// is whatever the feed last held. After the Mac wakes, the first background tick waits
+    /// `PluginScheduler.backgroundSettleAfterWake` so no sample lands on the login moment.
+    /// Declare one only for work the person wants done while they are not looking, and say
+    /// in the README what runs and how often.
     var backgroundInterval: TimeInterval? { get }
 }
 
@@ -162,6 +164,12 @@ The scheduler's rules, in addition to today's:
   tick one interval later, since the tab was collected a moment ago.
 - `PluginScheduler.minimumBackgroundInterval` is 5 seconds;
   `maximumRefreshInterval` is the ceiling for both.
+- After the Mac wakes (`NSWorkspace.didWakeNotification` or
+  `screensDidWakeNotification`), every background timer is restarted with its
+  first tick `PluginScheduler.backgroundSettleAfterWake` (120 seconds) later.
+  A Dispatch timer that missed its deadline during sleep fires the instant
+  the Mac wakes, which would land a `top` sample, or a disk scan, on the
+  login moment. The shown tab's fast timer is left alone.
 - The host's shared samplers are unchanged: they run only while the window is
   open, and the process sampler only while the showing tab declares it.
 
@@ -212,14 +220,14 @@ notification, which cost nothing.
 and wake-ups per second, each with a timestamp. 120 readings, not two hours
 of wall clock, so an overnight sleep does not empty it. A name absent for 120
 consecutive samples is dropped. It is written as JSON to
-`<homeDirectory>/Library/Application Support/SystemBar/cpu-baseline.json`
-every five minutes, with a `version` field, and read on the first collect
+`cpu-baseline.json` inside `host.dataDirectory`, the per-plugin folder under
+Application Support that the Disk epic (ifd) adds to `HostServices`, every
+five minutes, with a `version` field, and read on the first collect
 rather than in `init`, which must stay under 100 ms. A file that will not
 parse, or has a version this build does not know, is logged and replaced by
 an empty baseline: the app wrote it, so unlike `plugins.json` it is not the
-person's text to correct. Tests build their own path inside a temporary folder
-through the `homeDirectory` a test hands `HostServices`, and never touch the
-real Application Support.
+person's text to correct. Tests point `dataDirectory` at a temporary folder,
+and never touch the real Application Support.
 
 **The rules.** Initial values, tuned against real readings in Stage 3 and
 kept as named constants:
@@ -284,13 +292,15 @@ Epic swift-ui-system-monitor-ewy, three stage issues, each leaving a working,
 buildable, tested app with something new on screen or in `--list-plugins`:
 
 1. **Background sampling in the SDK.** `backgroundInterval`, the scheduler's
-   slow timer, its clamp, `--list-plugins` reporting it, scheduler tests, the
-   doc comment, D9 in the plugin spec, and the README's two tables.
+   slow timer, its clamp, the wake settle, `--list-plugins` reporting it,
+   scheduler tests, the doc comment, D9 in the plugin spec, and the README's
+   two tables. The Disk epic's Stage 1 adopts this contract and waits for it.
 2. **The left column.** The fast feed's three new fields and their sampler
    tests, the cluster spike, and the machine-state views under the history.
 3. **The right column.** The `top` sampler and its parser, naming by path,
-   the baseline and its file, the rules and their tests, the three cards, and
-   the README's `top` row and CPU line.
+   the baseline and its file in `host.dataDirectory`, the rules and their
+   tests, the three cards, and the README's `top` row and CPU line. Waits for
+   the Disk epic's `dataDirectory` task.
 
 ## Decision Log
 
@@ -307,3 +317,7 @@ buildable, tested app with something new on screen or in `--list-plugins`:
 - 2026-10-10 — D6: chose A — the baseline is written to disk — Adam.
 - 2026-10-10 — D7: chose A — one `collect()` at two cadences — Claude,
   proposed.
+- 2026-10-10 — The Disk epic (ifd) drops its own background-tick design and
+  adopts this contract, adding the 120-second settle after wake from its D2;
+  this epic's baseline file moves into the `host.dataDirectory` that ifd
+  adds. Agreed between the two sessions, for Adam to confirm.
