@@ -100,6 +100,22 @@ struct DiskSnapshot {
         return next
     }
 
+    /// The footer's one line: problems first (settings, then a failed save, then a ledger moved
+    /// aside), then progress while a plan runs, then what the last scans could not measure, then
+    /// each plan's age. A warning when any problem is set, or an incomplete scan once nothing runs.
+    func footer(now: Date) -> (text: String, isWarning: Bool) {
+        let hasProblem = settingsProblem != nil || saveProblem != nil || ledgerNote != nil
+        let isWarning = hasProblem || (!isScanning && scanWarning != nil)
+        if let problem = settingsProblem ?? saveProblem ?? ledgerNote { return (problem, isWarning) }
+        if isScanning { return (scanStatus, isWarning) }
+        if let warning = scanWarning { return (warning, isWarning) }
+        let ages = DiskPlanKind.allCases.map { kind -> String in
+            guard let date = planAges[kind] else { return "\(kind.title) never" }
+            return "\(kind.title) \(relativeTimeString(date, now: now)) ago"
+        }
+        return (ages.joined(separator: " · "), isWarning)
+    }
+
     /// A copy with the incomplete-scan summary applied, or nil once every plan measured everything.
     func warning(_ text: String?) -> DiskSnapshot {
         var next = self

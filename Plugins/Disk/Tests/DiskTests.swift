@@ -11,6 +11,7 @@ enum DiskTests {
         testLocalSnapshotParsing()
         testSnapshotCountRunsTmutilThroughTheHost()
         testSnapshotAppliesAReadingAndALedger()
+        testFooterOrdersProblemsBeforeProgressBeforeAges()
         testSamplingIntervalsKeepScansRare()
         testBackgroundScansSettingDefaultsOnAndReportsAWrongType()
         testPluginDeclaresABackgroundIntervalUnlessTurnedOff()
@@ -85,6 +86,29 @@ enum DiskTests {
         let scanning = mapped.scanning(true, status: "Measuring overview folders")
         expect(scanning.isScanning && scanning.scanStatus == "Measuring overview folders", "the scan state is its own, got \(scanning.scanStatus)")
         expect(scanning.biggest == mapped.biggest, "and leaves the rows alone")
+    }
+
+    private static func testFooterOrdersProblemsBeforeProgressBeforeAges() {
+        var ages = DiskSnapshot()
+        ages.planAges = [.overview: now.addingTimeInterval(-120), .simulators: now.addingTimeInterval(-7200)]
+        let plain = ages.footer(now: now)
+        expect(plain.text == "Overview 2m ago · Developer never · Simulators 2h ago" && !plain.isWarning, "with nothing else to say, each plan's age in plan order, got \(plain.text)")
+
+        let incomplete = ages.warning("Overview: Measured 1 path, 1 unreadable (needs Full Disk Access?)")
+        expect(incomplete.footer(now: now) == ("Overview: Measured 1 path, 1 unreadable (needs Full Disk Access?)", true), "an incomplete last scan comes before the ages, as a warning")
+
+        let scanning = incomplete.scanning(true, status: "Measuring overview folders")
+        expect(scanning.footer(now: now) == ("Measuring overview folders", false), "progress comes before the incomplete summary, and is not a warning while it runs")
+
+        let moved = scanning.noting("moved aside")
+        expect(moved.footer(now: now) == ("moved aside", true), "a moved-aside ledger comes before progress, as a warning")
+
+        let unsaved = moved.savingProblem("could not save")
+        expect(unsaved.footer(now: now) == ("could not save", true), "a failed save comes before the moved-aside note")
+
+        var misconfigured = unsaved
+        misconfigured.settingsProblem = "settings problem"
+        expect(misconfigured.footer(now: now) == ("settings problem", true), "a settings problem comes first of all")
     }
 
     private static func testSamplingIntervalsKeepScansRare() {

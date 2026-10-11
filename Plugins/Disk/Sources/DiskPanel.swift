@@ -187,9 +187,10 @@ struct DiskPanel: View {
     private var footer: some View {
         HStack(spacing: 8) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(footerText(now: context.date))
+                let footer = snapshot.footer(now: context.date)
+                Text(footer.text)
                     .font(.caption)
-                    .foregroundStyle(isFooterWarning ? Palette.warning : .secondary)
+                    .foregroundStyle(footer.isWarning ? Palette.warning : .secondary)
                     .lineLimit(2)
                     .minimumScaleFactor(0.75)
             }
@@ -207,27 +208,6 @@ struct DiskPanel: View {
             .disabled(snapshot.isScanning)
             .help("Measure every folder again now")
         }
-    }
-
-    /// Warning colour for a problem, or for an incomplete last scan once nothing is running.
-    private var isFooterWarning: Bool {
-        let hasProblem = snapshot.settingsProblem != nil || snapshot.saveProblem != nil || snapshot.ledgerNote != nil
-        return hasProblem || (!snapshot.isScanning && snapshot.scanWarning != nil)
-    }
-
-    /// Problems first, then what is running, then what the last scans could not measure, then
-    /// each plan's age.
-    private func footerText(now: Date) -> String {
-        if let problem = snapshot.settingsProblem { return problem }
-        if let problem = snapshot.saveProblem { return problem }
-        if let note = snapshot.ledgerNote { return note }
-        if snapshot.isScanning { return snapshot.scanStatus }
-        if let warning = snapshot.scanWarning { return warning }
-        let ages = DiskPlanKind.allCases.map { kind -> String in
-            guard let date = snapshot.planAges[kind] else { return "\(kind.title) never" }
-            return "\(kind.title) \(relativeTimeString(date, now: now)) ago"
-        }
-        return ages.joined(separator: " · ")
     }
 }
 
