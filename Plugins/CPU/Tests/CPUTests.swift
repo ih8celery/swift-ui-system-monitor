@@ -15,6 +15,9 @@ enum CPUTests {
         testClusterLayoutPutsTheSlowestClusterAtCoreZero()
         testClusterUsageIsTheMeanOfItsCores()
         testThermalSpeedLimitParsing()
+        testMachineStateRunsPmsetThroughTheHost()
+        testClustersOnThisMacCoverEveryCore()
+        testCollectPublishesTheMachineState()
     }
 
     // A `ps -eo pid,ppid,pcpu,rss,etime,args` sample. Leading fields are
@@ -164,7 +167,7 @@ enum CPUTests {
         expect(CPUPlugin.identifier == "cpu" && plugin.title == "CPU" && plugin.systemImage == "cpu", "the bundle keeps the tab's id, title and icon")
         expect(plugin.accent == Palette.warning, "and its accent")
         expect(plugin.sharedFeeds == [.processes, .fastStats], "it needs both shared feeds")
-        expect(plugin.refreshInterval == PluginScheduler.maximumRefreshInterval, "its collect() does nothing, so it asks to be called as rarely as the host allows, got \(plugin.refreshInterval)")
+        expect(plugin.refreshInterval == CPUSampling.refreshInterval && CPUSampling.refreshInterval == 10, "collect() reads the load average, thermal state and pmset every 10 seconds while showing, got \(plugin.refreshInterval)")
     }
 
     // MARK: - Machine state
@@ -208,5 +211,42 @@ enum CPUTests {
         expect(ThermalReading(state: .nominal, speedLimitPercent: 100).isNominal, "full speed is nothing to say either")
         expect(!ThermalReading(state: .fair, speedLimitPercent: nil).isNominal, "a fair state is worth a line")
         expect(!ThermalReading(state: .nominal, speedLimitPercent: 80).isNominal, "and so is a speed limit under 100")
+    }
+
+    private static func testMachineStateRunsPmsetThroughTheHost() {
+        let recorder = LogRecorder()
+        let command = "/usr/bin/pmset -g therm"
+        let throttled = "CPU Power notify\n\tCPU_Speed_Limit \t= 80\n"
+        let host = makeHost(runner: recordingRunner(recorder, answers: [command: throttled]))
+        let state = CPUCollector.machineState(using: host, now: Date(timeIntervalSince1970: 1_000))
+        expect(recorder.messages == [command], "one pmset, through the host, by explicit path, got \(recorder.messages)")
+        expect(state.thermal.speedLimitPercent == 80, "the speed limit comes from pmset, got \(String(describing: state.thermal.speedLimitPercent))")
+        expect(state.coreCount == ProcessInfo.processInfo.activeProcessorCount && state.loadAverage >= 0, "the core count and load average come from the kernel, got \(state.coreCount) and \(state.loadAverage)")
+        expect(state.sampledAt == Date(timeIntervalSince1970: 1_000), "the reading carries the time it was taken")
+
+        let failing = CPUCollector.machineState(using: makeHost(runner: recordingRunner(LogRecorder(), answers: [:])))
+        expect(failing.thermal.speedLimitPercent == nil, "a pmset that fails means no speed limit, not a guess")
+    }
+
+    private static func testClustersOnThisMacCoverEveryCore() {
+        // sysctl is read for real here: the layout rule has fixed-input tests above, this checks
+        // the plumbing against whichever chip runs the tests.
+        guard let clusters = CPUCollector.clusters() else {
+            expect(true, "a chip whose perflevel counts do not add up falls back to per-core bars")
+            return
+        }
+        let covered = clusters.flatMap { Array($0.cores) }.sorted()
+        expect(covered == Array(0..<ProcessInfo.processInfo.activeProcessorCount), "the clusters cover every core index once, got \(clusters)")
+        expect(clusters.allSatisfy { !$0.name.isEmpty }, "every cluster carries sysctl's name, got \(clusters.map(\.name))")
+    }
+
+    private static func testCollectPublishesTheMachineState() {
+        let command = "/usr/bin/pmset -g therm"
+        let answers = [command: "CPU Power notify\n\tCPU_Speed_Limit \t= 90\n"]
+        let plugin = CPUPlugin(host: makeHost(runner: recordingRunner(LogRecorder(), answers: answers)))
+        expect(plugin.machineState == .empty, "before the first collect the state is empty")
+        plugin.collect()
+        waitUntil { plugin.machineState.thermal.speedLimitPercent == 90 }
+        expect(plugin.machineState.thermal.speedLimitPercent == 90 && plugin.machineState.coreCount > 0, "collect publishes the reading on the main thread, got \(plugin.machineState)")
     }
 }
