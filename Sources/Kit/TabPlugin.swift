@@ -11,7 +11,8 @@ public enum SharedFeed: Hashable, Sendable {
 }
 
 /// One tab. The host creates a plugin once at launch, calls `collect()` on the plugin's own
-/// queue only while its tab is on screen, and embeds `makeView()` in the window.
+/// queue while its tab is on screen (and, if the plugin declares a `backgroundInterval`, at that
+/// cadence while it is not), and embeds `makeView()` in the window.
 ///
 /// Thread rules, fixed for every plugin built against this SDK: the host constructs every
 /// plugin on the main thread at launch; `collect()` runs on a queue the host owns for this
@@ -34,11 +35,20 @@ public protocol TabPlugin: AnyObject {
     /// Which shared samplers must run while this tab is showing. The set is not frozen: a host
     /// switching over it needs `@unknown default`.
     var sharedFeeds: Set<SharedFeed> { get }
+    /// How often the host calls `collect()` while this tab is NOT showing: the window closed,
+    /// or open on another tab. Nil, the default, means never: the tab samples only while it is
+    /// on screen, as every tab did before this existed. A number is clamped to between 5 seconds
+    /// and one day, and each substitution is logged. Shared feeds do not run for a hidden tab,
+    /// so a `collect()` that runs in the background samples for itself; a feed value read then
+    /// is whatever the feed last held. After the Mac wakes, the first background tick waits
+    /// two minutes so no sample lands on the login moment. Declare one only for work the person
+    /// wants done while they are not looking, and say in the README what runs and how often.
+    var backgroundInterval: TimeInterval? { get }
 
     /// The host times this call and logs a warning once it passes 100 ms, so slow work belongs
     /// in `collect()` instead.
     @MainActor init(host: HostServices)
-    /// This plugin's own queue, never concurrently with itself, only while visible.
+    /// This plugin's own queue, never concurrently with itself: while visible, and while hidden only if `backgroundInterval` is set.
     func collect()
     /// Main thread, when the tab is switched to or away from. Default: nothing.
     @MainActor func visibilityChanged(isVisible: Bool)
@@ -51,4 +61,6 @@ public protocol TabPlugin: AnyObject {
 public extension TabPlugin {
     /// Does nothing: most plugins need no notice beyond `collect()` starting and stopping.
     @MainActor func visibilityChanged(isVisible: Bool) {}
+    /// Nil: the tab is collected only while it is showing.
+    var backgroundInterval: TimeInterval? { nil }
 }
