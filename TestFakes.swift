@@ -5,8 +5,9 @@ import SystemBarKit
 // Helpers and fakes shared by more than one test file. A helper used by only one file lives in
 // that file instead.
 
-/// A HostServices with empty feeds, a silent log, and a runner that succeeds with no output
-/// unless a test passes its own.
+/// A HostServices with empty feeds, a silent log, a runner that succeeds with no output unless
+/// a test passes its own, empty settings, and a data folder under the temporary directory, so
+/// no test ever writes into the real Application Support folder.
 @MainActor
 func makeHost(
     processes: Feed<ProcessSummary> = Feed(initial: ProcessSummary()),
@@ -14,14 +15,18 @@ func makeHost(
     runner: @escaping CommandRunner = { _, _, _, _ in
         CommandOutput(output: "", error: "", status: 0, didTimeout: false)
     },
-    log: @escaping @Sendable (String) -> Void = { _ in }
+    log: @escaping @Sendable (String) -> Void = { _ in },
+    settings: PluginSettings = .empty,
+    dataDirectory: URL = FileManager.default.temporaryDirectory.appendingPathComponent("systembar-tests-data")
 ) -> HostServices {
     HostServices(
         homeDirectory: "/tmp/systembar-tests",
         processes: processes,
         fastStats: fastStats,
         runner: runner,
-        log: log
+        log: log,
+        settings: settings,
+        dataDirectory: dataDirectory
     )
 }
 

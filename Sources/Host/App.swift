@@ -26,7 +26,7 @@ struct SystemBarApp: App {
             samplers: HostSamplers.standard(processes: processes, fastStats: fastStats)
         )
         let source = BundleTabSource.standard()
-        let loaded = TabLoader.load(store: store, source: source, host: host)
+        let loaded = TabLoader.load(store: store, source: source, host: host, dataRoot: PluginDataRoot.standard())
         tabs = loaded
         configPath = store.fileURL.path
 

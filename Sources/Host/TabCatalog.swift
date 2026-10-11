@@ -46,13 +46,20 @@ enum TabCatalog {
     static let slowInitThreshold: TimeInterval = 0.1
 
     /// Every enabled entry, in order, as a loaded tab or a failure. Nothing here stops on error.
-    @MainActor static func build(config: PluginConfig, source: TabSource, host: HostServices) -> [LoadedTab] {
+    /// Each plugin is constructed with a host of its own: the shared feeds and runner, plus its
+    /// entry's settings and a folder named by its identifier under `dataRoot`.
+    @MainActor static func build(
+        config: PluginConfig,
+        source: TabSource,
+        host: HostServices,
+        dataRoot: URL = PluginDataRoot.standard()
+    ) -> [LoadedTab] {
         var tabs: [LoadedTab] = []
         // Identifier to the location of the entry that first claimed it, so a later duplicate
         // can name which earlier entry it clashes with.
         var loadedIDs: [String: String] = [:]
         for entry in config.plugins where entry.isEnabled {
-            let tab = makeTab(for: entry, source: source, host: host, alreadyLoaded: loadedIDs)
+            let tab = makeTab(for: entry, source: source, host: host, dataRoot: dataRoot, alreadyLoaded: loadedIDs)
             tabs.append(tab)
             if let plugin = tab.plugin {
                 loadedIDs[type(of: plugin).identifier] = entry.location
@@ -65,6 +72,7 @@ enum TabCatalog {
         for entry: PluginEntry,
         source: TabSource,
         host: HostServices,
+        dataRoot: URL,
         alreadyLoaded: [String: String]
     ) -> LoadedTab {
         let type: TabPlugin.Type
@@ -80,7 +88,8 @@ enum TabCatalog {
         if let earlier = alreadyLoaded[id] {
             return .failed(location: entry.location, reason: "the id \"\(id)\" is already used by \"\(earlier)\", which comes earlier in the list")
         }
-        return .loaded(location: entry.location, plugin: timedInit(of: type, host: host))
+        let pluginHost = host.forPlugin(identifier: id, settings: entry.settings, dataRoot: dataRoot)
+        return .loaded(location: entry.location, plugin: timedInit(of: type, host: pluginHost))
     }
 
     /// Constructs one plugin, timing its init(host:) and warning through the host's log when it

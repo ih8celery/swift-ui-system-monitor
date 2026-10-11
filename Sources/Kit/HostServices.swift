@@ -17,6 +17,14 @@ public final class HostServices: Sendable {
     /// The 1-second sample: CPU percent and network rates with their short histories. Sampled
     /// whenever the window is open, so listing `.fastStats` only documents the dependency today.
     public let fastStats: Feed<FastStatsSnapshot>
+    /// The `settings` object from this plugin's entry in plugins.json, or `.empty`. The keys
+    /// are the plugin's own; see `PluginSettings`.
+    public let settings: PluginSettings
+    /// A folder for this plugin alone, `~/Library/Application Support/SystemBar/Plugins/<id>/`
+    /// in the app. It may not exist yet: create it (with intermediate directories) before
+    /// writing. A plugin that saves anything between launches saves it here and nowhere else,
+    /// so a test can point the whole app at a temporary root with SYSTEMBAR_PLUGIN_DATA_ROOT.
+    public let dataDirectory: URL
     private let runner: CommandRunner
     private let logger: @Sendable (String) -> Void
 
@@ -28,13 +36,52 @@ public final class HostServices: Sendable {
         processes: Feed<ProcessSummary>,
         fastStats: Feed<FastStatsSnapshot>,
         runner: @escaping CommandRunner,
-        log: @escaping @Sendable (String) -> Void
+        log: @escaping @Sendable (String) -> Void,
+        settings: PluginSettings,
+        dataDirectory: URL
     ) {
         self.homeDirectory = homeDirectory
         self.processes = processes
         self.fastStats = fastStats
         self.runner = runner
         self.logger = log
+        self.settings = settings
+        self.dataDirectory = dataDirectory
+    }
+
+    /// The original initializer, kept so plugin tests written against it still compile: empty
+    /// settings, and a data folder under the temporary directory that nothing reads back.
+    public convenience init(
+        homeDirectory: String,
+        processes: Feed<ProcessSummary>,
+        fastStats: Feed<FastStatsSnapshot>,
+        runner: @escaping CommandRunner,
+        log: @escaping @Sendable (String) -> Void
+    ) {
+        self.init(
+            homeDirectory: homeDirectory,
+            processes: processes,
+            fastStats: fastStats,
+            runner: runner,
+            log: log,
+            settings: .empty,
+            dataDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("SystemBar-plugin-data-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        )
+    }
+
+    /// The host's side: this host's feeds, runner and log, with one plugin's settings and its
+    /// own folder under `dataRoot`. Package-only: the catalog builds one per loaded plugin.
+    package func forPlugin(identifier: String, settings: PluginSettings, dataRoot: URL) -> HostServices {
+        HostServices(
+            homeDirectory: homeDirectory,
+            processes: processes,
+            fastStats: fastStats,
+            runner: runner,
+            log: logger,
+            settings: settings,
+            dataDirectory: dataRoot.appendingPathComponent(identifier, isDirectory: true)
+        )
     }
 
     /// The way a plugin runs a subprocess: explicit path, argument array, no shell.

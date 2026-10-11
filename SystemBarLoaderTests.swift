@@ -17,6 +17,7 @@ struct SystemBarLoaderTests {
         testCatalogRefusesADuplicateBeforeConstructingIt()
         testCatalogLogsWhenInitPassesTheSlowThreshold()
         testCatalogLogsNothingForAFastInit()
+        testCatalogGivesEachPluginItsOwnSettingsAndDataFolder()
         testListReportPrintsOneLinePerEntry()
         testDefaultListNamesSixBundles()
         testPluginPathResolvesNamesInsideThePlugInsFolder()
@@ -152,6 +153,22 @@ struct SystemBarLoaderTests {
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: host)
         expect(tabs.compactMap(\.plugin).count == 1, "the fast plugin loads, got \(tabs)")
         expect(log.count == 0, "a fast init(host:) logs nothing, got \(log.count): \(log.messages)")
+    }
+
+    private static func testCatalogGivesEachPluginItsOwnSettingsAndDataFolder() {
+        let settings = PluginSettings(values: ["backgroundScans": .bool(false)])
+        let config = PluginConfig(plugins: [
+            PluginEntry(name: "A.bundle", path: nil, isEnabled: true, settings: settings),
+            PluginEntry(name: "B.bundle", path: nil, isEnabled: true),
+        ])
+        let source = MapTabSource(types: ["A.bundle": HostKeepingTab.self, "B.bundle": OtherHostKeepingTab.self])
+        let tabs = TabCatalog.build(config: config, source: source, host: makeHost(), dataRoot: URL(fileURLWithPath: "/data"))
+        let a = tabs[0].plugin as? HostKeepingTab
+        let b = tabs[1].plugin as? OtherHostKeepingTab
+        expect(a?.host.settings == settings, "the first plugin sees its entry's settings")
+        expect(a?.host.dataDirectory.path == "/data/keeper", "and a folder named by its identifier, got \(String(describing: a?.host.dataDirectory.path))")
+        expect(b?.host.settings == .empty, "the second plugin, whose entry has none, sees empty settings")
+        expect(b?.host.dataDirectory.path == "/data/other-keeper", "and its own folder, got \(String(describing: b?.host.dataDirectory.path))")
     }
 
     private static func testListReportPrintsOneLinePerEntry() {
@@ -371,6 +388,36 @@ final class OtherFakeTab: TabPlugin {
     init(host: HostServices) {}
     func collect() {}
     @MainActor func makeView() -> AnyView { AnyView(Text("other")) }
+}
+
+/// A plugin that keeps the HostServices it was given, so a test can see what the catalog built for it.
+final class HostKeepingTab: TabPlugin {
+    static let identifier = "keeper"
+    let title = "Keeper"
+    let systemImage = "questionmark"
+    let accent = Color.white
+    let refreshInterval: TimeInterval = 5
+    let sharedFeeds: Set<SharedFeed> = []
+    let host: HostServices
+
+    init(host: HostServices) { self.host = host }
+    func collect() {}
+    @MainActor func makeView() -> AnyView { AnyView(Text("keeper")) }
+}
+
+/// A second host-keeping plugin with its own id, so a test can tell two plugins' hosts apart.
+final class OtherHostKeepingTab: TabPlugin {
+    static let identifier = "other-keeper"
+    let title = "Other Keeper"
+    let systemImage = "questionmark"
+    let accent = Color.white
+    let refreshInterval: TimeInterval = 5
+    let sharedFeeds: Set<SharedFeed> = []
+    let host: HostServices
+
+    init(host: HostServices) { self.host = host }
+    func collect() {}
+    @MainActor func makeView() -> AnyView { AnyView(Text("other keeper")) }
 }
 
 /// A source that knows a fixed set of names, standing in for the bundle source.
