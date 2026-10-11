@@ -62,30 +62,36 @@ enum DiskRows {
         let devices = latest.filter { $0.simulator != nil }
         let folders = latest.filter { $0.simulator == nil }
 
+        let group = simulatorGroup(devices)
+        let plainFolders = folders.filter { $0.path != group?.path }
+        var measured: [String: (bytes: UInt64, measuredAt: Date)] = Dictionary(uniqueKeysWithValues: plainFolders.map { ($0.path, ($0.bytes, $0.measuredAt)) })
         var rows: [DiskRow] = []
-        var bytesByPath: [String: UInt64] = Dictionary(uniqueKeysWithValues: folders.map { ($0.path, $0.bytes) })
-        if let group = simulatorGroup(devices) {
+        if let group {
             rows.append(group)
-            bytesByPath[group.path] = group.bytes
+            measured[group.path] = (group.bytes, group.measuredAt)
         }
-        let measuredPaths = Array(bytesByPath.keys)
+        let measuredPaths = Array(measured.keys)
 
-        for sample in folders {
+        for sample in plainFolders {
             let children = directChildren(of: sample.path, among: measuredPaths)
             if children.isEmpty {
                 rows.append(DiskRow(name: displayName(sample.path, homeDirectory: homeDirectory), path: sample.path, bytes: sample.bytes, measuredAt: sample.measuredAt, kind: .folder, simulator: nil))
                 continue
             }
-            let explained = children.reduce(UInt64(0)) { $0 &+ (bytesByPath[$1] ?? 0) }
+            let explained = children.reduce(UInt64(0)) { $0 &+ (measured[$1]?.bytes ?? 0) }
             let rest = sample.bytes > explained ? sample.bytes - explained : 0
-            rows.append(DiskRow(name: "\(displayName(sample.path, homeDirectory: homeDirectory)) (rest)", path: sample.path, bytes: rest, measuredAt: sample.measuredAt, kind: .remainder, simulator: nil))
+            // As old as the oldest number it is computed from, never flattered by a fresher parent.
+            let oldest = children.compactMap { measured[$0]?.measuredAt }.reduce(sample.measuredAt, min)
+            rows.append(DiskRow(name: "\(displayName(sample.path, homeDirectory: homeDirectory)) (rest)", path: sample.path, bytes: rest, measuredAt: oldest, kind: .remainder, simulator: nil))
         }
         return rows
     }
 
-    /// One row for every simulator device, as old as the oldest device measurement, so the age
-    /// shown is never newer than the data behind it.
-    private static func simulatorGroup(_ devices: [DiskSample]) -> DiskRow? {
+    /// One row for every simulator device still present, as old as the oldest device
+    /// measurement, so the age shown is never newer than the data behind it. A device measured
+    /// at zero bytes has been deleted and is neither counted nor summed.
+    private static func simulatorGroup(_ allDevices: [DiskSample]) -> DiskRow? {
+        let devices = allDevices.filter { $0.bytes > 0 }
         guard let first = devices.first, let oldest = devices.map(\.measuredAt).min() else { return nil }
         let count = devices.count
         return DiskRow(
@@ -98,8 +104,14 @@ enum DiskRows {
         )
     }
 
-    /// One row per device, biggest first, for the expanded simulator group.
+    /// One row per present device, biggest first, for the expanded simulator group.
     static func simulatorRows(from ledger: DiskLedger) -> [DiskRow] {
+        allSimulatorRows(from: ledger).filter { $0.bytes > 0 }
+    }
+
+    /// Every device the ledger knows, deleted ones (measured at zero) included, so movers can
+    /// show a deleted device as freed.
+    private static func allSimulatorRows(from ledger: DiskLedger) -> [DiskRow] {
         ledger.latest
             .compactMap { sample -> DiskRow? in
                 guard let info = sample.simulator else { return nil }
@@ -121,16 +133,20 @@ enum DiskRows {
         Array(rows.filter { $0.bytes > 0 }.sorted { $0.bytes != $1.bytes ? $0.bytes > $1.bytes : $0.path < $1.path }.prefix(limit))
     }
 
-    /// Each row against its own newest sample from at or before `window` ago. A row with no such
-    /// sample is new when it was first measured inside the window, and silent otherwise: a
-    /// folder measured once, before the window, has nothing to be compared with.
+    /// Each row against its own newest sample from at or before `window` ago. Simulator devices
+    /// are compared one by one, deleted ones included, never as the group: a group's earlier
+    /// sum can cover a different set of devices. A row with no earlier sample is new only when
+    /// its plan had already looked before the window and did not see it; otherwise it is
+    /// silent, so a first scan, or a folder a budget cut-off skipped, is never called new.
     static func movers(rows: [DiskRow], ledger: DiskLedger, window: TimeInterval, now: Date, limit: Int = listLimit) -> [DiskMover] {
         let since = now.addingTimeInterval(-window)
         let history = SampleHistory(ledger)
-        let movers = rows.compactMap { row -> DiskMover? in
+        let compared = rows.flatMap { row in row.kind == .simulatorGroup ? allSimulatorRows(from: ledger) : [row] }
+        let movers = compared.compactMap { row -> DiskMover? in
             guard row.kind != .remainder else { return nil }
-            guard let earlier = earlierBytes(of: row, history: history, atOrBefore: since) else {
-                return row.measuredAt > since && row.bytes > 0 ? DiskMover(row: row, change: .new) : nil
+            guard let earlier = history.sample(of: row.path, atOrBefore: since)?.bytes else {
+                let planHadLooked = history.plan(of: row.path).map { history.planHadRun($0, atOrBefore: since) } ?? false
+                return planHadLooked && row.bytes > 0 ? DiskMover(row: row, change: .new) : nil
             }
             if row.bytes == 0, earlier > 0 { return DiskMover(row: row, change: .freed(earlier)) }
             if row.bytes > earlier { return DiskMover(row: row, change: .grew(row.bytes - earlier)) }
@@ -138,16 +154,6 @@ enum DiskRows {
             return nil
         }
         return Array(movers.sorted { $0.magnitude != $1.magnitude ? $0.magnitude > $1.magnitude : $0.row.path < $1.row.path }.prefix(limit))
-    }
-
-    /// A folder's earlier size is its own earlier sample; the simulator group's is the sum of
-    /// its devices' earlier samples, nil when none of them has one.
-    private static func earlierBytes(of row: DiskRow, history: SampleHistory, atOrBefore since: Date) -> UInt64? {
-        guard row.kind == .simulatorGroup else {
-            return history.sample(of: row.path, atOrBefore: since)?.bytes
-        }
-        let earlier = history.devicePaths.compactMap { history.sample(of: $0, atOrBefore: since)?.bytes }
-        return earlier.isEmpty ? nil : earlier.reduce(0, &+)
     }
 
     /// The ledger's samples grouped by path, built once per `movers` call so each lookup scans
@@ -158,22 +164,32 @@ enum DiskRows {
         /// appended first, so the last match for any cut-off is the earliest appended of the
         /// newest: the one the ledger's `max(by:)` and `latest` keep.
         private let byPath: [String: [DiskSample]]
-        /// The paths whose newest sample is a simulator device.
-        let devicePaths: [String]
+        /// When each plan first appears in the ledger.
+        private let earliestRun: [DiskPlanKind: Date]
 
         init(_ ledger: DiskLedger) {
             let grouped = Dictionary(grouping: ledger.samples.enumerated(), by: { $0.element.path })
-            let ordered = grouped.mapValues { entries in
+            byPath = grouped.mapValues { entries in
                 entries
                     .sorted { $0.element.measuredAt != $1.element.measuredAt ? $0.element.measuredAt < $1.element.measuredAt : $0.offset > $1.offset }
                     .map(\.element)
             }
-            byPath = ordered
-            devicePaths = ordered.compactMap { path, samples in samples.last?.simulator != nil ? path : nil }.sorted()
+            earliestRun = ledger.samples.reduce(into: [:]) { earliest, sample in
+                earliest[sample.plan] = min(earliest[sample.plan] ?? sample.measuredAt, sample.measuredAt)
+            }
         }
 
         func sample(of path: String, atOrBefore date: Date) -> DiskSample? {
             byPath[path]?.last { $0.measuredAt <= date }
+        }
+
+        /// The plan of the path's newest sample: the plan that measures it now.
+        func plan(of path: String) -> DiskPlanKind? {
+            byPath[path]?.last?.plan
+        }
+
+        func planHadRun(_ plan: DiskPlanKind, atOrBefore date: Date) -> Bool {
+            earliestRun[plan].map { $0 <= date } ?? false
         }
     }
 
@@ -181,20 +197,37 @@ enum DiskRows {
     /// all slices of the volume's capacity. Labels must be distinct for the legend, so a repeated
     /// name carries its path.
     static func distribution(biggest: [DiskRow], volume: DiskVolume, homeDirectory: String, limit: Int = distributionLimit) -> [BarSegment] {
-        let colors = [Palette.cyan, Palette.blue, Palette.purple, Palette.tangerine, Palette.caution, Palette.warning]
         let top = Array(biggest.prefix(limit))
         let shown = top.reduce(UInt64(0)) { $0 &+ $1.bytes }
         let rest = volume.used > shown ? volume.used - shown : 0
-        var seen = Set<String>()
+        var seen: Set<String> = [everythingElseLabel, freeLabel]
         let slices = top.enumerated().map { index, row -> BarSegment in
             let label = seen.insert(row.name).inserted ? row.name : "\(row.name) · \(displayPath(row.path, homeDirectory: homeDirectory))"
-            return BarSegment(label: label, value: row.bytes, color: colors[index % colors.count])
+            // Colours cycle when `limit` is longer than the list.
+            return BarSegment(label: label, value: row.bytes, color: seriesColors[index % seriesColors.count])
         }
         return slices + [
-            BarSegment(label: "Everything else", value: rest, color: Color.white.opacity(0.35)),
-            BarSegment(label: "Free", value: volume.free, color: Palette.good),
+            BarSegment(label: everythingElseLabel, value: rest, color: otherColor),
+            BarSegment(label: freeLabel, value: volume.free, color: Palette.good),
         ]
     }
+
+    private static let everythingElseLabel = "Everything else"
+    private static let freeLabel = "Free"
+
+    /// Six visibly distinct series colours for the distribution's slices. None is green, which
+    /// is Free's colour, and none is a status colour, because a slice is neither good nor bad.
+    private static let seriesColors: [Color] = [
+        Palette.cyan,
+        Palette.blue,
+        Palette.purple,
+        Palette.tangerine,
+        Color(red: 0.96, green: 0.42, blue: 0.68),
+        Color(red: 0.80, green: 0.70, blue: 0.52),
+    ]
+
+    /// "Everything else": used space no measured row explains.
+    private static let otherColor = Color.white.opacity(0.35)
 
     static func displayName(_ path: String, homeDirectory: String) -> String {
         path == homeDirectory ? "~" : (path as NSString).lastPathComponent

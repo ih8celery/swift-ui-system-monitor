@@ -14,6 +14,13 @@ enum DiskRowsTests {
         testMoversSayNothingForARowWithNoEarlierSample()
         testDistributionIsTopRowsThenEverythingElseThenFree()
         testDisplayPathShortensHome()
+        testDirectChildrenIgnoresPrefixSiblings()
+        testRemainderClampsWhenChildrenOutgrowTheParent()
+        testMoversStaySilentAfterAFirstScan()
+        testMoversNameANewPathOnlyWhenItsPlanHadLookedBefore()
+        testMoversListSimulatorDevicesNotTheGroup()
+        testDeletedDevicesLeaveTheGroupCountAndList()
+        testSampleHistoryAgreesWithTheLedgerOnTies()
     }
 
     static let home = "/Users/ada"
@@ -105,6 +112,79 @@ enum DiskRowsTests {
         expect(segments.map(\.value) == [300, 100, 400, 200], "everything else is used minus the shown rows: 800 - 400, got \(segments.map(\.value))")
         let all = DiskRows.distribution(biggest: biggest, volume: volume, homeDirectory: home, limit: 3)
         expect(all.map(\.label) == ["Simulators · 3 devices", "proj", "proj · /opt/proj", "Everything else", "Free"], "a repeated name gets its path, because a legend needs distinct labels, got \(all.map(\.label))")
+    }
+
+    private static func testDirectChildrenIgnoresPrefixSiblings() {
+        let paths = ["/a/b", "/a/bc"]
+        expect(DiskRows.directChildren(of: "/a", among: paths).sorted() == paths, "a path that merely starts with a sibling's name is a sibling, got \(DiskRows.directChildren(of: "/a", among: paths))")
+        expect(DiskRows.directChildren(of: "/a/b", among: paths).isEmpty, "/a/bc is not inside /a/b")
+    }
+
+    private static func testRemainderClampsWhenChildrenOutgrowTheParent() {
+        let ledger = DiskLedger().appending([
+            sample("p", 10, ago: 3600),
+            sample("p/c", 25),
+        ])
+        let rows = DiskRows.rows(from: ledger, homeDirectory: home)
+        let rest = rows.first { $0.name == "p (rest)" }
+        expect(rest?.bytes == 0 && rest?.kind == .remainder, "a child measured later and bigger than its parent leaves a zero remainder, not an underflow, got \(String(describing: rest))")
+        expect(!DiskRows.biggest(rows).contains { $0.name == "p (rest)" }, "and a zero remainder is not listed")
+        expect(rest?.measuredAt == now.addingTimeInterval(-3600), "a remainder is as old as the oldest of its parent and children")
+    }
+
+    private static func testMoversStaySilentAfterAFirstScan() {
+        let ledger = DiskLedger().appending([sample("a", 10, ago: 3600), sample("b", 5)])
+        let rows = DiskRows.rows(from: ledger, homeDirectory: home)
+        let movers = DiskRows.movers(rows: rows, ledger: ledger, window: day, now: now)
+        expect(movers.isEmpty, "a plan that never ran before the window cannot call anything new, got \(movers.map(\.row.name))")
+    }
+
+    private static func testMoversNameANewPathOnlyWhenItsPlanHadLookedBefore() {
+        let ledger = DiskLedger().appending([sample("x", 5, ago: 2 * day), sample("x", 5), sample("y", 3)])
+        let rows = DiskRows.rows(from: ledger, homeDirectory: home)
+        let movers = DiskRows.movers(rows: rows, ledger: ledger, window: day, now: now)
+        expect(movers.map(\.row.name) == ["y"] && movers.first?.change == .new, "the overview looked two days ago and did not see y, so y is new, got \(movers)")
+    }
+
+    static let deviceA = SimulatorInfo(udid: "A", name: "iPhone 17", runtime: "iOS 26.5", lastBootedAt: nil)
+    static let deviceB = SimulatorInfo(udid: "B", name: "iPad", runtime: "iOS 26.5", lastBootedAt: nil)
+    static let deviceC = SimulatorInfo(udid: "C", name: "iPhone SE", runtime: "iOS 18.0", lastBootedAt: nil)
+    static let devices = "Library/Developer/CoreSimulator/Devices"
+
+    /// A and B measured two days ago; today A grew, B is gone and C is new.
+    static func deviceLedger() -> DiskLedger {
+        DiskLedger().appending([
+            sample("\(devices)/A", 30, ago: 2 * day, plan: .simulators, simulator: deviceA),
+            sample("\(devices)/B", 20, ago: 2 * day, plan: .simulators, simulator: deviceB),
+            sample("\(devices)/A", 35, plan: .simulators, simulator: deviceA),
+            sample("\(devices)/B", 0, plan: .simulators, simulator: deviceB),
+            sample("\(devices)/C", 10, plan: .simulators, simulator: deviceC),
+        ])
+    }
+
+    private static func testMoversListSimulatorDevicesNotTheGroup() {
+        let ledger = deviceLedger()
+        let rows = DiskRows.rows(from: ledger, homeDirectory: home)
+        let movers = DiskRows.movers(rows: rows, ledger: ledger, window: day, now: now)
+        expect(movers.map(\.row.path) == ["B", "C", "A"].map { "\(home)/\(devices)/\($0)" }, "each device is ranked on its own: freed 20, new 10, grew 5, got \(movers.map(\.row.path))")
+        expect(movers.map(\.change) == [.freed(20), .new, .grew(5)], "got \(movers.map(\.change))")
+        expect(movers.allSatisfy { $0.row.kind == .simulator }, "the group never appears among movers")
+        expect(movers.first?.row.name == "iPad · iOS 26.5", "a device mover is named as the device list names it")
+    }
+
+    private static func testDeletedDevicesLeaveTheGroupCountAndList() {
+        let ledger = deviceLedger()
+        let group = DiskRows.rows(from: ledger, homeDirectory: home).first { $0.kind == .simulatorGroup }
+        expect(group?.name == "Simulators · 2 devices" && group?.bytes == 45, "a device measured at zero is gone and not counted, got \(String(describing: group))")
+        expect(DiskRows.simulatorRows(from: ledger).map(\.name) == ["iPhone 17 · iOS 26.5", "iPhone SE · iOS 18.0"], "nor listed, got \(DiskRows.simulatorRows(from: ledger).map(\.name))")
+    }
+
+    private static func testSampleHistoryAgreesWithTheLedgerOnTies() {
+        let ledger = DiskLedger().appending([sample("t", 1, ago: 2 * day), sample("t", 2, ago: 2 * day), sample("t", 5)])
+        let rows = DiskRows.rows(from: ledger, homeDirectory: home)
+        let movers = DiskRows.movers(rows: rows, ledger: ledger, window: day, now: now)
+        let ledgerEarlier = ledger.sample(of: "\(home)/t", atOrBefore: now.addingTimeInterval(-day))?.bytes
+        expect(ledgerEarlier == 1 && movers.first?.change == .grew(4), "two samples at one instant: the movers compare with the one the ledger picks, got \(movers.map(\.change)) against \(String(describing: ledgerEarlier))")
     }
 
     private static func testDisplayPathShortensHome() {

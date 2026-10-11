@@ -140,8 +140,11 @@ a legend of sizes. Other volumes keep their section. Adam, 2026-10-10.
 
 **Right.** One list, two modes. Biggest ranks every measured row by size.
 Movers ranks by absolute change over 24 hours or 7 days, showing the signed
-delta and the current size; a row with no earlier sample is marked new, a row
-whose path has gone is shown as freed. Every row shows name, path, a bar
+delta and the current size; a row with no earlier sample is marked new only
+when its plan had already run before the window began, and is otherwise
+silent, so a first scan never lists everything as new; a row whose path has
+gone is shown as freed. Movers lists simulator devices individually, while
+Biggest shows them as one group. Every row shows name, path, a bar
 relative to the top row, and the age of its measurement. The simulator group
 shows as one row with a device count, expandable to one row per device with
 runtime and last boot. The footer shows each plan's newest sample age, scan
