@@ -24,6 +24,7 @@ struct SystemBarSchedulerTests {
         testSchedulerClampsABadBackgroundInterval()
         testSchedulerSettlesBackgroundTimersAfterAWake()
         testSchedulerLeavesTheShownTabAloneAfterAWake()
+        testSchedulerStartLeavesAShownTabOnItsFastTimer()
         testSamplersWantNothingWhileTheWindowIsClosed()
         testSamplersRunNothingWhileTheWindowIsClosed()
         testSamplersRunTheFastSamplerForEveryVisibleTab()
@@ -162,7 +163,7 @@ struct SystemBarSchedulerTests {
 
     private static func testSchedulerClampsABadRefreshInterval() {
         let log = LogRecorder()
-        let scheduler = PluginScheduler(log: { log.record($0) })
+        let scheduler = PluginScheduler(wakeNotifications: NotificationCenter(), log: { log.record($0) })
         for tooShort in [0, -1, .nan, 0.1] as [TimeInterval] {
             let before = log.count
             let effective = scheduler.effectiveInterval(tooShort, identifier: "test")
@@ -206,6 +207,7 @@ struct SystemBarSchedulerTests {
         waitUntil(2) { plugin.count >= 3 }
         expect(plugin.count >= 3, "a hidden tab with a backgroundInterval is collected every interval, got \(plugin.count) collects")
         expect(!plugin.overlapped, "background collects never run concurrently with themselves")
+        withExtendedLifetime(scheduler) {}
     }
 
     private static func testSchedulerLeavesAHiddenTabAloneWhenItDeclaresNoBackgroundInterval() {
@@ -345,6 +347,19 @@ struct SystemBarSchedulerTests {
         waitUntil { shownTab.count >= shownAtWake + 3 }
         expect(shownTab.count >= shownAtWake + 3, "a wake does not touch the shown tab's fast timer, got \(shownTab.count - shownAtWake) ticks")
         expect(hiddenTab.count <= hiddenAtWake + 1, "the same wake did settle the hidden tab, got \(hiddenTab.count - hiddenAtWake) ticks")
+        scheduler.hide()
+    }
+
+    private static func testSchedulerStartLeavesAShownTabOnItsFastTimer() {
+        let plugin = BackgroundTab(refresh: 0.02, background: 5)
+        let scheduler = makeBackgroundScheduler()
+        scheduler.show(plugin)
+        waitUntil { plugin.count >= 2 }
+        // Calling start after show (any launch order) must not swap the fast timer for the slow one.
+        scheduler.start([plugin])
+        let atStart = plugin.count
+        waitUntil { plugin.count >= atStart + 3 }
+        expect(plugin.count >= atStart + 3, "start must leave an already shown tab on its fast timer, got \(plugin.count - atStart) ticks")
         scheduler.hide()
     }
 
