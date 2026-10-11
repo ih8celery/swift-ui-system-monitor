@@ -36,6 +36,13 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     /// Touched only on `scanQueue`.
     private var ledger = DiskLedger()
     private var isLedgerLoaded = false
+    /// When each plan last started a run, measured or not. Touched only on `scanQueue`; lost at
+    /// relaunch, which costs at most one extra attempt per plan per launch.
+    private var lastAttempt: [DiskPlanKind: Date] = [:]
+    /// A rescan is queued or running, so another click adds nothing. Set by the caller and
+    /// cleared on `scanQueue`, so it sits behind a lock rather than on one queue.
+    private let forcedRunLock = NSLock()
+    private var isForcedRunQueued = false
 
     @MainActor public convenience init(host: HostServices) {
         self.init(host: host, plans: DiskScanPlan.all, now: { Date() }, listChildren: DiskScanner.subfolders(of:))
@@ -76,11 +83,27 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
 
     /// The panel's rescan button passes `force: true`; every collect asks without forcing. Runs
     /// behind any scan already going, which then finds nothing due unless forced.
+    /// A click while a rescan is already queued or running is ignored rather than queuing
+    /// another full run behind it.
     func requestScan(force: Bool) {
+        if force {
+            let isAlreadyQueued = forcedRunLock.withLock {
+                defer { isForcedRunQueued = true }
+                return isForcedRunQueued
+            }
+            guard !isAlreadyQueued else { return }
+        }
         scanQueue.async { [self] in
             loadLedgerIfNeeded()
             runDuePlans(force: force)
+            if force { forcedRunLock.withLock { isForcedRunQueued = false } }
         }
+    }
+
+    /// For tests: returns once everything queued on the scan queue so far has finished, so a
+    /// test can check that something did not happen without guessing how long to wait.
+    func drainScanQueue() {
+        scanQueue.sync {}
     }
 
     // MARK: - Scan queue
@@ -101,9 +124,10 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     }
 
     private func runDuePlans(force: Bool) {
-        let due = plans.filter { force || ledger.isDue($0.kind, cadence: $0.cadence, now: now()) }
+        let due = plans.filter { force || isDue($0) }
         guard !due.isEmpty else { return }
         for plan in due {
+            lastAttempt[plan.kind] = now()
             publish { $0.scanning(true, status: "Measuring \(plan.kind.title.lowercased()) folders") }
             var fresh: [DiskSample] = []
             let outcome = scanner.run(plan: plan, previous: ledger) { sample in
@@ -118,14 +142,24 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
         }
     }
 
+    /// Due when the ledger's newest sample for the plan is a cadence old and so is its last
+    /// attempt. Attempts count because a run can record nothing (no simulator folder, every row
+    /// too slow), and the ledger alone would then call the plan due on every collect.
+    private func isDue(_ plan: DiskScanPlan) -> Bool {
+        let at = now()
+        let hasWaitedSinceAttempt = lastAttempt[plan.kind].map { at.timeIntervalSince($0) >= plan.cadence } ?? true
+        return hasWaitedSinceAttempt && ledger.isDue(plan.kind, cadence: plan.cadence, now: at)
+    }
+
     private func save() {
         do {
             try store.save(ledger)
+            publish { $0.savingProblem(nil) }
         } catch {
             let path = store.fileURL.path
             let reason = error.localizedDescription
             host.log("SystemBar Disk: could not save the ledger to \(path): \(reason)")
-            publish { $0.noting("Sizes could not be saved to \(path): \(reason)") }
+            publish { $0.savingProblem("Sizes could not be saved to \(path): \(reason)") }
         }
     }
 

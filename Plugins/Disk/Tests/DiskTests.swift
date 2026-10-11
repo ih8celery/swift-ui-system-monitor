@@ -15,6 +15,9 @@ enum DiskTests {
         testBackgroundScansSettingDefaultsOnAndReportsAWrongType()
         testPluginDeclaresABackgroundIntervalUnlessTurnedOff()
         testCollectRunsDuePlansOnceAndSavesTheLedger()
+        testAPlanThatMeasuredNothingWaitsItsCadence()
+        testRepeatedRescanClicksQueueOneRun()
+        testSaveProblemClearsAndLeavesTheLedgerNote()
         testPluginStartsFromASavedLedgerAndReportsABrokenOne()
         testPluginIdentityMatchesTheOldTab()
     }
@@ -101,11 +104,13 @@ enum DiskTests {
     }
 
     private static func testPluginDeclaresABackgroundIntervalUnlessTurnedOff() {
-        let on = DiskPlugin(host: makeHost(dataDirectory: temporaryDirectory()))
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let on = DiskPlugin(host: makeHost(dataDirectory: directory))
         expect(on.backgroundInterval == DiskSampling.backgroundInterval, "by default the host should call collect() every 15 minutes while the tab is hidden")
-        let off = DiskPlugin(host: makeHost(settings: PluginSettings(values: ["backgroundScans": .bool(false)]), dataDirectory: temporaryDirectory()))
+        let off = DiskPlugin(host: makeHost(settings: PluginSettings(values: ["backgroundScans": .bool(false)]), dataDirectory: directory))
         expect(off.backgroundInterval == nil, "turned off, the plugin asks for nothing while hidden")
-        let wrong = DiskPlugin(host: makeHost(settings: PluginSettings(values: ["backgroundScans": .number(1)]), dataDirectory: temporaryDirectory()))
+        let wrong = DiskPlugin(host: makeHost(settings: PluginSettings(values: ["backgroundScans": .number(1)]), dataDirectory: directory))
         expect(wrong.snapshot.settingsProblem?.contains("backgroundScans") == true, "a bad value is on the snapshot for the panel to show")
     }
 
@@ -144,13 +149,71 @@ enum DiskTests {
         expect(recorder.messages.allSatisfy { $0.hasPrefix("/usr/bin/tmutil ") || $0.hasPrefix("/usr/bin/du -s -k -x ") }, "every command goes through the host by explicit path, got \(recorder.messages)")
 
         plugin.collect()
-        waitUntil(2) { plugin.snapshot.localSnapshotCount == 1 }
-        spinRunLoop(for: 0.2)
+        plugin.drainScanQueue()
         expect(duCount() == 2, "a second collect finds nothing due and runs no du, got \(duCount())")
 
         plugin.requestScan(force: true)
         waitUntil(5) { duCount() == 4 }
         expect(duCount() == 4, "the rescan button forces every plan, got \(duCount())")
+    }
+
+    private static func testAPlanThatMeasuredNothingWaitsItsCadence() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = LogRecorder()
+        let plan = DiskScanPlan(kind: .simulators, cadence: 3600, budget: 60, roots: [""])
+        let plugin = DiskPlugin(
+            host: makeHost(runner: recordingRunner(recorder, answers: [:]), dataDirectory: directory),
+            plans: [plan],
+            now: { Date() },
+            listChildren: { _ in [] }
+        )
+        plugin.collect()
+        plugin.drainScanQueue()
+        plugin.collect()
+        plugin.drainScanQueue()
+        let simctlCalls = recorder.messages.filter { $0.hasPrefix("/usr/bin/xcrun simctl ") }
+        expect(simctlCalls.count == 1, "a run that records no sample still waits its cadence, so simctl runs once, got \(recorder.messages)")
+    }
+
+    private static func testRepeatedRescanClicksQueueOneRun() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = LogRecorder()
+        // Each du waits for the test, so the first rescan is still running when the others arrive.
+        let release = DispatchSemaphore(value: 0)
+        let recording = recordingRunner(recorder, answers: [
+            "/usr/bin/du -s -k -x \(home)/big": "100\t\(home)/big\n",
+        ])
+        let runner: CommandRunner = { path, arguments, timeout, environment in
+            if path == "/usr/bin/du" { _ = release.wait(timeout: .now() + 5) }
+            return recording(path, arguments, timeout, environment)
+        }
+        let plugin = DiskPlugin(
+            host: makeHost(runner: runner, dataDirectory: directory),
+            plans: [DiskScanPlan(kind: .overview, cadence: 3600, budget: 60, roots: [""])],
+            now: { Date() },
+            listChildren: { parent in parent == home ? ["\(home)/big"] : [] }
+        )
+        plugin.requestScan(force: true)
+        plugin.requestScan(force: true)
+        plugin.requestScan(force: true)
+        release.signal()
+        plugin.drainScanQueue()
+        let duCount = recorder.messages.filter { $0.hasPrefix("/usr/bin/du ") }.count
+        expect(duCount == 1, "three clicks during one rescan run it once, got \(recorder.messages)")
+
+        plugin.requestScan(force: true)
+        release.signal()
+        plugin.drainScanQueue()
+        expect(recorder.messages.filter { $0.hasPrefix("/usr/bin/du ") }.count == 2, "a click after that rescan finished runs another")
+    }
+
+    private static func testSaveProblemClearsAndLeavesTheLedgerNote() {
+        let noted = DiskSnapshot().noting("moved aside").savingProblem("could not save")
+        expect(noted.ledgerNote == "moved aside" && noted.saveProblem == "could not save", "a save problem does not overwrite the moved-aside note")
+        let saved = noted.savingProblem(nil)
+        expect(saved.saveProblem == nil && saved.ledgerNote == "moved aside", "a later good save clears the save problem and keeps the note")
     }
 
     private static func testPluginStartsFromASavedLedgerAndReportsABrokenOne() {
@@ -163,6 +226,7 @@ enum DiskTests {
         plugin.collect()
         waitUntil(5) { plugin.snapshot.biggest.contains { $0.name == "saved" } }
         expect(plugin.snapshot.biggest.contains { $0.name == "saved" }, "the saved ledger shows before any scan, got \(plugin.snapshot.biggest.map(\.name))")
+        plugin.drainScanQueue()
         expect(recorder.messages.filter { $0.hasPrefix("/usr/bin/du ") }.isEmpty, "and a plan measured a moment ago is not due, got \(recorder.messages)")
 
         let brokenDirectory = temporaryDirectory()
@@ -175,7 +239,9 @@ enum DiskTests {
     }
 
     private static func testPluginIdentityMatchesTheOldTab() {
-        let plugin = DiskPlugin(host: makeHost(dataDirectory: temporaryDirectory()))
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let plugin = DiskPlugin(host: makeHost(dataDirectory: directory))
         expect(DiskPlugin.identifier == "disk" && plugin.title == "Disk" && plugin.systemImage == "internaldrive", "the bundle keeps the tab's id, title and icon")
         expect(plugin.accent == Palette.cyan, "and its accent")
         expect(plugin.refreshInterval == 30 && plugin.sharedFeeds.isEmpty, "and its interval, and it needs no shared feed")

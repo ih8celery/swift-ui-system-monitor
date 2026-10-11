@@ -40,8 +40,11 @@ struct DiskSnapshot {
 
     var isScanning = false
     var scanStatus = "No scan yet"
-    /// Something the person should know about the ledger file, such as it being moved aside.
+    /// The saved ledger could not be read and was moved aside. Stays for the session: the old
+    /// sizes are gone however later saves go.
     var ledgerNote: String?
+    /// The last save failed, worded for the footer; cleared by the next save that succeeds.
+    var saveProblem: String?
     /// A settings value the plugin could not use, worded for the footer.
     var settingsProblem: String?
 
@@ -89,6 +92,13 @@ struct DiskSnapshot {
     func noting(_ note: String) -> DiskSnapshot {
         var next = self
         next.ledgerNote = note
+        return next
+    }
+
+    /// A copy with the save outcome applied: a problem to show, or nil after a save that worked.
+    func savingProblem(_ problem: String?) -> DiskSnapshot {
+        var next = self
+        next.saveProblem = problem
         return next
     }
 }
