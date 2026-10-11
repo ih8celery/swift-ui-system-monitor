@@ -17,7 +17,6 @@ struct DiskPanel: View {
 
                 HStack(spacing: 10) {
                     StatPill(label: "Snapshots", value: "\(plugin.snapshot.localSnapshotCount)")
-                    StatPill(label: "Cleanup", value: byteString(plugin.snapshot.reclaimableTotal))
                 }
 
                 if let boot = plugin.snapshot.boot {
@@ -59,23 +58,23 @@ struct DiskPanel: View {
                     SectionTitle("Reclaimable Space")
                     Spacer()
                     Button {
-                        plugin.scanHogs(force: true)
+                        plugin.requestScan(force: true)
                     } label: {
-                        if plugin.snapshot.isScanningHogs {
+                        if plugin.snapshot.isScanning {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
                     .buttonStyle(.borderless)
-                    .disabled(plugin.snapshot.isScanningHogs)
+                    .disabled(plugin.snapshot.isScanning)
                     .help("Rescan reclaimable paths")
                 }
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(plugin.snapshot.hogs) { hog in
-                            DiskHogRow(hog: hog, fraction: Double(hog.size) / Double(plugin.snapshot.maxHogSize))
+                        ForEach(plugin.snapshot.biggest) { row in
+                            EvidenceRow(label: row.name, value: byteString(row.bytes), detail: row.path)
                         }
                     }
                 }
@@ -106,36 +105,7 @@ struct DiskPanel: View {
     }
 
     private func hogFooterText(now: Date) -> String {
-        guard let lastScan = plugin.snapshot.lastHogScan else { return plugin.snapshot.hogStatus }
-        return "\(plugin.snapshot.hogStatus) - \(relativeTimeString(lastScan, now: now)) ago"
-    }
-}
-
-struct DiskHogRow: View {
-    let hog: DiskHog
-    let fraction: Double
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(hog.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Spacer()
-                Text(byteString(hog.size))
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-            }
-            ProgressBar(value: fraction, color: Palette.cyan)
-                .frame(height: 4)
-            Text(hog.hint)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(9)
-        .background(Color.white.opacity(0.055))
-        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        plugin.snapshot.scanStatus
     }
 }
 

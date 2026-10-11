@@ -3,10 +3,12 @@ import Foundation
 import SwiftUI
 import SystemBarKit
 
-/// The Disk tab as a bundle. The host calls `collect()` on this plugin's queue every 30 s while
-/// the tab shows; each collect reads the volumes and asks the collector for a hog scan, which runs
-/// on the collector's own queue at most every ten minutes unless the panel's rescan button forces
-/// one. Both publish on main, and the panel observes `snapshot`.
+/// The Disk tab as a bundle. The host calls `collect()` every 30 s while the tab shows and, unless
+/// settings turn it off, every 15 minutes while it is hidden. Each call reads the volumes on the
+/// plugin's queue, then asks the scan queue to run whichever plans are due. The scan queue is the
+/// plugin's own and serial: it alone touches the ledger, a plan can run for minutes without
+/// holding up a volume read, and the panel's rescan button queues a forced run behind whatever
+/// is going. Everything publishes on main, and the panel observes `snapshot`.
 @objc(SystemBarDiskPlugin)
 public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     public static let identifier = "disk"
@@ -15,26 +17,128 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     public let accent = Palette.cyan
     public let refreshInterval: TimeInterval = DiskSampling.refreshInterval
     public let sharedFeeds: Set<SharedFeed> = []
+    /// 15 minutes, or nil when `backgroundScans` is false in this tab's settings: the host then
+    /// never calls `collect()` while the tab is hidden, and scans run only on the button and
+    /// while the tab shows.
+    public let backgroundInterval: TimeInterval?
+
+    static let backgroundScansKey = "backgroundScans"
 
     @Published private(set) var snapshot = DiskSnapshot()
-    private let collector: DiskCollector
 
-    @MainActor public init(host: HostServices) {
+    private let host: HostServices
+    private let collector: DiskCollector
+    private let scanner: DiskScanner
+    private let store: DiskLedgerStore
+    private let plans: [DiskScanPlan]
+    private let now: () -> Date
+    private let scanQueue = DispatchQueue(label: "systembar.disk.scan", qos: .utility)
+    /// Touched only on `scanQueue`.
+    private var ledger = DiskLedger()
+    private var isLedgerLoaded = false
+
+    @MainActor public convenience init(host: HostServices) {
+        self.init(host: host, plans: DiskScanPlan.all, now: { Date() }, listChildren: DiskScanner.subfolders(of:))
+    }
+
+    /// The plans, clock and folder listing are parameters so a test can run a tiny plan over a
+    /// fake tree in no time; the app uses `init(host:)`.
+    @MainActor init(host: HostServices, plans: [DiskScanPlan], now: @escaping () -> Date, listChildren: @escaping (String) -> [String]?) {
+        self.host = host
         collector = DiskCollector(host: host)
+        scanner = DiskScanner(host: host, listChildren: listChildren)
+        store = DiskLedgerStore.standard(dataDirectory: host.dataDirectory)
+        self.plans = plans
+        self.now = now
+        let setting = Self.backgroundScansSetting(host.settings)
+        backgroundInterval = setting.isEnabled ? DiskSampling.backgroundInterval : nil
+        var initial = DiskSnapshot()
+        initial.settingsProblem = setting.problem
+        snapshot = initial
         super.init()
+    }
+
+    /// `backgroundScans`: absent or true means on; false means off; anything else keeps the
+    /// default and is reported, because a misspelt value must never silently do nothing.
+    static func backgroundScansSetting(_ settings: PluginSettings) -> (isEnabled: Bool, problem: String?) {
+        if let flag = settings.bool(forKey: backgroundScansKey) { return (flag, nil) }
+        if settings[backgroundScansKey] != nil {
+            return (true, "settings: \"\(backgroundScansKey)\" must be true or false; background scans stay on")
+        }
+        return (true, nil)
     }
 
     public func collect() {
         let reading = collector.readVolumes()
         publish { $0.applying(reading) }
-        scanHogs(force: false)
+        requestScan(force: false)
     }
 
-    /// The panel's rescan button passes `force: true`; every collect asks without forcing.
-    func scanHogs(force: Bool) {
-        collector.scanHogsIfDue(force: force) { [weak self] update in
-            self?.publish { $0.applying(update) }
+    /// The panel's rescan button passes `force: true`; every collect asks without forcing. Runs
+    /// behind any scan already going, which then finds nothing due unless forced.
+    func requestScan(force: Bool) {
+        scanQueue.async { [self] in
+            loadLedgerIfNeeded()
+            runDuePlans(force: force)
         }
+    }
+
+    // MARK: - Scan queue
+
+    private func loadLedgerIfNeeded() {
+        guard !isLedgerLoaded else { return }
+        isLedgerLoaded = true
+        switch store.load() {
+        case .fresh:
+            break
+        case .loaded(let saved):
+            ledger = saved
+        case let .movedAside(to, reason):
+            host.log("SystemBar Disk: the saved ledger could not be read (\(reason)); moved to \(to)")
+            publish { $0.noting("Saved sizes could not be read (\(reason)); the file was moved to \(to) and a fresh one started") }
+        }
+        publishLedger()
+    }
+
+    private func runDuePlans(force: Bool) {
+        let due = plans.filter { force || ledger.isDue($0.kind, cadence: $0.cadence, now: now()) }
+        guard !due.isEmpty else { return }
+        for plan in due {
+            publish { $0.scanning(true, status: "Measuring \(plan.kind.title.lowercased()) folders") }
+            var fresh: [DiskSample] = []
+            let outcome = scanner.run(plan: plan, previous: ledger) { sample in
+                // Each tree lands in the list as it finishes rather than after the last one.
+                fresh.append(sample)
+                publishRows(from: ledger.appending(fresh))
+            }
+            ledger = ledger.appending(fresh).compacted(now: now())
+            save()
+            publish { $0.scanning(false, status: "\(plan.kind.title): \(outcome.status)") }
+            publishLedger()
+        }
+    }
+
+    private func save() {
+        do {
+            try store.save(ledger)
+        } catch {
+            let path = store.fileURL.path
+            let reason = error.localizedDescription
+            host.log("SystemBar Disk: could not save the ledger to \(path): \(reason)")
+            publish { $0.noting("Sizes could not be saved to \(path): \(reason)") }
+        }
+    }
+
+    private func publishLedger() {
+        publishRows(from: ledger)
+    }
+
+    /// Reads the home folder and the clock here, on the scan queue, so the closure that runs on
+    /// main carries only values.
+    private func publishRows(from ledger: DiskLedger) {
+        let homeDirectory = host.homeDirectory
+        let at = now()
+        publish { $0.applying(ledger: ledger, homeDirectory: homeDirectory, now: at) }
     }
 
     @MainActor public func makeView() -> AnyView {

@@ -1,29 +1,26 @@
 import Foundation
 import SystemBarKit
 
-/// The Disk tab: volume math, the du-based hog scan, and the plugin that runs both.
-/// Main-actor because a plugin is constructed on the main thread, by contract.
+/// The Disk tab: volume math, the plugin's settings, and the plugin end to end through a fake
+/// host with a temporary data folder. Main-actor because a plugin is constructed on the main
+/// thread, by contract.
 @MainActor
 enum DiskTests {
     static func runAll() {
         testDiskVolumeMath()
-        testDiskUsageParsing()
         testLocalSnapshotParsing()
-        testReclaimableTotalIgnoresNestedPaths()
-        testDiskHogCandidatePaths()
-        testDiskHogScanDueRule()
-        testDiskHogScanKeepsPathsThatFinished()
-        testDiskHogScanMeasuresBiggestCandidatesFirst()
-        testDiskHogScanPublishesRowsAsTheyFinish()
-        testDiskHogScanStopsAtItsBudget()
-        testDiskHogScanReportsPermissionTroubleSeparately()
-        testSamplingIntervalsKeepDuRare()
         testSnapshotCountRunsTmutilThroughTheHost()
-        testSnapshotAppliesAReadingAndEachHogUpdate()
-        testHogScanRunsOnceUntilDueOrForced()
-        testCollectPublishesVolumesAndTheHogScan()
+        testSnapshotAppliesAReadingAndALedger()
+        testSamplingIntervalsKeepScansRare()
+        testBackgroundScansSettingDefaultsOnAndReportsAWrongType()
+        testPluginDeclaresABackgroundIntervalUnlessTurnedOff()
+        testCollectRunsDuePlansOnceAndSavesTheLedger()
+        testPluginStartsFromASavedLedgerAndReportsABrokenOne()
         testPluginIdentityMatchesTheOldTab()
     }
+
+    static let home = "/tmp/systembar-tests"
+    static let now = Date(timeIntervalSince1970: 100 * 86_400)
 
     private static func testDiskVolumeMath() {
         let volume = DiskVolume(name: "Macintosh HD", path: "/", total: 1000, free: 150, isRoot: true)
@@ -33,18 +30,6 @@ enum DiskTests {
         // A volume reporting more free than capacity must not underflow the unsigned used value.
         let overreported = DiskVolume(name: "Odd", path: "/odd", total: 100, free: 200, isRoot: false)
         expect(overreported.used == 0, "used clamps to zero rather than underflowing")
-    }
-
-    private static func testDiskUsageParsing() {
-        let sample = """
-        18034356\t/Users/adam/Library/Caches
-        5890624\t/Users/adam/Downloads
-        garbage line without a tab
-        """
-        let parsed = DiskCollector.parseDiskUsage(sample)
-        expect(parsed.count == 2, "du parser should skip lines it cannot read")
-        expect(parsed.first?.path == "/Users/adam/Library/Caches", "du parser should preserve paths")
-        expect(parsed.first?.bytes == 18034356 * 1024, "du -k reports kilobytes and must be scaled to bytes")
     }
 
     private static func testLocalSnapshotParsing() {
@@ -57,220 +42,10 @@ enum DiskTests {
         expect(DiskCollector.parseLocalSnapshotCount("") == 0, "snapshot parser should tolerate empty output")
     }
 
-    private static func testReclaimableTotalIgnoresNestedPaths() {
-        var snapshot = DiskSnapshot()
-        snapshot.hogs = [
-            DiskHog(name: "User Caches", path: "/Users/adam/Library/Caches", size: 100, hint: ""),
-            DiskHog(name: "CocoaPods", path: "/Users/adam/Library/Caches/CocoaPods", size: 30, hint: ""),
-            DiskHog(name: "Downloads", path: "/Users/adam/Downloads", size: 20, hint: "")
-        ]
-        expect(snapshot.reclaimableTotal == 120, "nested candidates must not be counted twice")
-        expect(snapshot.maxHogSize == 100, "max hog size should drive the row bars")
-
-        // A path that merely shares a name prefix is not nested and must still count.
-        var siblings = DiskSnapshot()
-        siblings.hogs = [
-            DiskHog(name: "Caches", path: "/Users/adam/Caches", size: 10, hint: ""),
-            DiskHog(name: "CachesOld", path: "/Users/adam/CachesOld", size: 5, hint: "")
-        ]
-        expect(siblings.reclaimableTotal == 15, "prefix-sharing siblings are not nested")
-    }
-
-    private static func testDiskHogCandidatePaths() {
-        let candidate = DiskHogCandidate(name: "Caches", path: "Library/Caches", hint: "")
-        expect(candidate.resolvedPath(homeDirectory: "/Users/adam") == "/Users/adam/Library/Caches", "relative candidates resolve against home")
-
-        let absolute = DiskHogCandidate(name: "System Caches", path: "/Library/Caches", hint: "")
-        expect(absolute.resolvedPath(homeDirectory: "/Users/adam") == "/Library/Caches", "absolute candidates are used as-is")
-
-        let paths = Set(DiskHogCandidate.all.map(\.path))
-        expect(paths.count == DiskHogCandidate.all.count, "candidate paths must be unique")
-    }
-
-    /// A `du` that walked a tree to completion prints "<kilobytes>\t<path>".
-    private static func duFinished(_ path: String, kilobytes: UInt64) -> CommandOutput {
-        CommandOutput(output: "\(kilobytes)\t\(path)\n", error: "", status: 0, didTimeout: false)
-    }
-
-    private static let hogHome = "/Users/adam"
-
-    private static let hogCandidates = [
-        DiskHogCandidate(name: "DerivedData", path: "Library/Developer/Xcode/DerivedData", hint: ""),
-        DiskHogCandidate(name: "Simulators", path: "Library/Developer/CoreSimulator", hint: ""),
-        DiskHogCandidate(name: "Downloads", path: "Downloads", hint: "")
-    ]
-
-    /// Every capacity read asks whether a hog scan is due, so the rule that answers has to
-    /// live where the answer can be given without racing the queue that owns the scan.
-    private static func testDiskHogScanDueRule() {
-        let now = Date(timeIntervalSince1970: 10_000)
-        expect(
-            DiskCollector.isDiskHogScanDue(force: false, lastScan: .distantPast, now: now, interval: 600),
-            "a scan that has never run is due"
-        )
-        expect(
-            !DiskCollector.isDiskHogScanDue(force: false, lastScan: now.addingTimeInterval(-599), now: now, interval: 600),
-            "a scan finished seconds ago must not be repeated by the next capacity read"
-        )
-        expect(
-            DiskCollector.isDiskHogScanDue(force: false, lastScan: now.addingTimeInterval(-600), now: now, interval: 600),
-            "a scan is due once the full interval has elapsed"
-        )
-        expect(
-            DiskCollector.isDiskHogScanDue(force: true, lastScan: now, now: now, interval: 600),
-            "the rescan button must override the interval"
-        )
-    }
-
-    /// The regression: one `du` covering every candidate tree took longer than its timeout,
-    /// and because its stdout was a pipe (so block-buffered), SIGTERM destroyed every
-    /// per-path total it had already computed. The whole list came back empty.
-    private static func testDiskHogScanKeepsPathsThatFinished() {
-        let slowPath = "\(hogHome)/Library/Developer/CoreSimulator"
-
-        let result = DiskCollector.measureDiskHogs(
-            candidates: hogCandidates,
-            homeDirectory: hogHome,
-            budget: 100,
-            pathExists: { _ in true },
-            elapsed: { 0 },
-            measure: { path in
-                if path == slowPath {
-                    return CommandOutput(output: "", error: "", status: -1, didTimeout: true)
-                }
-                return duFinished(path, kilobytes: path.hasSuffix("DerivedData") ? 2048 : 1024)
-            }
-        )
-
-        expect(
-            result.hogs.map(\.name) == ["DerivedData", "Downloads"],
-            "a du killed on one tree must not discard the trees that finished, got \(result.hogs.map(\.name))"
-        )
-        expect(result.hogs.first?.size == 2048 * 1024, "du -k reports kilobytes and must scale to bytes")
-        expect(
-            result.status.contains("1 too slow"),
-            "the status should count the path that timed out rather than blaming permissions: \(result.status)"
-        )
-    }
-
-    private static func testDiskHogScanMeasuresBiggestCandidatesFirst() {
-        var measured: [String] = []
-        _ = DiskCollector.measureDiskHogs(
-            candidates: DiskHogCandidate.all,
-            homeDirectory: hogHome,
-            budget: 100,
-            pathExists: { _ in true },
-            elapsed: { 0 },
-            measure: { path in
-                measured.append(path)
-                return duFinished(path, kilobytes: 1)
-            }
-        )
-
-        expect(
-            measured == DiskHogCandidate.all.map { $0.resolvedPath(homeDirectory: hogHome) },
-            "paths must be walked in candidate order so a scan cut short still covers the biggest hogs"
-        )
-    }
-
-    /// A full scan can take minutes, and an empty panel for minutes is the same complaint as
-    /// an empty panel forever. Each tree that finishes goes to the list right away.
-    private static func testDiskHogScanPublishesRowsAsTheyFinish() {
-        var updates: [[String]] = []
-
-        let result = DiskCollector.measureDiskHogs(
-            candidates: hogCandidates,
-            homeDirectory: hogHome,
-            budget: 100,
-            pathExists: { _ in true },
-            elapsed: { 0 },
-            measure: { path in
-                if path.hasSuffix("CoreSimulator") {
-                    return CommandOutput(output: "", error: "", status: -1, didTimeout: true)
-                }
-                return duFinished(path, kilobytes: path.hasSuffix("DerivedData") ? 1 : 2)
-            },
-            onProgress: { updates.append($0.map(\.name)) }
-        )
-
-        expect(
-            updates == [["DerivedData"], ["Downloads", "DerivedData"]],
-            "every finished tree should reach the list mid-scan, always biggest first: \(updates)"
-        )
-        expect(
-            result.hogs.map(\.name) == ["Downloads", "DerivedData"],
-            "reporting progress must not change what the finished scan returns"
-        )
-    }
-
-    private static func testDiskHogScanStopsAtItsBudget() {
-        var started = 0
-        let result = DiskCollector.measureDiskHogs(
-            candidates: hogCandidates,
-            homeDirectory: hogHome,
-            budget: 10,
-            pathExists: { _ in true },
-            elapsed: { Double(started) * 6 },
-            measure: { path in
-                started += 1
-                return duFinished(path, kilobytes: 1)
-            }
-        )
-
-        expect(started == 2, "no new path should be started once the scan budget is spent, started \(started)")
-        expect(result.hogs.count == 2, "paths measured before the budget ran out must still be reported")
-        expect(
-            result.status.contains("1 not measured"),
-            "a scan cut short should say what it never reached: \(result.status)"
-        )
-    }
-
-    private static func testDiskHogScanReportsPermissionTroubleSeparately() {
-        let denied = DiskCollector.measureDiskHogs(
-            candidates: hogCandidates,
-            homeDirectory: hogHome,
-            budget: 100,
-            pathExists: { _ in true },
-            elapsed: { 0 },
-            measure: { path in
-                CommandOutput(output: "", error: "du: \(path): Operation not permitted", status: 1, didTimeout: false)
-            }
-        )
-        expect(denied.hogs.isEmpty, "a path du cannot read produces no row")
-        expect(
-            denied.status.contains("Full Disk Access"),
-            "an unreadable path should point at the permission that would fix it: \(denied.status)"
-        )
-
-        let nothingInstalled = DiskCollector.measureDiskHogs(
-            candidates: hogCandidates,
-            homeDirectory: hogHome,
-            budget: 100,
-            pathExists: { _ in false },
-            elapsed: { 0 },
-            measure: { _ in
-                expect(false, "a path that does not exist must never be handed to du")
-                return duFinished("/nope", kilobytes: 0)
-            }
-        )
-        expect(
-            nothingInstalled.status == "No candidate paths present on this Mac",
-            "a Mac with none of the candidate directories should say so plainly"
-        )
-    }
-
-    private static func testSamplingIntervalsKeepDuRare() {
-        expect(DiskSampling.refreshInterval == 30, "the volume read keeps its 30-second interval")
-        expect(DiskSampling.hogRefreshInterval >= 300, "du walks real trees and must stay rare")
-        expect(DiskSampling.hogRefreshInterval > DiskSampling.refreshInterval, "hog scan should be rarer than the cheap capacity read")
-        expect(DiskSampling.hogScanBudget < DiskSampling.hogRefreshInterval, "a scan must be over before the next one is due, so scans never pile up")
-        expect(DiskSampling.hogPathTimeout < DiskSampling.hogScanBudget, "one slow tree must not be able to spend the whole scan budget")
-    }
-
     private static func testSnapshotCountRunsTmutilThroughTheHost() {
         let recorder = LogRecorder()
-        let listing = "Snapshots for disk /:\ncom.apple.TimeMachine.2026-09-24-101010.local\ncom.apple.os.update-ABC\n"
-        let collector = DiskCollector(host: makeHost(runner: recordingRunner(recorder, answers: ["/usr/bin/tmutil listlocalsnapshots /": listing])))
+        let answers = ["/usr/bin/tmutil listlocalsnapshots /": "Snapshots for disk /:\ncom.apple.TimeMachine.1.local\ncom.apple.os.update-2\n"]
+        let collector = DiskCollector(host: makeHost(runner: recordingRunner(recorder, answers: answers)))
         expect(collector.collectLocalSnapshotCount() == 2, "both Time Machine and OS-update snapshots count")
         expect(recorder.messages == ["/usr/bin/tmutil listlocalsnapshots /"], "tmutil runs through the host by explicit path, got \(recorder.messages)")
 
@@ -278,64 +53,129 @@ enum DiskTests {
         expect(failing.collectLocalSnapshotCount() == 0, "a tmutil that fails counts no snapshots rather than guessing")
     }
 
-    private static func testSnapshotAppliesAReadingAndEachHogUpdate() {
+    private static func testSnapshotAppliesAReadingAndALedger() {
         let volume = DiskVolume(name: "Macintosh HD", path: "/", total: 1000, free: 150, isRoot: true)
-        let at = Date(timeIntervalSince1970: 5_000)
-
-        let read = DiskSnapshot().applying(DiskVolumeReading(volumes: [volume], localSnapshotCount: 3, sampledAt: at))
+        let read = DiskSnapshot().applying(DiskVolumeReading(volumes: [volume], localSnapshotCount: 3, sampledAt: now))
         expect(read.boot?.path == "/" && read.localSnapshotCount == 3, "a volume reading fills the volumes and the snapshot count")
-        expect(read.status == "Disk sample OK" && read.health == .ok && read.lastUpdated == at, "a reading with volumes is healthy and dated, got \(read.status)")
+        expect(read.status == "Disk sample OK" && read.health == .ok && read.lastUpdated == now, "a reading with volumes is healthy and dated, got \(read.status)")
 
-        let empty = DiskSnapshot().applying(DiskVolumeReading(volumes: [], localSnapshotCount: 0, sampledAt: at))
+        let empty = DiskSnapshot().applying(DiskVolumeReading(volumes: [], localSnapshotCount: 0, sampledAt: now))
         expect(empty.status == "No readable volumes found" && empty.health == .degraded, "no readable volume says so and is degraded, got \(empty.status)")
 
-        let hog = DiskHog(name: "Downloads", path: "/Users/adam/Downloads", size: 10, hint: "")
-        let started = read.applying(DiskHogUpdate.started)
-        expect(started.isScanningHogs && started.hogStatus == "Measuring reclaimable paths", "a starting scan says it is measuring, got \(started.hogStatus)")
-        let partway = started.applying(DiskHogUpdate.progress([hog]))
-        expect(partway.hogs.map(\.name) == ["Downloads"] && partway.isScanningHogs, "each finished tree shows while the scan goes on")
-        let done = partway.applying(DiskHogUpdate.finished(hogs: [hog], status: "Measured 1 path", at: at))
-        expect(!done.isScanningHogs && done.hogStatus == "Measured 1 path" && done.lastHogScan == at, "a finished scan records its status and time")
-        expect(done.volumes.count == 1 && done.localSnapshotCount == 3, "a hog update leaves the volume reading alone")
+        // Both paths were measured over a week ago, so the overview plan had looked before either
+        // window and Library, unchanged, is not a mover.
+        let ledger = DiskLedger().appending([
+            DiskSample(path: "\(home)/proj", bytes: 10, measuredAt: now.addingTimeInterval(-8 * 86_400), plan: .overview),
+            DiskSample(path: "\(home)/Library", bytes: 90, measuredAt: now.addingTimeInterval(-8 * 86_400), plan: .overview),
+            DiskSample(path: "\(home)/proj", bytes: 40, measuredAt: now.addingTimeInterval(-3600), plan: .overview),
+            DiskSample(path: "\(home)/Library", bytes: 90, measuredAt: now.addingTimeInterval(-7200), plan: .overview),
+        ])
+        let mapped = read.applying(ledger: ledger, homeDirectory: home, now: now)
+        expect(mapped.biggest.map(\.name) == ["Library", "proj"], "the ledger becomes ranked rows, got \(mapped.biggest.map(\.name))")
+        expect(mapped.movers24h.map(\.row.name) == ["proj"] && mapped.movers24h.first?.change == .grew(30), "and movers over a day, got \(mapped.movers24h)")
+        expect(mapped.movers7d.first?.change == .grew(30), "and over a week")
+        expect(mapped.planAges[.overview] == now.addingTimeInterval(-3600) && mapped.planAges[.developer] == nil, "each plan's newest sample is its age; a plan that never ran has none")
+        expect(mapped.volumes.count == 1 && mapped.localSnapshotCount == 3, "applying a ledger leaves the volume reading alone")
+
+        let scanning = mapped.scanning(true, status: "Measuring overview folders")
+        expect(scanning.isScanning && scanning.scanStatus == "Measuring overview folders", "the scan state is its own, got \(scanning.scanStatus)")
+        expect(scanning.biggest == mapped.biggest, "and leaves the rows alone")
     }
 
-    private static func testHogScanRunsOnceUntilDueOrForced() {
-        let updates = LogRecorder()
-        let collector = DiskCollector(host: makeHost(runner: recordingRunner(LogRecorder(), answers: [:])))
-        let record: (DiskHogUpdate) -> Void = { update in
-            switch update {
-            case .started: updates.record("started")
-            case .progress: updates.record("progress")
-            case .finished: updates.record("finished")
-            }
+    private static func testSamplingIntervalsKeepScansRare() {
+        expect(DiskSampling.refreshInterval == 30, "volumes every 30 s while showing")
+        expect(DiskSampling.backgroundInterval == 900 && DiskSampling.backgroundInterval >= 5 && DiskSampling.backgroundInterval <= 86_400, "a 15-minute due check while hidden, inside the scheduler's clamp")
+        for plan in DiskScanPlan.all {
+            expect(plan.cadence >= 3 * 3600, "\(plan.kind) runs at most every three hours, got \(plan.cadence)")
+            expect(plan.budget < plan.cadence && plan.budget > DiskSampling.rowTimeout, "\(plan.kind)'s budget fits inside its cadence and outlasts one row's timeout")
         }
-        let count: (String) -> Int = { name in updates.messages.filter { $0 == name }.count }
-
-        collector.scanHogsIfDue(force: false, publish: record)
-        collector.scanHogsIfDue(force: false, publish: record)
-        waitUntil(2) { count("finished") >= 1 }
-        spinRunLoop(for: 0.1)
-        expect(count("started") == 1, "a second request straight after the first finds the scan not due, got \(updates.messages)")
-
-        collector.scanHogsIfDue(force: true, publish: record)
-        waitUntil(2) { count("finished") >= 2 }
-        expect(count("started") == 2, "the rescan button forces a scan however recent the last one was, got \(updates.messages)")
     }
 
-    private static func testCollectPublishesVolumesAndTheHogScan() {
+    private static func testBackgroundScansSettingDefaultsOnAndReportsAWrongType() {
+        let on = DiskPlugin.backgroundScansSetting(.empty)
+        expect(on.isEnabled && on.problem == nil, "no setting means background scans run")
+        let off = DiskPlugin.backgroundScansSetting(PluginSettings(values: ["backgroundScans": .bool(false)]))
+        expect(!off.isEnabled && off.problem == nil, "false turns them off")
+        let wrong = DiskPlugin.backgroundScansSetting(PluginSettings(values: ["backgroundScans": .string("no")]))
+        expect(wrong.isEnabled && wrong.problem == "settings: \"backgroundScans\" must be true or false; background scans stay on", "a wrong type keeps the default and says so, got \(String(describing: wrong.problem))")
+    }
+
+    private static func testPluginDeclaresABackgroundIntervalUnlessTurnedOff() {
+        let on = DiskPlugin(host: makeHost(dataDirectory: temporaryDirectory()))
+        expect(on.backgroundInterval == DiskSampling.backgroundInterval, "by default the host should call collect() every 15 minutes while the tab is hidden")
+        let off = DiskPlugin(host: makeHost(settings: PluginSettings(values: ["backgroundScans": .bool(false)]), dataDirectory: temporaryDirectory()))
+        expect(off.backgroundInterval == nil, "turned off, the plugin asks for nothing while hidden")
+        let wrong = DiskPlugin(host: makeHost(settings: PluginSettings(values: ["backgroundScans": .number(1)]), dataDirectory: temporaryDirectory()))
+        expect(wrong.snapshot.settingsProblem?.contains("backgroundScans") == true, "a bad value is on the snapshot for the panel to show")
+    }
+
+    /// A plugin over a fake tree: home has two folders, one plan measures them.
+    private static func makePlugin(dataDirectory: URL, recorder: LogRecorder, extraAnswers: [String: String] = [:]) -> DiskPlugin {
+        var answers = [
+            "/usr/bin/tmutil listlocalsnapshots /": "Snapshots for disk /:\ncom.apple.TimeMachine.1.local\n",
+            "/usr/bin/du -s -k -x \(home)/big": "100\t\(home)/big\n",
+            "/usr/bin/du -s -k -x \(home)/small": "1\t\(home)/small\n",
+        ]
+        answers.merge(extraAnswers) { _, new in new }
+        let plan = DiskScanPlan(kind: .overview, cadence: 3600, budget: 60, roots: [""])
+        return DiskPlugin(
+            host: makeHost(runner: recordingRunner(recorder, answers: answers), dataDirectory: dataDirectory),
+            plans: [plan],
+            now: { Date() },
+            listChildren: { parent in parent == home ? ["\(home)/big", "\(home)/small"] : [] }
+        )
+    }
+
+    private static func testCollectRunsDuePlansOnceAndSavesTheLedger() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
         let recorder = LogRecorder()
-        let answers = ["/usr/bin/tmutil listlocalsnapshots /": "com.apple.TimeMachine.1.local\n"]
-        let plugin = DiskPlugin(host: makeHost(runner: recordingRunner(recorder, answers: answers)))
+        let plugin = makePlugin(dataDirectory: directory, recorder: recorder)
+        let duCount: () -> Int = { recorder.messages.filter { $0.hasPrefix("/usr/bin/du ") }.count }
+
         plugin.collect()
-        waitUntil(2) { plugin.snapshot.lastUpdated != nil && plugin.snapshot.lastHogScan != nil }
-        expect(plugin.snapshot.boot != nil, "the boot volume is always read, got \(plugin.snapshot.volumes.map(\.path))")
-        expect(plugin.snapshot.localSnapshotCount == 1, "the snapshot count comes through the host's runner")
-        expect(plugin.snapshot.lastHogScan != nil && !plugin.snapshot.isScanningHogs, "a fresh plugin's first collect also runs the hog scan, which is due")
+        waitUntil(5) { plugin.snapshot.biggest.count == 2 && !plugin.snapshot.isScanning && plugin.snapshot.lastUpdated != nil }
+        expect(plugin.snapshot.boot != nil && plugin.snapshot.localSnapshotCount == 1, "collect reads the volumes and the snapshot count")
+        expect(plugin.snapshot.biggest.map(\.name) == ["big", "small"], "a fresh plugin's first collect finds the plan due, measures, and publishes rows, got \(plugin.snapshot.biggest.map(\.name))")
+        expect(plugin.snapshot.biggest.first?.bytes == 100 * 1024, "in bytes")
+        expect(plugin.snapshot.scanStatus == "Overview: Measured 2 paths", "the footer says what the scan did, got \(plugin.snapshot.scanStatus)")
+        expect(duCount() == 2, "one du per folder, got \(recorder.messages)")
+        expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("disk-ledger.json").path), "the ledger is saved in the plugin's data folder")
         expect(recorder.messages.allSatisfy { $0.hasPrefix("/usr/bin/tmutil ") || $0.hasPrefix("/usr/bin/du -s -k -x ") }, "every command goes through the host by explicit path, got \(recorder.messages)")
+
+        plugin.collect()
+        waitUntil(2) { plugin.snapshot.localSnapshotCount == 1 }
+        spinRunLoop(for: 0.2)
+        expect(duCount() == 2, "a second collect finds nothing due and runs no du, got \(duCount())")
+
+        plugin.requestScan(force: true)
+        waitUntil(5) { duCount() == 4 }
+        expect(duCount() == 4, "the rescan button forces every plan, got \(duCount())")
+    }
+
+    private static func testPluginStartsFromASavedLedgerAndReportsABrokenOne() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DiskLedgerStore.standard(dataDirectory: directory)
+        try? store.save(DiskLedger().appending([DiskSample(path: "\(home)/saved", bytes: 7 * 1024, measuredAt: Date(), plan: .overview)]))
+        let recorder = LogRecorder()
+        let plugin = makePlugin(dataDirectory: directory, recorder: recorder)
+        plugin.collect()
+        waitUntil(5) { plugin.snapshot.biggest.contains { $0.name == "saved" } }
+        expect(plugin.snapshot.biggest.contains { $0.name == "saved" }, "the saved ledger shows before any scan, got \(plugin.snapshot.biggest.map(\.name))")
+        expect(recorder.messages.filter { $0.hasPrefix("/usr/bin/du ") }.isEmpty, "and a plan measured a moment ago is not due, got \(recorder.messages)")
+
+        let brokenDirectory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: brokenDirectory) }
+        try? Data("{".utf8).write(to: brokenDirectory.appendingPathComponent(DiskLedgerStore.fileName))
+        let fresh = makePlugin(dataDirectory: brokenDirectory, recorder: LogRecorder())
+        fresh.collect()
+        waitUntil(5) { fresh.snapshot.ledgerNote != nil }
+        expect(fresh.snapshot.ledgerNote?.contains(".broken") == true, "a ledger that will not parse is moved aside and the panel is told, got \(String(describing: fresh.snapshot.ledgerNote))")
     }
 
     private static func testPluginIdentityMatchesTheOldTab() {
-        let plugin = DiskPlugin(host: makeHost())
+        let plugin = DiskPlugin(host: makeHost(dataDirectory: temporaryDirectory()))
         expect(DiskPlugin.identifier == "disk" && plugin.title == "Disk" && plugin.systemImage == "internaldrive", "the bundle keeps the tab's id, title and icon")
         expect(plugin.accent == Palette.cyan, "and its accent")
         expect(plugin.refreshInterval == 30 && plugin.sharedFeeds.isEmpty, "and its interval, and it needs no shared feed")

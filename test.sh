@@ -85,7 +85,7 @@ echo "Shipped-script check passed: build-plugin.sh inside an app builds against 
 expected_fresh="ok power Power Power.bundle
 ok dev Dev Dev.bundle
 ok memory Memory Memory.bundle
-ok disk Disk Disk.bundle
+ok disk Disk Disk.bundle background every 900s
 ok network Network Network.bundle
 ok cpu CPU CPU.bundle"
 actual_fresh=$(SYSTEMBAR_PLUGINS_FILE="$tmp/fresh/plugins.json" SYSTEMBAR_PLUGIN_DATA_ROOT="$tmp/plugin-data" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
