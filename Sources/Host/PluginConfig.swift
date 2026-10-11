@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 /// One line of plugins.json. Exactly one of `name` (a bundle shipped inside the app) or `path`
 /// (a bundle anywhere on disk) is set; the parser refuses anything else.
@@ -6,6 +7,15 @@ struct PluginEntry: Equatable {
     let name: String?
     let path: String?
     let isEnabled: Bool
+    /// The entry's `settings` object, passed to the plugin untouched; `.empty` when there is none.
+    let settings: PluginSettings
+
+    init(name: String?, path: String?, isEnabled: Bool, settings: PluginSettings = .empty) {
+        self.name = name
+        self.path = path
+        self.isEnabled = isEnabled
+        self.settings = settings
+    }
 
     /// What the config called this entry, for error messages and the --list-plugins report.
     var location: String { name ?? path ?? "" }

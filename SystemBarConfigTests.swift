@@ -29,6 +29,10 @@ struct SystemBarConfigTests {
         testParserRejectsNullEnabled()
         testParserKeepsTheFirstOfTwoDuplicateKeys()
         testParserAcceptsATrailingComma()
+        testParserPassesASettingsObjectThrough()
+        testParserDefaultsSettingsToEmpty()
+        testParserRejectsNonObjectSettings()
+        testEncodeWritesSettingsOnlyWhenPresentAndRoundTrips()
         testStoreUsesApplicationSupportByDefault()
         testStoreHonoursTheEnvironmentOverride()
         testStoreWritesTheDefaultWhenTheFileIsMissing()
@@ -112,6 +116,11 @@ struct SystemBarConfigTests {
 
     private static func failure(_ result: Result<PluginConfig, PluginConfigError>) -> PluginConfigError? {
         if case .failure(let error) = result { return error }
+        return nil
+    }
+
+    private static func success(_ result: Result<PluginConfig, PluginConfigError>) -> PluginConfig? {
+        if case .success(let config) = result { return config }
         return nil
     }
 
@@ -243,6 +252,37 @@ struct SystemBarConfigTests {
     private static func testParserAcceptsATrailingComma() {
         let config = try? parse(#"{ "plugins": [ { "name": "A.bundle" }, ] }"#).get()
         expect(config?.plugins.count == 1, "JSONSerialization accepts a trailing comma, and the docs say so")
+    }
+
+    private static func testParserPassesASettingsObjectThrough() {
+        let config = success(parse(#"{ "plugins": [ { "name": "Disk.bundle", "settings": { "backgroundScans": false, "limit": 25, "label": "x", "tags": ["a", 1], "nested": { "k": null } } } ] }"#))
+        let settings = config?.plugins.first?.settings
+        expect(settings?.bool(forKey: "backgroundScans") == false, "a JSON false arrives as a boolean, not a number, got \(String(describing: settings))")
+        expect(settings?.number(forKey: "limit") == 25, "a JSON number arrives as a double")
+        expect(settings?.string(forKey: "label") == "x", "a JSON string arrives as a string")
+        expect(settings?["tags"] == .list([.string("a"), .number(1)]), "lists keep their order and element types")
+        expect(settings?["nested"] == .object(["k": .null]), "nested objects and nulls survive")
+    }
+
+    private static func testParserDefaultsSettingsToEmpty() {
+        let config = success(parse(#"{ "plugins": [ { "name": "A.bundle" }, { "name": "B.bundle", "settings": null } ] }"#))
+        expect(config?.plugins.map(\.settings) == [.empty, .empty], "no settings and a null settings both mean empty")
+    }
+
+    private static func testParserRejectsNonObjectSettings() {
+        let error = failure(parse(#"{ "plugins": [ { "name": "A.bundle", "settings": true } ] }"#))
+        expect(error == .wrongType(key: "settings", expected: "an object", where: "plugins[0]"),
+               "settings must be an object, and the error names the entry, got \(String(describing: error))")
+    }
+
+    private static func testEncodeWritesSettingsOnlyWhenPresentAndRoundTrips() {
+        let plain = PluginEntry(name: "A.bundle", path: nil, isEnabled: true)
+        let withSettings = PluginEntry(name: "B.bundle", path: nil, isEnabled: false, settings: PluginSettings(values: ["backgroundScans": .bool(false), "n": .number(3), "s": .string("x")]))
+        let data = try! PluginConfigParser.encode(PluginConfig(plugins: [plain, withSettings]))
+        let text = String(decoding: data, as: UTF8.self)
+        expect(!text.contains(#""settings" : {}"#) && text.contains(#""backgroundScans" : false"#), "settings are written only for the entry that has them, got \(text)")
+        let back = success(PluginConfigParser.parse(data))
+        expect(back?.plugins == [plain, withSettings], "what encode writes parses back equal, got \(String(describing: back))")
     }
 
     // MARK: - Config store

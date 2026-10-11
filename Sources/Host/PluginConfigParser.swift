@@ -1,4 +1,5 @@
 import Foundation
+import SystemBarKit
 
 /// Reads and writes plugins.json. Uses JSONSerialization rather than Codable because the file
 /// is hand-edited: an unknown key or a wrong type must be an error that names its place, and
@@ -7,7 +8,7 @@ import Foundation
 enum PluginConfigParser {
     private static let topLevel = "the top level"
     private static let topLevelKeys: Set<String> = ["plugins"]
-    private static let entryKeys: Set<String> = ["name", "path", "enabled"]
+    private static let entryKeys: Set<String> = ["name", "path", "enabled", "settings"]
     /// Foundation's own userInfo key for the byte offset a parse failed at. Named by string
     /// because the constant is not exposed to Swift on every SDK.
     private static let errorIndexKey = "NSJSONSerializationErrorIndex"
@@ -87,8 +88,10 @@ enum PluginConfigParser {
         if let path, !(path is String) {
             return .failure(.wrongType(key: "path", expected: "a string", where: place))
         }
-        return parseEnabled(object["enabled"], where: place).map { isEnabled in
-            PluginEntry(name: name as? String, path: path as? String, isEnabled: isEnabled)
+        return parseEnabled(object["enabled"], where: place).flatMap { isEnabled in
+            parseSettings(object["settings"], where: place).map { settings in
+                PluginEntry(name: name as? String, path: path as? String, isEnabled: isEnabled, settings: settings)
+            }
         }
     }
 
@@ -98,6 +101,39 @@ enum PluginConfigParser {
             return .failure(.wrongType(key: "enabled", expected: "true or false", where: place))
         }
         return .success(value)
+    }
+
+    /// `settings` is the plugin's, so only its shape is checked here: an object, or absent.
+    private static func parseSettings(_ raw: Any?, where place: String) -> Result<PluginSettings, PluginConfigError> {
+        guard let raw = present(raw) else { return .success(.empty) }
+        guard let object = raw as? [String: Any] else {
+            return .failure(.wrongType(key: "settings", expected: "an object", where: place))
+        }
+        return .success(PluginSettings(values: object.mapValues(settingsValue)))
+    }
+
+    /// JSONSerialization's value as the SDK's. Booleans are checked before numbers because
+    /// NSNumber is both.
+    private static func settingsValue(_ raw: Any) -> PluginSettings.Value {
+        if raw is NSNull { return .null }
+        if isBoolean(raw), let flag = raw as? Bool { return .bool(flag) }
+        if let number = raw as? NSNumber { return .number(number.doubleValue) }
+        if let text = raw as? String { return .string(text) }
+        if let list = raw as? [Any] { return .list(list.map(settingsValue)) }
+        if let object = raw as? [String: Any] { return .object(object.mapValues(settingsValue)) }
+        return .null
+    }
+
+    private static func jsonObject(_ value: PluginSettings.Value) -> Any {
+        switch value {
+        case .bool(let flag): return flag
+        case .number(let number): return number
+        case .string(let text): return text
+        case .list(let list): return list.map(jsonObject)
+        case .object(let object): return object.mapValues(jsonObject)
+        case .null: return NSNull()
+        @unknown default: return NSNull()
+        }
     }
 
     /// JSONSerialization hands back NSNumber for both `1` and `true`; only the latter is a boolean.
@@ -113,16 +149,21 @@ enum PluginConfigParser {
         )
     }
 
-    /// `enabled` is written only when false, since true is the default a reader assumes.
+    /// `enabled` is written only when false, since true is the default a reader assumes, and
+    /// `settings` only when the entry has any.
     private static func object(for entry: PluginEntry) -> [String: Any] {
-        let location: [String: Any]
+        var object: [String: Any] = [:]
         if let name = entry.name {
-            location = ["name": name]
+            object["name"] = name
         } else if let path = entry.path {
-            location = ["path": path]
-        } else {
-            location = [:]
+            object["path"] = path
         }
-        return entry.isEnabled ? location : location.merging(["enabled": false]) { current, _ in current }
+        if !entry.isEnabled {
+            object["enabled"] = false
+        }
+        if !entry.settings.values.isEmpty {
+            object["settings"] = entry.settings.values.mapValues(jsonObject)
+        }
+        return object
     }
 }
