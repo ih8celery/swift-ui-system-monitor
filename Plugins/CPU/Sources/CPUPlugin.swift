@@ -6,8 +6,9 @@ import SystemBarKit
 /// The CPU tab as a bundle. The headline, graph, cluster bars and user/system split follow the
 /// host's 1-second feed and the list follows its process feed. `collect()` reads what the feed
 /// does not carry (load average, thermal state, `pmset -g therm`) every ten seconds while the
-/// tab is showing, and again whenever macOS says the thermal state changed. The one other
-/// command it runs is a `ps` when a row is tapped, which the panel calls off the main thread.
+/// tab is showing, and again whenever macOS says the thermal state changed while it is showing.
+/// The one other command it runs is a `ps` when a row is tapped, which the panel calls off the
+/// main thread.
 /// This plugin also calls `collect()` from its own thermal queue, so the SDK's "never
 /// concurrently with itself" promise does not cover it.
 @objc(SystemBarCPUPlugin)
@@ -46,22 +47,32 @@ public final class CPUPlugin: NSObject, TabPlugin, ObservableObject {
             host.fastStats.publisher.sink { [weak self] snapshot in self?.fastStats = snapshot },
             host.processes.publisher.sink { [weak self] summary in self?.processes = summary },
         ]
-        observeThermalChanges()
     }
 
     deinit {
-        if let thermalObserver {
-            NotificationCenter.default.removeObserver(thermalObserver)
-        }
+        stopObservingThermalChanges()
     }
 
     /// A change is worth one read now rather than up to ten seconds later. Registered from a
     /// plain method, not the main-actor init, so the compiler does not take `self` for a
     /// main-actor value being sent to the observer block.
     private func observeThermalChanges() {
+        guard thermalObserver == nil else { return }
         thermalObserver = NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: thermalQueue
         ) { [weak self] _ in self?.collect() }
+    }
+
+    private func stopObservingThermalChanges() {
+        guard let thermalObserver else { return }
+        NotificationCenter.default.removeObserver(thermalObserver)
+        self.thermalObserver = nil
+    }
+
+    /// The thermal observer runs only while the tab is showing: a hidden tab samples nothing
+    /// unless it declares a `backgroundInterval`, and this one does not.
+    @MainActor public func visibilityChanged(isVisible: Bool) {
+        if isVisible { observeThermalChanges() } else { stopObservingThermalChanges() }
     }
 
     /// Reads the load average, thermal state and pmset's speed limit, and publishes them on the

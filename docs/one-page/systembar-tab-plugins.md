@@ -234,7 +234,7 @@ bundles can share code only through the SDK, so anything two tabs both need
 joins it or, when it is a line or two, is copied.
 
 The host runs two shared samplers of its own, in `HostSamplers`. The 1-second
-sampler (CPU percent and network rates, with 90 seconds of history) runs
+sampler (CPU percent for the whole machine, each core and the user/system split, and network rates, with 90 seconds of history for the headline figures) runs
 whenever the window is open, whatever the tab, so switching tabs leaves no gap
 in the histories. The 10-second `ps` sampler runs only while the showing tab
 declares `.processes`. With the window closed, or an error tab showing,
@@ -526,7 +526,7 @@ leaving a working, buildable, tested app:
   and only published the sum (CPU epic D5) — Adam.
 - 2026-10-10 — CPU's `refreshInterval` is 10 seconds again, superseding the
   2026-09-24 entry: its `collect()` now reads the load average, the thermal
-  state and `pmset -g therm`, which the shared feeds do not carry. It also
+  state and `pmset -g therm`, which the shared feeds do not carry. While showing, it also
   runs `collect()` from its own queue on a thermal-state change, so the
   "never concurrently with itself" promise is one it waives for itself —
   Claude, from the Stage 2 plan, for Adam to confirm.

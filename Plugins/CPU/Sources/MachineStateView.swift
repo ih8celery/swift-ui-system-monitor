@@ -13,7 +13,7 @@ struct MachineStateView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let clusters {
-                ForEach(clusters, id: \.name) { cluster in
+                ForEach(clusters, id: \.cores.lowerBound) { cluster in
                     LabelledBar(
                         label: "\(cluster.name) · \(cluster.coreCount)",
                         percent: cluster.usage(perCore: fastStats.perCoreUsage),

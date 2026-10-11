@@ -18,6 +18,7 @@ enum CPUTests {
         testMachineStateRunsPmsetThroughTheHost()
         testClustersOnThisMacCoverEveryCore()
         testCollectPublishesTheMachineState()
+        testThermalChangesAreReadOnlyWhileShowing()
     }
 
     // A `ps -eo pid,ppid,pcpu,rss,etime,args` sample. Leading fields are
@@ -248,7 +249,28 @@ enum CPUTests {
         let plugin = CPUPlugin(host: makeHost(runner: recordingRunner(LogRecorder(), answers: answers)))
         expect(plugin.machineState == .empty, "before the first collect the state is empty")
         plugin.collect()
-        waitUntil { plugin.machineState.thermal.speedLimitPercent == 90 }
+        waitUntil(5) { plugin.machineState.thermal.speedLimitPercent == 90 }
         expect(plugin.machineState.thermal.speedLimitPercent == 90 && plugin.machineState.coreCount > 0, "collect publishes the reading on the main thread, got \(plugin.machineState)")
+    }
+
+    private static func testThermalChangesAreReadOnlyWhileShowing() {
+        let recorder = LogRecorder()
+        let command = "/usr/bin/pmset -g therm"
+        let plugin = CPUPlugin(host: makeHost(runner: recordingRunner(recorder, answers: [command: "CPU Power notify\n\tCPU_Speed_Limit \t= 90\n"])))
+        let center = NotificationCenter.default
+
+        center.post(name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        spinRunLoop(for: 0.2)
+        expect(recorder.count == 0, "a thermal change while hidden runs nothing: the window may be closed, got \(recorder.messages)")
+
+        plugin.visibilityChanged(isVisible: true)
+        center.post(name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        waitUntil(5) { recorder.count == 1 }
+        expect(recorder.messages == [command], "a thermal change while showing reads pmset once, got \(recorder.messages)")
+
+        plugin.visibilityChanged(isVisible: false)
+        center.post(name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        spinRunLoop(for: 0.2)
+        expect(recorder.count == 1, "hiding the tab stops the observer, got \(recorder.messages)")
     }
 }
