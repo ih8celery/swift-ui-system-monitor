@@ -72,9 +72,10 @@ public enum BoundedHistory {
     }
 }
 
-/// The host's 1-second reading of CPU load and network traffic, behind `HostServices.fastStats`.
-/// Every figure is worked out from how far the kernel's counters moved since the previous
-/// second, so the very first reading is all zeros.
+/// The host's 1-second reading of CPU load (the whole machine, each core, and the user/system
+/// split) and network traffic, behind `HostServices.fastStats`. Every figure is worked out from
+/// how far the kernel's counters moved since the previous second, so the very first reading is
+/// all zeros.
 public struct FastStatsSnapshot: Sendable {
     /// Bytes per second received, summed over every network interface that is up, loopback
     /// excluded.
@@ -86,6 +87,16 @@ public struct FastStatsSnapshot: Sendable {
     public var cpuUsagePercent: Double = 0
     /// Past values of `cpuUsagePercent`, oldest first, one per second, at most ninety.
     public var cpuHistory: [Double] = []
+    /// How busy each core was over the last second, as a percent from 0 to 100, in the kernel's
+    /// core order (core 0 first). Empty until the second reading, and after any reading whose
+    /// core count differed from the one before it.
+    public var perCoreUsage: [Double] = []
+    /// The part of `cpuUsagePercent` spent running programs (user and nice time), as a percent
+    /// of all cores together.
+    public var cpuUserPercent: Double = 0
+    /// The part spent in the kernel on their behalf (system time), the same way. User plus
+    /// system is `cpuUsagePercent`.
+    public var cpuSystemPercent: Double = 0
     /// Past values of `currentDownloadRate` in bytes per second, oldest first, one per second,
     /// at most ninety.
     public var downloadHistory: [Double] = []
