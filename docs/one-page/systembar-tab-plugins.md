@@ -238,8 +238,9 @@ whenever the window is open, whatever the tab, so switching tabs leaves no gap
 in the histories. The 10-second `ps` sampler runs only while the showing tab
 declares `.processes`. With the window closed, or an error tab showing,
 neither runs; the only work that does is the `collect()` of a plugin that
-declared a `backgroundInterval` (D9), on its own queue, at that cadence. A sampler samples at once when it starts, and one that keeps
-running across a tab switch keeps its rhythm.
+declared a `backgroundInterval` (D9), on its own queue, at that cadence. A
+sampler samples at once when it starts, and one that keeps running across a
+tab switch keeps its rhythm.
 
 ## Config Contract
 
