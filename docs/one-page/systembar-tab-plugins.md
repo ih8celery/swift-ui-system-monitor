@@ -177,7 +177,8 @@ public protocol TabPlugin: AnyObject {
     var sharedFeeds: Set<SharedFeed> { get }
     /// How often the host calls collect() while this tab is NOT showing. Nil (the
     /// default) means never. Clamped to 5s...86,400s. Shared feeds do not run for a
-    /// hidden tab. The first tick after the Mac wakes waits 120s.
+    /// hidden tab. Every wake restarts the cadence with a tick 120s later, so a
+    /// slower cadence of your own belongs in your bookkeeping, checked each tick.
     var backgroundInterval: TimeInterval? { get }
 
     /// @MainActor, and must not do slow work: the host times this call and logs a warning when

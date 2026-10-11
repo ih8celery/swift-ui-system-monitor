@@ -40,10 +40,12 @@ public protocol TabPlugin: AnyObject {
     /// on screen, as every tab did before this existed. A number is clamped to between 5 seconds
     /// and one day, and each substitution is logged. Shared feeds run only for the window and the
     /// showing tab, never for this one while it is hidden, so a background `collect()` must sample
-    /// for itself; a feed value read then is whatever the feed last held. After the Mac wakes,
-    /// the first background tick waits two minutes so no sample lands on the login moment.
-    /// Declare one only for work the person wants done while they are not looking, and say in
-    /// the README what runs and how often.
+    /// for itself; a feed value read then is whatever the feed last held. Every wake of the Mac
+    /// or its screen restarts the cadence with a tick two minutes later, so no sample lands on
+    /// the login moment and a long interval still gets a tick soon after each wake: keep the
+    /// work of one tick cheap, and keep any slower cadence (a scan every few hours, say) in
+    /// your own bookkeeping, checked on each tick. Declare one only for work the person wants
+    /// done while they are not looking, and say in the README what runs and how often.
     var backgroundInterval: TimeInterval? { get }
 
     /// The host times this call and logs a warning once it passes 100 ms, so slow work belongs
