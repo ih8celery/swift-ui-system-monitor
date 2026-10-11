@@ -137,11 +137,13 @@ enum DiskRows {
     /// are compared one by one, deleted ones included, never as the group: a group's earlier
     /// sum can cover a different set of devices. A row with no earlier sample is new only when
     /// its plan had already looked before the window and did not see it; otherwise it is
-    /// silent, so a first scan, or a folder a budget cut-off skipped, is never called new.
+    /// silent, so a plan's first run never calls everything new.
     static func movers(rows: [DiskRow], ledger: DiskLedger, window: TimeInterval, now: Date, limit: Int = listLimit) -> [DiskMover] {
         let since = now.addingTimeInterval(-window)
         let history = SampleHistory(ledger)
-        let compared = rows.flatMap { row in row.kind == .simulatorGroup ? allSimulatorRows(from: ledger) : [row] }
+        // Devices come from the ledger, not the group row: when the last device is deleted
+        // there is no group, and its device must still show as freed.
+        let compared = rows.filter { $0.kind != .simulatorGroup } + allSimulatorRows(from: ledger)
         let movers = compared.compactMap { row -> DiskMover? in
             guard row.kind != .remainder else { return nil }
             guard let earlier = history.sample(of: row.path, atOrBefore: since)?.bytes else {

@@ -21,6 +21,18 @@ enum DiskRowsTests {
         testMoversListSimulatorDevicesNotTheGroup()
         testDeletedDevicesLeaveTheGroupCountAndList()
         testSampleHistoryAgreesWithTheLedgerOnTies()
+        testDeletingTheLastSimulatorShowsAsFreed()
+    }
+
+    private static func testDeletingTheLastSimulatorShowsAsFreed() {
+        let ledger = DiskLedger().appending([
+            sample("\(devices)/A", 20, ago: 2 * day, plan: .simulators, simulator: deviceA),
+            sample("\(devices)/A", 0, plan: .simulators, simulator: deviceA),
+        ])
+        let rows = DiskRows.rows(from: ledger, homeDirectory: home)
+        expect(!rows.contains { $0.kind == .simulatorGroup }, "no device left means no group row, got \(rows.map(\.name))")
+        let movers = DiskRows.movers(rows: rows, ledger: ledger, window: day, now: now)
+        expect(movers.map(\.change) == [.freed(20)] && movers.first?.row.path == "\(home)/\(devices)/A", "the last deleted device still shows as freed, got \(movers)")
     }
 
     static let home = "/Users/ada"
@@ -122,8 +134,8 @@ enum DiskRowsTests {
 
     private static func testRemainderClampsWhenChildrenOutgrowTheParent() {
         let ledger = DiskLedger().appending([
-            sample("p", 10, ago: 3600),
-            sample("p/c", 25),
+            sample("p", 10),
+            sample("p/c", 25, ago: 3600),
         ])
         let rows = DiskRows.rows(from: ledger, homeDirectory: home)
         let rest = rows.first { $0.name == "p (rest)" }
@@ -140,10 +152,13 @@ enum DiskRowsTests {
     }
 
     private static func testMoversNameANewPathOnlyWhenItsPlanHadLookedBefore() {
-        let ledger = DiskLedger().appending([sample("x", 5, ago: 2 * day), sample("x", 5), sample("y", 3)])
+        let ledger = DiskLedger().appending([
+            sample("x", 5, ago: 2 * day), sample("x", 5), sample("y", 3),
+            sample("z", 9, plan: .developer),
+        ])
         let rows = DiskRows.rows(from: ledger, homeDirectory: home)
         let movers = DiskRows.movers(rows: rows, ledger: ledger, window: day, now: now)
-        expect(movers.map(\.row.name) == ["y"] && movers.first?.change == .new, "the overview looked two days ago and did not see y, so y is new, got \(movers)")
+        expect(movers.map(\.row.name) == ["y"] && movers.first?.change == .new, "the overview looked two days ago and did not see y, so y is new; the developer plan had never looked, so z is silent, got \(movers)")
     }
 
     static let deviceA = SimulatorInfo(udid: "A", name: "iPhone 17", runtime: "iOS 26.5", lastBootedAt: nil)
