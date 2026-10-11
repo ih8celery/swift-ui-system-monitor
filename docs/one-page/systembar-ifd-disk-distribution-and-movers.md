@@ -61,18 +61,18 @@ fires during sleep. Adam, 2026-10-10.
 | Simulators | 6 hours | right after Developer |
 
 The Disk plugin declares a 15-minute `backgroundInterval` (the CPU epic's SDK
-contract, see D6), so the host calls its `collect()` every 15 minutes while the
-tab is hidden and every 30 seconds while it shows. Each call reads the volumes
-and runs every plan whose newest sample is older than its cadence, one plan at
-a time, in the order above, on the plugin's own scan queue. The scheduler
-restarts background timers two minutes after the Mac wakes, so a scan never
-lands on the login moment. That restart also gives an extra background tick
-about two minutes after each wake, which is harmless and wanted: each tick is
-only a due check, so it runs a plan only if one is due. Screen unlock is not a
-trigger: a wake plus the 15-minute cadence covers the morning, and an unlock
-without a sleep is not a moment worth scanning at (agreed with the CPU pane,
-2026-10-10). The panel's button runs every plan now. A scan under way when the
-popover closes finishes.
+contract, see D6), so the host calls its `collect()` every 15 minutes while
+the tab is hidden and every 30 seconds while it shows. Each call reads the
+volumes and runs every plan whose newest sample is older than its cadence, one
+plan at a time, in the order above, on the plugin's own scan queue. The
+scheduler restarts background timers two minutes after the Mac or its screen
+wakes, so a scan never lands on the login moment. That restart also gives an
+extra background tick about two minutes after each wake, which is harmless and
+wanted: each tick is only a due check, so it runs a plan only if one is due.
+Screen unlock is not a trigger: a wake plus the 15-minute cadence covers the
+morning, and an unlock without a sleep is not a moment worth scanning at
+(agreed with the CPU pane, 2026-10-10). The panel's button runs every plan
+now. A scan under way when the popover closes finishes.
 
 ### D3: How far does the scan reach?
 
@@ -243,7 +243,7 @@ example. Adam, 2026-10-10.
   tick after wake.
 - A simulator added yesterday shows in Movers 24h as new with its size; a
   deleted DerivedData shows as freed.
-- Turning `backgroundScans` off stops scheduled scans; the button still works.
+- Turning `backgroundScans` off stops the hidden 15-minute calls; due plans still run while the tab shows, and the button still works.
 
 ## Non-Goals
 
