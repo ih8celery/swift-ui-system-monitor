@@ -88,14 +88,16 @@ public struct FastStatsSnapshot: Sendable {
     /// Past values of `cpuUsagePercent`, oldest first, one per second, at most ninety.
     public var cpuHistory: [Double] = []
     /// How busy each core was over the last second, as a percent from 0 to 100, in the kernel's
-    /// core order (core 0 first). Empty until the second reading, and after any reading whose
-    /// core count differed from the one before it.
+    /// core order (core 0 first). Empty until the second reading. After a reading whose core
+    /// count differed from the one before it, the previous figures stand for one more second,
+    /// so the array's length can briefly differ from the live core count: index it with a
+    /// bounds check.
     public var perCoreUsage: [Double] = []
     /// The part of `cpuUsagePercent` spent running programs (user and nice time), as a percent
     /// of all cores together.
     public var cpuUserPercent: Double = 0
-    /// The part spent in the kernel on their behalf (system time), the same way. User plus
-    /// system is `cpuUsagePercent`.
+    /// The part spent in the kernel on their behalf (system time), the same way. User and
+    /// system add up to `cpuUsagePercent`.
     public var cpuSystemPercent: Double = 0
     /// Past values of `currentDownloadRate` in bytes per second, oldest first, one per second,
     /// at most ninety.

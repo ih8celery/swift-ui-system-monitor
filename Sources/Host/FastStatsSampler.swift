@@ -123,11 +123,12 @@ final class FastStatsSampler: @unchecked Sendable {
 
         for cpuIndex in 0..<Int(processorCount) {
             let offset = cpuIndex * stride
+            // The kernel's counters are unsigned 32-bit; read them as such so a count past Int32.max cannot trap.
             cores.append(CoreTicks(
-                user: UInt64(cpuInfo[offset + Int(CPU_STATE_USER)]),
-                system: UInt64(cpuInfo[offset + Int(CPU_STATE_SYSTEM)]),
-                idle: UInt64(cpuInfo[offset + Int(CPU_STATE_IDLE)]),
-                nice: UInt64(cpuInfo[offset + Int(CPU_STATE_NICE)])
+                user: UInt64(UInt32(bitPattern: cpuInfo[offset + Int(CPU_STATE_USER)])),
+                system: UInt64(UInt32(bitPattern: cpuInfo[offset + Int(CPU_STATE_SYSTEM)])),
+                idle: UInt64(UInt32(bitPattern: cpuInfo[offset + Int(CPU_STATE_IDLE)])),
+                nice: UInt64(UInt32(bitPattern: cpuInfo[offset + Int(CPU_STATE_NICE)]))
             ))
         }
 
@@ -184,21 +185,25 @@ struct CoreTicks {
 /// the per-core figures need.
 struct CPUCounters {
     let cores: [CoreTicks]
+    let user: UInt64
+    let system: UInt64
+    let nice: UInt64
+    let active: UInt64
+    let total: UInt64
 
     init(cores: [CoreTicks]) {
         self.cores = cores
+        user = cores.reduce(0) { $0 + $1.user }
+        system = cores.reduce(0) { $0 + $1.system }
+        nice = cores.reduce(0) { $0 + $1.nice }
+        active = cores.reduce(0) { $0 + $1.active }
+        total = cores.reduce(0) { $0 + $1.total }
     }
 
     /// The whole machine as one core: for a read that failed, and for tests of the rate math.
     init(user: UInt64, system: UInt64, idle: UInt64, nice: UInt64) {
-        cores = [CoreTicks(user: user, system: system, idle: idle, nice: nice)]
+        self.init(cores: [CoreTicks(user: user, system: system, idle: idle, nice: nice)])
     }
-
-    var user: UInt64 { cores.reduce(0) { $0 + $1.user } }
-    var system: UInt64 { cores.reduce(0) { $0 + $1.system } }
-    var nice: UInt64 { cores.reduce(0) { $0 + $1.nice } }
-    var active: UInt64 { cores.reduce(0) { $0 + $1.active } }
-    var total: UInt64 { cores.reduce(0) { $0 + $1.total } }
 }
 
 struct NetworkCounters {

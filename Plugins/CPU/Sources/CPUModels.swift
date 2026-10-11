@@ -16,7 +16,7 @@ struct CPUCluster: Equatable {
     var coreCount: Int { cores.count }
 
     /// The cluster's busy percent: the mean of its cores' entries in the feed's `perCoreUsage`,
-    /// or 0 when the feed has none yet (the first second, or just after a core-count change).
+    /// or 0 when the feed has none yet (the first second, or a feed shorter than this cluster's range).
     func usage(perCore: [Double]) -> Double {
         guard !cores.isEmpty, cores.upperBound <= perCore.count else { return 0 }
         return perCore[cores].reduce(0, +) / Double(cores.count)
