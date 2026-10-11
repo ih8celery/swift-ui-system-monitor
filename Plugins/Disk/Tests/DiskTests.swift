@@ -26,14 +26,13 @@ enum DiskTests {
     }
 
     private static func testDiskVolumeMath() {
-        let volume = DiskVolume(name: "Macintosh HD", path: "/", total: 1000, free: 100, purgeable: 50, isRoot: true)
-        expect(volume.importantAvailable == 150, "available should include purgeable space macOS can reclaim")
-        expect(volume.used == 850, "used should be capacity minus everything macOS counts as available")
-        expect(volume.availableRatio == 0.15, "available ratio should drive the headline colour")
+        let volume = DiskVolume(name: "Macintosh HD", path: "/", total: 1000, free: 150, isRoot: true)
+        expect(volume.used == 850, "used is capacity minus free: purgeable space is still on the disk, so it counts as used")
+        expect(volume.freeRatio == 0.15, "the free ratio drives the headline colour")
 
-        // A volume reporting more available than capacity must not underflow the unsigned used value.
-        let overreported = DiskVolume(name: "Odd", path: "/odd", total: 100, free: 200, purgeable: 0, isRoot: false)
-        expect(overreported.used == 0, "used should clamp to zero rather than underflow")
+        // A volume reporting more free than capacity must not underflow the unsigned used value.
+        let overreported = DiskVolume(name: "Odd", path: "/odd", total: 100, free: 200, isRoot: false)
+        expect(overreported.used == 0, "used clamps to zero rather than underflowing")
     }
 
     private static func testDiskUsageParsing() {
@@ -280,7 +279,7 @@ enum DiskTests {
     }
 
     private static func testSnapshotAppliesAReadingAndEachHogUpdate() {
-        let volume = DiskVolume(name: "Macintosh HD", path: "/", total: 1000, free: 100, purgeable: 50, isRoot: true)
+        let volume = DiskVolume(name: "Macintosh HD", path: "/", total: 1000, free: 150, isRoot: true)
         let at = Date(timeIntervalSince1970: 5_000)
 
         let read = DiskSnapshot().applying(DiskVolumeReading(volumes: [volume], localSnapshotCount: 3, sampledAt: at))

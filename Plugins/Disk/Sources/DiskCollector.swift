@@ -42,7 +42,6 @@ final class DiskCollector: @unchecked Sendable {
             .volumeNameKey,
             .volumeTotalCapacityKey,
             .volumeAvailableCapacityKey,
-            .volumeAvailableCapacityForImportantUsageKey,
             .volumeIsBrowsableKey,
             .volumeIsInternalKey
         ]
@@ -61,16 +60,12 @@ final class DiskCollector: @unchecked Sendable {
             guard let total = values.volumeTotalCapacity, total > 0 else { return nil }
 
             let free = UInt64(max(values.volumeAvailableCapacity ?? 0, 0))
-            let important = UInt64(max(values.volumeAvailableCapacityForImportantUsage ?? 0, 0))
-            // macOS reports reclaimable space as available; the difference is what it would purge under pressure.
-            let purgeable = important > free ? important - free : 0
 
             return DiskVolume(
                 name: values.volumeName ?? url.lastPathComponent,
                 path: url.path,
                 total: UInt64(total),
                 free: free,
-                purgeable: purgeable,
                 isRoot: url.path == "/"
             )
         }

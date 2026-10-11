@@ -16,7 +16,6 @@ struct DiskPanel: View {
                     .minimumScaleFactor(0.7)
 
                 HStack(spacing: 10) {
-                    StatPill(label: "Purgeable", value: byteString(plugin.snapshot.boot?.purgeable ?? 0))
                     StatPill(label: "Snapshots", value: "\(plugin.snapshot.localSnapshotCount)")
                     StatPill(label: "Cleanup", value: byteString(plugin.snapshot.reclaimableTotal))
                 }
@@ -35,7 +34,7 @@ struct DiskPanel: View {
                             ForEach(plugin.snapshot.otherVolumes) { volume in
                                 EvidenceRow(
                                     label: volume.name,
-                                    value: byteString(volume.importantAvailable),
+                                    value: "\(byteString(volume.free)) free",
                                     detail: "\(byteString(volume.used)) used of \(byteString(volume.total))"
                                 )
                             }
@@ -96,13 +95,13 @@ struct DiskPanel: View {
 
     private var headlineText: String {
         guard let boot = plugin.snapshot.boot else { return "Reading volumes" }
-        return "\(byteString(boot.importantAvailable)) Available"
+        return "\(byteString(boot.free)) Free"
     }
 
     private var headlineColor: Color {
         guard let boot = plugin.snapshot.boot else { return .secondary }
-        if boot.availableRatio > 0.20 { return Palette.good }
-        if boot.availableRatio > 0.10 { return Palette.caution }
+        if boot.freeRatio > 0.20 { return Palette.good }
+        if boot.freeRatio > 0.10 { return Palette.caution }
         return Palette.critical
     }
 
@@ -140,13 +139,11 @@ struct DiskHogRow: View {
     }
 }
 
-/// The three capacity buckets, unfiltered — CapacityLegend shows all of them even when a
-/// bucket is zero, while CapacityBar (which can't draw a zero-width segment meaningfully)
-/// filters those out itself.
+/// The two capacity buckets. CapacityLegend shows both even when one is zero, while CapacityBar
+/// (which can't draw a zero-width segment meaningfully) filters those out itself.
 private func capacityRows(for volume: DiskVolume) -> [BarSegment] {
     [
         BarSegment(label: "Used", value: volume.used, color: Palette.blue),
-        BarSegment(label: "Purgeable", value: volume.purgeable, color: Palette.caution),
         BarSegment(label: "Free", value: volume.free, color: Palette.good)
     ]
 }

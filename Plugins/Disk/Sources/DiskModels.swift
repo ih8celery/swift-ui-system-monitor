@@ -6,19 +6,17 @@ struct DiskVolume: Identifiable {
     let name: String
     let path: String
     let total: UInt64
+    /// Plain free space, what `df` calls available. Space macOS could purge is not counted:
+    /// it is still on the disk, and the map on this tab is of what is on the disk.
     let free: UInt64
-    let purgeable: UInt64
     let isRoot: Bool
 
-    /// What Finder calls available: genuinely free space plus space macOS can reclaim on demand.
-    var importantAvailable: UInt64 { free &+ purgeable }
-
     var used: UInt64 {
-        total > importantAvailable ? total - importantAvailable : 0
+        total > free ? total - free : 0
     }
 
-    var availableRatio: Double {
-        Double(importantAvailable) / Double(max(total, 1))
+    var freeRatio: Double {
+        Double(free) / Double(max(total, 1))
     }
 }
 
