@@ -16,6 +16,11 @@ struct SystemBarSchedulerTests {
         testSchedulerStopsThePreviousPluginWhenAnotherIsShown()
         testSchedulerNeverOverlapsACollectInterruptedByHideAndShow()
         testSchedulerClampsABadRefreshInterval()
+        testSchedulerCollectsAHiddenTabAtItsBackgroundInterval()
+        testSchedulerLeavesAHiddenTabAloneWhenItDeclaresNoBackgroundInterval()
+        testSchedulerSwapsToTheFastTimerWhenShownAndBackWhenHidden()
+        testSchedulerReturnsAReplacedTabToItsBackgroundCadence()
+        testSchedulerNeverOverlapsABackgroundCollectWithTheFirstForegroundTick()
         testSamplersWantNothingWhileTheWindowIsClosed()
         testSamplersRunNothingWhileTheWindowIsClosed()
         testSamplersRunTheFastSamplerForEveryVisibleTab()
@@ -98,7 +103,7 @@ struct SystemBarSchedulerTests {
     /// A scheduler for the timing tests: a minimum far below any fake's declared interval, so
     /// none of them are clamped, and a silent log, so a run of test.sh never prints a clamp line.
     private static func makeTestScheduler() -> PluginScheduler {
-        PluginScheduler(minimumRefreshInterval: 0.01, log: { _ in })
+        PluginScheduler(minimumRefreshInterval: 0.01, wakeNotifications: NotificationCenter(), log: { _ in })
     }
 
     private static func testSchedulerCollectsOnlyWhileVisibleAndNeverOverlaps() {
@@ -175,6 +180,84 @@ struct SystemBarSchedulerTests {
             expect(effective == ok, "a sane refreshInterval of \(ok) must pass through unchanged")
             expect(log.count == before, "a sane refreshInterval of \(ok) must not log a clamp, got \(log.count - before) messages")
         }
+    }
+
+    // MARK: - Background sampling
+
+    /// A scheduler whose floors are short enough that a test's intervals run as declared.
+    private static func makeBackgroundScheduler(log: @escaping (String) -> Void = { _ in }) -> PluginScheduler {
+        PluginScheduler(
+            minimumRefreshInterval: 0.01,
+            minimumBackgroundInterval: 0.01,
+            settleAfterWake: 0.3,
+            wakeNotifications: NotificationCenter(),
+            log: log
+        )
+    }
+
+    private static func testSchedulerCollectsAHiddenTabAtItsBackgroundInterval() {
+        let plugin = BackgroundTab(refresh: 0.05, background: 0.1)
+        let scheduler = makeBackgroundScheduler()
+        scheduler.start([plugin])
+        expect(plugin.count == 0, "a background timer's first tick comes one interval after launch, not at once, got \(plugin.count)")
+        waitUntil(2) { plugin.count >= 3 }
+        expect(plugin.count >= 3, "a hidden tab with a backgroundInterval is collected every interval, got \(plugin.count) collects")
+        expect(!plugin.overlapped, "background collects never run concurrently with themselves")
+    }
+
+    private static func testSchedulerLeavesAHiddenTabAloneWhenItDeclaresNoBackgroundInterval() {
+        let plugin = BackgroundTab(refresh: 0.05, background: nil)
+        let scheduler = makeBackgroundScheduler()
+        scheduler.start([plugin])
+        spinRunLoop(for: 0.3)
+        expect(plugin.count == 0, "a tab with no backgroundInterval is never collected while hidden, got \(plugin.count)")
+    }
+
+    private static func testSchedulerSwapsToTheFastTimerWhenShownAndBackWhenHidden() {
+        let plugin = BackgroundTab(refresh: 0.02, background: 0.3)
+        let scheduler = makeBackgroundScheduler()
+        scheduler.start([plugin])
+        scheduler.show(plugin)
+        waitUntil { plugin.count >= 5 }
+        expect(plugin.count >= 5, "showing a background tab collects it at its refreshInterval, got \(plugin.count)")
+        scheduler.hide()
+        let atHide = plugin.count
+        spinRunLoop(for: 0.15)
+        // A fast tick already dispatched when hide() cancelled its timer may still land, so
+        // allow one; two would mean the slow timer fired early.
+        expect(plugin.count <= atHide + 1, "after hide, the next tick waits one background interval, got \(plugin.count - atHide) collects in half an interval")
+        waitUntil(2) { plugin.count > atHide }
+        expect(plugin.count > atHide, "after hide, the tab goes back to its background cadence")
+        expect(!plugin.overlapped, "the fast and slow timers never overlap")
+        scheduler.hide()
+    }
+
+    private static func testSchedulerReturnsAReplacedTabToItsBackgroundCadence() {
+        let background = BackgroundTab(refresh: 0.02, background: 0.1)
+        let other = TickingTab(host: makeHost())
+        let scheduler = makeBackgroundScheduler()
+        scheduler.start([background])
+        scheduler.show(background)
+        waitUntil { background.count >= 2 }
+        scheduler.show(other)
+        let atSwitch = background.count
+        waitUntil(2) { background.count >= atSwitch + 2 }
+        expect(background.count >= atSwitch + 2, "a tab replaced by another returns to its background cadence, got \(background.count - atSwitch) more collects")
+        expect(!background.overlapped, "swapping timers never overlaps a collect")
+        scheduler.hide()
+    }
+
+    private static func testSchedulerNeverOverlapsABackgroundCollectWithTheFirstForegroundTick() {
+        let plugin = BackgroundTab(refresh: 0.02, background: 0.05, work: 0.15)
+        let scheduler = makeBackgroundScheduler()
+        scheduler.start([plugin])
+        waitUntil { plugin.count >= 1 }
+        // The background collect is now asleep inside `work`; showing the tab must queue the
+        // first fast tick behind it, not beside it.
+        scheduler.show(plugin)
+        spinRunLoop(for: 0.3)
+        expect(!plugin.overlapped, "a background collect still running when the tab is shown must finish before the first foreground tick")
+        scheduler.hide()
     }
 
     // MARK: - Host samplers
