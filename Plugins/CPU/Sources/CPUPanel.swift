@@ -32,7 +32,14 @@ struct CPUPanel: View {
                     ChartUnitLabel("% CPU - last 90s")
                 }
                 Sparkline(values: plugin.fastStats.cpuHistory, maxValue: 100, color: accentColor, fill: true)
-                    .frame(height: 120)
+                    .frame(height: 96)
+
+                MachineStateView(
+                    clusters: plugin.clusters,
+                    fastStats: plugin.fastStats,
+                    state: plugin.machineState,
+                    accent: accentColor
+                )
 
                 Spacer(minLength: 0)
             }

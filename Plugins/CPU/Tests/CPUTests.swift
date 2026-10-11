@@ -12,6 +12,13 @@ enum CPUTests {
         testGroupDetailFindsAnAppWhosePathHasSpaces()
         testPluginFollowsBothFeeds()
         testPluginIdentityMatchesTheOldTab()
+        testClusterLayoutPutsTheSlowestClusterAtCoreZero()
+        testClusterUsageIsTheMeanOfItsCores()
+        testThermalSpeedLimitParsing()
+        testMachineStateRunsPmsetThroughTheHost()
+        testClustersOnThisMacCoverEveryCore()
+        testCollectPublishesTheMachineState()
+        testThermalChangesAreReadOnlyWhileShowing()
     }
 
     // A `ps -eo pid,ppid,pcpu,rss,etime,args` sample. Leading fields are
@@ -161,6 +168,109 @@ enum CPUTests {
         expect(CPUPlugin.identifier == "cpu" && plugin.title == "CPU" && plugin.systemImage == "cpu", "the bundle keeps the tab's id, title and icon")
         expect(plugin.accent == Palette.warning, "and its accent")
         expect(plugin.sharedFeeds == [.processes, .fastStats], "it needs both shared feeds")
-        expect(plugin.refreshInterval == PluginScheduler.maximumRefreshInterval, "its collect() does nothing, so it asks to be called as rarely as the host allows, got \(plugin.refreshInterval)")
+        expect(plugin.refreshInterval == CPUSampling.refreshInterval && CPUSampling.refreshInterval == 10, "collect() reads the load average, thermal state and pmset every 10 seconds while showing, got \(plugin.refreshInterval)")
+    }
+
+    // MARK: - Machine state
+
+    private static func testClusterLayoutPutsTheSlowestClusterAtCoreZero() {
+        // This Mac: sysctl lists Super (6) then Performance (12); the device tree puts the
+        // Performance cores at 0-11 and the Super cores at 12-17.
+        expect(CPUClusters.layout(names: ["A", "B"], counts: [0, 8], coreCount: 8) == nil, "a zero-core cluster means the counts are not trusted")
+        let thisMac = CPUClusters.layout(names: ["Super", "Performance"], counts: [6, 12], coreCount: 18)
+        expect(thisMac == [CPUCluster(name: "Super", cores: 12..<18), CPUCluster(name: "Performance", cores: 0..<12)],
+               "perflevel 0 is the fastest cluster and takes the last core indices, got \(String(describing: thisMac))")
+
+        let m1 = CPUClusters.layout(names: ["Performance", "Efficiency"], counts: [4, 4], coreCount: 8)
+        expect(m1 == [CPUCluster(name: "Performance", cores: 4..<8), CPUCluster(name: "Efficiency", cores: 0..<4)],
+               "an M1's efficiency cores are 0-3, got \(String(describing: m1))")
+
+        expect(CPUClusters.layout(names: ["Only"], counts: [8], coreCount: 8) == [CPUCluster(name: "Only", cores: 0..<8)],
+               "one perflevel covers every core")
+        expect(CPUClusters.layout(names: ["A", "B"], counts: [4, 4], coreCount: 10) == nil,
+               "counts that do not add up to the core count give nil, so the view falls back to per-core bars")
+        expect(CPUClusters.layout(names: [], counts: [], coreCount: 8) == nil, "no perflevels at all is nil too")
+        expect(CPUClusters.layout(names: ["A"], counts: [4, 4], coreCount: 8) == nil, "mismatched name and count lists are nil rather than a trap")
+    }
+
+    private static func testClusterUsageIsTheMeanOfItsCores() {
+        let cluster = CPUCluster(name: "Super", cores: 2..<4)
+        expect(cluster.usage(perCore: [0, 0, 80, 20]) == 50, "a cluster's usage is the mean of its cores, got \(cluster.usage(perCore: [0, 0, 80, 20]))")
+        expect(cluster.usage(perCore: []) == 0, "before the feed has per-core figures the cluster reads 0")
+        expect(cluster.usage(perCore: [1, 2, 3]) == 0, "a feed with fewer cores than the cluster expects reads 0 rather than trapping")
+        expect(cluster.coreCount == 2, "the core count is the range's length")
+    }
+
+    private static func testThermalSpeedLimitParsing() {
+        let quiet = "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded\n"
+        expect(CPUThermal.parseSpeedLimit(quiet) == nil, "no CPU power status means no speed limit to show")
+
+        let throttled = "CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 18\n\tCPU_Speed_Limit \t= 80\n"
+        expect(CPUThermal.parseSpeedLimit(throttled) == 80, "the speed limit is the CPU_Speed_Limit line, got \(String(describing: CPUThermal.parseSpeedLimit(throttled)))")
+        expect(CPUThermal.parseSpeedLimit("CPU_Speed_Limit = banana") == nil, "a value that is not a number is nil, not a crash")
+
+        expect(ThermalReading(state: .nominal, speedLimitPercent: nil).isNominal, "nominal with nothing recorded has nothing to say")
+        expect(ThermalReading(state: .nominal, speedLimitPercent: 100).isNominal, "full speed is nothing to say either")
+        expect(!ThermalReading(state: .fair, speedLimitPercent: nil).isNominal, "a fair state is worth a line")
+        expect(!ThermalReading(state: .nominal, speedLimitPercent: 80).isNominal, "and so is a speed limit under 100")
+    }
+
+    private static func testMachineStateRunsPmsetThroughTheHost() {
+        let recorder = LogRecorder()
+        let command = "/usr/bin/pmset -g therm"
+        let throttled = "CPU Power notify\n\tCPU_Speed_Limit \t= 80\n"
+        let host = makeHost(runner: recordingRunner(recorder, answers: [command: throttled]))
+        let state = CPUCollector.machineState(using: host, now: Date(timeIntervalSince1970: 1_000))
+        expect(recorder.messages == [command], "one pmset, through the host, by explicit path, got \(recorder.messages)")
+        expect(state.thermal.speedLimitPercent == 80, "the speed limit comes from pmset, got \(String(describing: state.thermal.speedLimitPercent))")
+        expect(state.coreCount == ProcessInfo.processInfo.activeProcessorCount && state.loadAverage >= 0, "the core count and load average come from the kernel, got \(state.coreCount) and \(state.loadAverage)")
+        expect(state.sampledAt == Date(timeIntervalSince1970: 1_000), "the reading carries the time it was taken")
+
+        let failing = CPUCollector.machineState(using: makeHost(runner: recordingRunner(LogRecorder(), answers: [:])))
+        expect(failing.thermal.speedLimitPercent == nil, "a pmset that fails means no speed limit, not a guess")
+    }
+
+    private static func testClustersOnThisMacCoverEveryCore() {
+        // sysctl is read for real here: the layout rule has fixed-input tests above, this checks
+        // the plumbing against whichever chip runs the tests. Everything builds for Apple silicon,
+        // so a nil here is a plumbing failure, not a tolerated case.
+        guard let clusters = CPUCollector.clusters() else {
+            expect(false, "Apple silicon always reports perflevels whose counts add up to activeProcessorCount")
+            return
+        }
+        let covered = clusters.flatMap { Array($0.cores) }.sorted()
+        expect(covered == Array(0..<ProcessInfo.processInfo.activeProcessorCount), "the clusters cover every core index once, got \(clusters)")
+        expect(clusters.allSatisfy { !$0.name.isEmpty }, "every cluster carries sysctl's name, got \(clusters.map(\.name))")
+    }
+
+    private static func testCollectPublishesTheMachineState() {
+        let command = "/usr/bin/pmset -g therm"
+        let answers = [command: "CPU Power notify\n\tCPU_Speed_Limit \t= 90\n"]
+        let plugin = CPUPlugin(host: makeHost(runner: recordingRunner(LogRecorder(), answers: answers)))
+        expect(plugin.machineState == .empty, "before the first collect the state is empty")
+        plugin.collect()
+        waitUntil(5) { plugin.machineState.thermal.speedLimitPercent == 90 }
+        expect(plugin.machineState.thermal.speedLimitPercent == 90 && plugin.machineState.coreCount > 0, "collect publishes the reading on the main thread, got \(plugin.machineState)")
+    }
+
+    private static func testThermalChangesAreReadOnlyWhileShowing() {
+        let recorder = LogRecorder()
+        let command = "/usr/bin/pmset -g therm"
+        let plugin = CPUPlugin(host: makeHost(runner: recordingRunner(recorder, answers: [command: "CPU Power notify\n\tCPU_Speed_Limit \t= 90\n"])))
+        let center = NotificationCenter.default
+
+        center.post(name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        spinRunLoop(for: 0.2)
+        expect(recorder.count == 0, "a thermal change while hidden runs nothing: the window may be closed, got \(recorder.messages)")
+
+        plugin.visibilityChanged(isVisible: true)
+        center.post(name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        waitUntil(5) { recorder.count == 1 }
+        expect(recorder.messages == [command], "a thermal change while showing reads pmset once, got \(recorder.messages)")
+
+        plugin.visibilityChanged(isVisible: false)
+        center.post(name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        spinRunLoop(for: 0.2)
+        expect(recorder.count == 1, "hiding the tab stops the observer, got \(recorder.messages)")
     }
 }

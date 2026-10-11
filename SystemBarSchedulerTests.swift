@@ -35,6 +35,7 @@ struct SystemBarSchedulerTests {
         testSamplersStillSampleAfterAQuickCloseAndReopen()
         testFastStatsSamplerTurnsCountersIntoRates()
         testFastStatsSamplerKeepsNinetySeconds()
+        testFastStatsSamplerReportsPerCoreAndUserSystemShares()
         testProcessSamplerGroupsRowsAndDropsTinyOnes()
         testProcessSamplerUsesTheFootprintOnlyForShownGroups()
         testProcessSamplerRunsPsThroughTheRunner()
@@ -648,6 +649,41 @@ struct SystemBarSchedulerTests {
         expect(last.cpuHistory.count == FastStatsSampler.historyLimit, "the CPU history keeps the last \(FastStatsSampler.historyLimit) samples, got \(last.cpuHistory.count)")
         expect(last.downloadHistory.count == FastStatsSampler.historyLimit && last.uploadHistory.count == FastStatsSampler.historyLimit, "and so do both network histories")
         expect(FastStatsSampler.historyLimit == 90, "90 one-second samples is the 'last 90s' the graphs are labelled with")
+    }
+
+    private static func testFastStatsSamplerReportsPerCoreAndUserSystemShares() {
+        let sampler = FastStatsSampler()
+        let start = Date(timeIntervalSince1970: 1_000)
+        let quiet = NetworkCounters(received: 0, sent: 0)
+
+        let first = sampler.sample(
+            cpu: CPUCounters(cores: [
+                CoreTicks(user: 0, system: 0, idle: 0, nice: 0),
+                CoreTicks(user: 0, system: 0, idle: 0, nice: 0),
+            ]),
+            network: quiet,
+            at: start
+        )
+        expect(first.perCoreUsage.isEmpty && first.cpuUserPercent == 0 && first.cpuSystemPercent == 0, "a first sample has no per-core or user/system figures yet")
+
+        let second = sampler.sample(
+            cpu: CPUCounters(cores: [
+                CoreTicks(user: 60, system: 20, idle: 20, nice: 0),   // 80% busy
+                CoreTicks(user: 10, system: 0, idle: 80, nice: 10),   // 20% busy; nice counts as user
+            ]),
+            network: quiet,
+            at: start.addingTimeInterval(1)
+        )
+        expect(second.perCoreUsage == [80, 20], "each core's busy percent over the interval, in the kernel's order, got \(second.perCoreUsage)")
+        expect(second.cpuUsagePercent == 50, "the headline is still the whole machine's busy percent, got \(second.cpuUsagePercent)")
+        expect(second.cpuUserPercent == 40 && second.cpuSystemPercent == 10, "user (with nice) and system as shares of all cores: 80 of 200 ticks and 20 of 200, got \(second.cpuUserPercent)/\(second.cpuSystemPercent)")
+
+        let fewerCores = sampler.sample(
+            cpu: CPUCounters(cores: [CoreTicks(user: 100, system: 0, idle: 0, nice: 0)]),
+            network: quiet,
+            at: start.addingTimeInterval(2)
+        )
+        expect(fewerCores.perCoreUsage == [80, 20], "a reading with a different core count keeps the last per-core figures rather than pairing the wrong cores, got \(fewerCores.perCoreUsage)")
     }
 
     // MARK: - Process sampler

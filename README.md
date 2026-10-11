@@ -59,7 +59,7 @@ A plugin says in `sharedFeeds` which of the host's two shared readings it uses, 
 
 | Feed | What it holds | When the host samples it |
 |---|---|---|
-| `.fastStats` | CPU percent and network rates, with 90 seconds of history | Every second while the window is open, whatever the tab, so the history has no gaps |
+| `.fastStats` | CPU percent (the whole machine, each core, and the user/system split) and network rates, with 90 seconds of history for the headline figures | Every second while the window is open, whatever the tab, so the history has no gaps |
 | `.processes` | The top processes by CPU and by memory | Every 10 seconds, only while a tab that declares it is showing |
 
 Nothing is sampled while the window is closed, unless a plugin declares a `backgroundInterval`: then the app keeps calling that plugin's `collect()` at that cadence while its tab is hidden, on the plugin's own queue, with a floor of 5 seconds. The first such call after the Mac wakes waits two minutes, so nothing lands on the login moment. The shared feeds run for the open window and its showing tab, never for a hidden one, so a background `collect()` samples for itself. The table below says which tabs sample while hidden; `--list-plugins` reports it too, as `background every <n>s` on that plugin's line.
@@ -149,7 +149,7 @@ Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU
 |---|---|---|
 | `/bin/ps` | Process list, per-process CPU and memory | Every 10s while the Power, Memory or CPU tab is showing; also every 60s for the Dev tab, with arguments, to work out which project each process belongs to |
 | `/usr/sbin/ioreg` | GPU (`AGXAccelerator`) info | Every 30s |
-| `/usr/bin/pmset` | Battery state and sleep assertions; thermal and performance warnings | Every 60s |
+| `/usr/bin/pmset` | Battery state and sleep assertions; thermal and performance warnings; the thermal speed limit | Every 60s for the Power and Dev tabs; every 10s while the CPU tab is showing |
 | `/usr/bin/nettop` | Per-process network throughput | Every 30s |
 | `/usr/sbin/lsof` | Active TCP connections; listening ports for the Dev tab; working directories of running build/test/bundler processes, to name the project each belongs to | Every 30–60s |
 | `/usr/bin/tmutil` | Count of Time Machine local snapshots | Every 30s |
@@ -176,7 +176,7 @@ Each interval lives in that tab's plugin, next to the code that uses it.
 | Memory | Kernel counters and pressure level every 3s; `ioreg` every 30s | — | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
 | Disk | Volumes and `tmutil` every 30s; the `du` scan every 10 min or on demand | — | `DiskSampling` in `Plugins/Disk/Sources/DiskModels.swift` |
 | Network | `nettop` and `lsof` every 30s; `networkQuality` only on the button | — | `NetworkSampling` in `Plugins/Network/Sources/NetworkModels.swift` |
-| CPU | Nothing of its own: everything it shows comes from the two shared feeds | — | `CPUPlugin.refreshInterval` (one day, so its empty collect almost never runs) |
+| CPU | Load average, thermal state and `pmset -g therm` every 10s; the headline, history, cluster bars and user/system split come from the 1-second feed | — | `CPUSampling` in `Plugins/CPU/Sources/CPUModels.swift` |
 
 The shared feeds' intervals are `HostSamplers.fastInterval` and `HostSamplers.processInterval` in `Sources/Host/HostSamplers.swift`.
 
