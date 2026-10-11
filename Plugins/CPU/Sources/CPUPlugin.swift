@@ -26,6 +26,13 @@ public final class CPUPlugin: NSObject, TabPlugin, ObservableObject {
     private let host: HostServices
     private var feedSubscriptions: [AnyCancellable] = []
     private var thermalObserver: NSObjectProtocol?
+    /// Runs the thermal-change observer off the main thread, as the host's own calls are.
+    private let thermalQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.qualityOfService = .utility
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
 
     @MainActor public init(host: HostServices) {
         self.host = host
@@ -37,19 +44,22 @@ public final class CPUPlugin: NSObject, TabPlugin, ObservableObject {
             host.fastStats.publisher.sink { [weak self] snapshot in self?.fastStats = snapshot },
             host.processes.publisher.sink { [weak self] summary in self?.processes = summary },
         ]
-        // The thermal state is read inside collect(); a change is worth one read now rather
-        // than up to ten seconds later. Off the main thread, as the host's own calls are.
-        thermalObserver = NotificationCenter.default.addObserver(
-            forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
-        ) { [weak self] _ in
-            DispatchQueue.global(qos: .utility).async { [weak self] in self?.collect() }
-        }
+        observeThermalChanges()
     }
 
     deinit {
         if let thermalObserver {
             NotificationCenter.default.removeObserver(thermalObserver)
         }
+    }
+
+    /// A change is worth one read now rather than up to ten seconds later. Registered from a
+    /// plain method, not the main-actor init, so the compiler does not take `self` for a
+    /// main-actor value being sent to the observer block.
+    private func observeThermalChanges() {
+        thermalObserver = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: thermalQueue
+        ) { [weak self] _ in self?.collect() }
     }
 
     /// Reads the load average, thermal state and pmset's speed limit, and publishes them on the
