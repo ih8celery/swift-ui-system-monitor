@@ -24,6 +24,8 @@ struct SimulatorInfo: Codable, Equatable, Sendable {
 
 /// One measurement of one folder. `bytes` of zero means the folder was gone or empty when the
 /// plan looked; the movers list shows a path that went from something to zero as freed.
+/// `measuredAt` is kept rounded down to a whole second, because the ledger file keeps whole
+/// seconds and memory and disk must agree.
 struct DiskSample: Codable, Equatable, Sendable {
     let path: String
     let bytes: UInt64
@@ -34,7 +36,7 @@ struct DiskSample: Codable, Equatable, Sendable {
     init(path: String, bytes: UInt64, measuredAt: Date, plan: DiskPlanKind, simulator: SimulatorInfo? = nil) {
         self.path = path
         self.bytes = bytes
-        self.measuredAt = measuredAt
+        self.measuredAt = Date(timeIntervalSince1970: measuredAt.timeIntervalSince1970.rounded(.down))
         self.plan = plan
         self.simulator = simulator
     }
