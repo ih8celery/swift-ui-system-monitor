@@ -139,7 +139,7 @@ Decided 2026-10-10 in `systembar-ewy-cpu-machine-state-and-background-sampling.m
 
 - **Option A — yes, by declaring a `backgroundInterval`:** nil by default; the
   host keeps calling `collect()` at that cadence while the tab is not showing,
-  with a 5-second floor, and restarts every background timer two minutes after
+  with a 5-second floor, and makes the first background tick wait two minutes after
   the Mac wakes. Shared feeds stay visible-only.
 - **Option B — never:** the guarantee D5 relied on, kept absolute.
 - **Option C — a host-sampled background feed:** the host does the hidden work
@@ -147,7 +147,7 @@ Decided 2026-10-10 in `systembar-ewy-cpu-machine-state-and-background-sampling.m
 
 **Selected: A.** Two tabs need a memory of what normal looks like (the CPU
 tab's movers, the Disk tab's size ledger), and a memory that fills only while
-someone is looking is not one. The guarantee becomes opt-in per plugin, each
+someone is looking is not one. Leaving the guarantee is opt-in per plugin, each
 opt-in is reported by `--list-plugins` and named in the README, and nothing
 changes for a plugin that declares nothing.
 
@@ -518,5 +518,5 @@ leaving a working, buildable, tested app:
   shipped bundle rebuilds with the app. From here on, public SDK symbols are
   only added — Claude, from 2ik.6, for Adam to confirm.
 - 2026-10-10 — D9: chose A — a plugin may declare a `backgroundInterval`; the
-  window-closed guarantee is opt-out per plugin, reported by `--list-plugins`
+  window-closed guarantee is kept unless a plugin opts out, reported by `--list-plugins`
   — Adam, through the CPU and Disk epics.

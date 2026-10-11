@@ -8,9 +8,9 @@ import SystemBarKit
 /// never overlap and a slow collect delays the next tick rather than running beside it. Only one
 /// plugin is shown at a time, enforced here: showing a different plugin returns the previous one
 /// to its background cadence, or to nothing. After the Mac wakes, every background timer is
-/// restarted with its first tick `settleAfterWake` later, because a Dispatch timer that missed
-/// its deadline during sleep fires the instant the Mac wakes, which would land a sample on the
-/// login moment. Main thread only.
+/// restarted with its first tick `settleAfterWake` later, because a timer that was close to due
+/// when the Mac slept fires moments after it wakes, which would land a sample on the login
+/// moment, when the machine is already busy. Main thread only.
 @MainActor
 final class PluginScheduler {
     private struct Slot {
