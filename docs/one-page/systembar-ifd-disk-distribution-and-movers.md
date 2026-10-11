@@ -86,9 +86,10 @@ developer folders must be visible. Adam, 2026-10-10.
 | Developer | `~/Library/Application Support`, `~/Library/Containers`, `~/Library/Group Containers`, `~/Library/Developer/Xcode`, `~/.cache`, `~/.ollama`, `~/.android`, `~/proj` |
 | Simulators | one row per device from `simctl list devices -j`, sized by `du` on `~/Library/Developer/CoreSimulator/Devices/<udid>`, carrying name, runtime and last boot |
 
-A root that does not exist is skipped silently. Each plan has its own time
-budget and each folder its own `du` with its own timeout, as the current scan
-does, so a slow folder costs one row. A row the budget does not reach keeps its
+A root that does not exist is skipped silently. A root that exists but cannot
+be listed is skipped the same way, and the earlier samples of its children stay
+as they were rather than being marked freed. Each plan has its own time budget
+and each folder its own `du` with its own timeout, as the current scan does, so a slow folder costs one row. A row the budget does not reach keeps its
 previous value and stamp. The roots, depth, cadences, budgets and timeouts are
 constants in `DiskSampling`, and the README's interval table names them.
 

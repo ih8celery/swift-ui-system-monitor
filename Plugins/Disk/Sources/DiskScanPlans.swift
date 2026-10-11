@@ -44,18 +44,19 @@ struct DiskScanTarget: Equatable {
 enum DiskScanTargets {
     /// Every subfolder of every root, each once, biggest-known-first so a spent budget cuts the
     /// smallest, then never-measured folders by name. Simulator targets carry what the catalog
-    /// knows, or their folder name when it knows nothing.
+    /// knows, or their folder name when it knows nothing. A root that could not be listed (nil)
+    /// contributes nothing.
     static func targets(
         for plan: DiskScanPlan,
         homeDirectory: String,
         previous: DiskLedger,
-        listChildren: (String) -> [String],
+        listChildren: (String) -> [String]?,
         catalog: [String: SimulatorInfo]
     ) -> [DiskScanTarget] {
         let known = Dictionary(uniqueKeysWithValues: previous.latest.map { ($0.path, $0.bytes) })
         var seen = Set<String>()
         let paths = plan.resolvedRoots(homeDirectory: homeDirectory)
-            .flatMap(listChildren)
+            .flatMap { listChildren($0) ?? [] }
             .filter { seen.insert($0).inserted }
             .sorted { a, b in
                 let (sizeA, sizeB) = (known[a] ?? 0, known[b] ?? 0)
@@ -73,15 +74,17 @@ enum DiskScanTargets {
 
     /// Paths this plan measured before, directly under one of its roots, that had bytes and are
     /// not among today's targets: recorded as zero now, so the movers list can show them freed.
-    static func vanished(plan: DiskScanPlan, homeDirectory: String, previous: DiskLedger, targets: [DiskScanTarget], now: Date) -> [DiskSample] {
-        let roots = Set(plan.resolvedRoots(homeDirectory: homeDirectory))
+    /// `listedRoots` are the resolved roots that listed successfully this run; a root that could
+    /// not be listed (missing, or refused by a privacy permission) keeps its children's earlier
+    /// samples untouched, because an unreadable folder says nothing about what is inside it.
+    static func vanished(plan: DiskScanPlan, listedRoots: Set<String>, previous: DiskLedger, targets: [DiskScanTarget], now: Date) -> [DiskSample] {
         let present = Set(targets.map(\.path))
         return previous.latest
             .filter { sample in
                 sample.plan == plan.kind
                     && sample.bytes > 0
                     && !present.contains(sample.path)
-                    && roots.contains((sample.path as NSString).deletingLastPathComponent)
+                    && listedRoots.contains((sample.path as NSString).deletingLastPathComponent)
             }
             .map { DiskSample(path: $0.path, bytes: 0, measuredAt: now, plan: plan.kind, simulator: $0.simulator) }
     }

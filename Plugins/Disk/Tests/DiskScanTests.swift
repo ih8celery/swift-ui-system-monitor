@@ -10,15 +10,21 @@ enum DiskScanTests {
         testTargetsAreEveryRootsChildrenBiggestKnownFirstWithoutRepeats()
         testSimulatorTargetsCarryTheCatalogOrFallBackToTheUdid()
         testVanishedPathsBecomeZeroSamplesForTheirPlanOnly()
+        testUnreadableRootsKeepTheirEarlierSamples()
         testSimulatorCatalogParsesSimctlAndPrettifiesTheRuntime()
+        testMeasureRecordsEachFinishedRowAndCountsTheRest()
+        testMeasureStopsAtTheBudgetAndCountsWhatItSkipped()
+        testScannerRunsDuAndSimctlThroughTheHost()
+        testOutcomeStatusNamesEveryWayARowCanBeMissing()
     }
 
     static let home = "/Users/ada"
     static let now = Date(timeIntervalSince1970: 100 * 86_400)
 
-    /// A fake folder listing: children per parent, absolute paths. Anything unlisted is empty.
-    static func lister(_ tree: [String: [String]]) -> (String) -> [String] {
-        { parent in (tree[parent] ?? []).map { "\(parent)/\($0)" } }
+    /// A fake folder listing: children per parent, absolute paths. An unlisted parent could not
+    /// be listed (nil), as a missing or unreadable folder would be.
+    static func lister(_ tree: [String: [String]]) -> (String) -> [String]? {
+        { parent in tree[parent]?.map { "\(parent)/\($0)" } }
     }
 
     private static func testPlansResolveRootsAgainstHomeAndKeepTheirCadences() {
@@ -31,7 +37,7 @@ enum DiskScanTests {
     }
 
     private static func testTargetsAreEveryRootsChildrenBiggestKnownFirstWithoutRepeats() {
-        let plan = DiskScanPlan(kind: .overview, cadence: 1, budget: 1, roots: ["", "Library", "/opt"])
+        let plan = DiskScanPlan(kind: .overview, cadence: 1, budget: 1, roots: ["", "Library", "/opt", "Library"])
         let tree = [
             home: ["Library", "proj", ".cache"],
             "\(home)/Library": ["Developer", "Caches"],
@@ -59,17 +65,32 @@ enum DiskScanTests {
 
     private static func testVanishedPathsBecomeZeroSamplesForTheirPlanOnly() {
         let plan = DiskScanPlan(kind: .overview, cadence: 1, budget: 1, roots: [""])
+        let devices = "\(home)/Library/Developer/CoreSimulator/Devices"
+        let deletedDevice = SimulatorInfo(udid: "AAA", name: "iPhone 17", runtime: "iOS 26.5", lastBootedAt: nil)
         let previous = DiskLedger().appending([
             DiskSample(path: "\(home)/gone", bytes: 10, measuredAt: now.addingTimeInterval(-3600), plan: .overview),
             DiskSample(path: "\(home)/stays", bytes: 10, measuredAt: now.addingTimeInterval(-3600), plan: .overview),
             DiskSample(path: "\(home)/already-zero", bytes: 0, measuredAt: now.addingTimeInterval(-3600), plan: .overview),
             DiskSample(path: "\(home)/Library/Developer", bytes: 10, measuredAt: now.addingTimeInterval(-3600), plan: .overview),
             DiskSample(path: "\(home)/other-plan", bytes: 10, measuredAt: now.addingTimeInterval(-3600), plan: .developer),
+            DiskSample(path: "\(devices)/AAA", bytes: 10, measuredAt: now.addingTimeInterval(-3600), plan: .simulators, simulator: deletedDevice),
         ])
         let targets = [DiskScanTarget(path: "\(home)/stays", simulator: nil)]
-        let vanished = DiskScanTargets.vanished(plan: plan, homeDirectory: home, previous: previous, targets: targets, now: now)
+        let vanished = DiskScanTargets.vanished(plan: plan, listedRoots: [home], previous: previous, targets: targets, now: now)
         expect(vanished.map(\.path) == ["\(home)/gone"], "only a path this plan measured, directly under one of its roots, that had bytes and is no longer listed, got \(vanished.map(\.path))")
         expect(vanished.first?.bytes == 0 && vanished.first?.measuredAt == now && vanished.first?.plan == .overview, "it is recorded as zero bytes now, so movers can show it as freed")
+        let simulators = DiskScanTargets.vanished(plan: .plan(.simulators), listedRoots: [devices], previous: previous, targets: [], now: now)
+        expect(simulators.map(\.path) == ["\(devices)/AAA"] && simulators.first?.simulator == deletedDevice, "a deleted device keeps its simulator info so the freed row still names it, got \(simulators)")
+    }
+
+    private static func testUnreadableRootsKeepTheirEarlierSamples() {
+        let plan = DiskScanPlan(kind: .overview, cadence: 1, budget: 1, roots: [""])
+        let previous = DiskLedger().appending([
+            DiskSample(path: "\(home)/gone", bytes: 10, measuredAt: now.addingTimeInterval(-3600), plan: .overview),
+            DiskSample(path: "\(home)/stays", bytes: 10, measuredAt: now.addingTimeInterval(-3600), plan: .overview),
+        ])
+        let vanished = DiskScanTargets.vanished(plan: plan, listedRoots: [], previous: previous, targets: [], now: now)
+        expect(vanished.isEmpty, "a root that could not be listed says nothing about its children, so none is marked freed, got \(vanished.map(\.path))")
     }
 
     private static func testSimulatorCatalogParsesSimctlAndPrettifiesTheRuntime() {
@@ -89,5 +110,61 @@ enum DiskScanTests {
         expect(catalog["BBB"]?.lastBootedAt == nil, "a device that never booted has none")
         expect(SimulatorCatalog.parse("not json").isEmpty && SimulatorCatalog.parse("").isEmpty, "unparseable output is an empty catalog, never a crash")
         expect(SimulatorCatalog.runtimeLabel("com.apple.CoreSimulator.SimRuntime.xrOS-3-1") == "xrOS 3.1" && SimulatorCatalog.runtimeLabel("odd") == "odd", "labels: product, space, dotted version; anything else as written")
+    }
+
+    static func duFinished(_ path: String, kilobytes: UInt64) -> CommandOutput {
+        CommandOutput(output: "\(kilobytes)\t\(path)\n", error: "", status: 0, didTimeout: false)
+    }
+
+    private static func testMeasureRecordsEachFinishedRowAndCountsTheRest() {
+        let plan = DiskScanPlan(kind: .overview, cadence: 1, budget: 100, roots: [""])
+        let targets = ["/a", "/slow", "/denied", "/b"].map { DiskScanTarget(path: $0, simulator: nil) }
+        var rows: [DiskSample] = []
+        let outcome = DiskScanner.measure(targets: targets, plan: plan, now: { now }, elapsed: { 0 }, measure: { path in
+            switch path {
+            case "/a": return duFinished("/a", kilobytes: 2)
+            case "/b": return duFinished("/b", kilobytes: 3)
+            case "/slow": return CommandOutput(output: "", error: "", status: 15, didTimeout: true)
+            default: return CommandOutput(output: "", error: "du: /denied: Operation not permitted", status: 1, didTimeout: false)
+            }
+        }, onRow: { rows.append($0) })
+        expect(rows.map { "\($0.path)=\($0.bytes)" } == ["/a=2048", "/b=3072"], "each finished du becomes a sample in bytes, as it finishes, got \(rows)")
+        expect(rows.allSatisfy { $0.measuredAt == now && $0.plan == .overview }, "stamped now, for this plan")
+        expect(outcome == DiskScanOutcome(measured: 2, timedOut: 1, unreadable: 1, unmeasured: 0), "the outcome counts every way a row can be missing, got \(outcome)")
+    }
+
+    private static func testMeasureStopsAtTheBudgetAndCountsWhatItSkipped() {
+        let plan = DiskScanPlan(kind: .overview, cadence: 1, budget: 10, roots: [""])
+        let targets = ["/a", "/b", "/c"].map { DiskScanTarget(path: $0, simulator: nil) }
+        var clock: TimeInterval = 0
+        var rows: [DiskSample] = []
+        let outcome = DiskScanner.measure(targets: targets, plan: plan, now: { now }, elapsed: { clock }, measure: { path in
+            clock += 6
+            return duFinished(path, kilobytes: 1)
+        }, onRow: { rows.append($0) })
+        expect(rows.map(\.path) == ["/a", "/b"], "the budget is checked before each du: the first two fit, the third is skipped, got \(rows.map(\.path))")
+        expect(outcome.unmeasured == 1 && outcome.measured == 2, "and the skipped one is counted, got \(outcome)")
+    }
+
+    private static func testScannerRunsDuAndSimctlThroughTheHost() {
+        let recorder = LogRecorder()
+        let devices = "/tmp/systembar-tests/Library/Developer/CoreSimulator/Devices"
+        let simctl = #"{ "devices": { "com.apple.CoreSimulator.SimRuntime.iOS-26-5": [ { "udid": "AAA", "name": "iPhone 17" } ] } }"#
+        let host = makeHost(runner: recordingRunner(recorder, answers: [
+            "/usr/bin/xcrun simctl list devices -j": simctl,
+            "/usr/bin/du -s -k -x \(devices)/AAA": "5\t\(devices)/AAA\n",
+        ]))
+        let scanner = DiskScanner(host: host, listChildren: lister([devices: ["AAA"]]))
+        var rows: [DiskSample] = []
+        let outcome = scanner.run(plan: .plan(.simulators), previous: DiskLedger(), onRow: { rows.append($0) })
+        expect(recorder.messages == ["/usr/bin/xcrun simctl list devices -j", "/usr/bin/du -s -k -x \(devices)/AAA"], "simctl once, then one du per device, all by explicit path through the host, got \(recorder.messages)")
+        expect(rows.count == 1 && rows.first?.bytes == 5 * 1024 && rows.first?.simulator?.name == "iPhone 17", "the device row carries simctl's name, got \(rows)")
+        expect(outcome.measured == 1, "and counts as measured")
+    }
+
+    private static func testOutcomeStatusNamesEveryWayARowCanBeMissing() {
+        expect(DiskScanOutcome(measured: 1, timedOut: 0, unreadable: 0, unmeasured: 0).status == "Measured 1 path", "singular")
+        expect(DiskScanOutcome(measured: 3, timedOut: 1, unreadable: 2, unmeasured: 4).status == "Measured 3 paths, 1 too slow to finish, 2 unreadable (needs Full Disk Access?), 4 not measured, scan budget spent", "each nonzero count gets a clause, got \(DiskScanOutcome(measured: 3, timedOut: 1, unreadable: 2, unmeasured: 4).status)")
+        expect(DiskScanOutcome().status == "Measured 0 paths", "zero measured is said plainly")
     }
 }
