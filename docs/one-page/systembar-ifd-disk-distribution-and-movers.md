@@ -170,7 +170,7 @@ Adam, 2026-10-10.
    value in its status line rather than failing to load. The Disk plugin reads one
    key, `backgroundScans` (boolean, default true).
 2. **A data folder per plugin.** `HostServices.dataDirectory` is
-   `~/Library/Application Support/SystemBar/Plugins/<identifier>/`, created
+   `~/Library/Application Support/SystemBar/PluginData/<identifier>/`, created
    on first use, with `SYSTEMBAR_PLUGIN_DATA_ROOT` overriding the root for
    tests. The ledger lives there as `disk-ledger.json`.
 3. **Background sampling, owned by the CPU epic (ewy.1).** The two specs

@@ -12,7 +12,7 @@ enum DefaultPlugins {
 /// build the tab list. A file that cannot be read, parsed, or written gives one error tab
 /// naming the path and the reason, and nothing else: the fix is in the file, not the app.
 enum TabLoader {
-    @MainActor static func load(store: PluginConfigStore, source: TabSource, host: HostServices, dataRoot: URL = PluginDataRoot.standard()) -> [LoadedTab] {
+    @MainActor static func load(store: PluginConfigStore, source: TabSource, host: HostServices, dataRoot: URL) -> [LoadedTab] {
         switch store.loadOrCreate(default: .defaults(named: DefaultPlugins.names)) {
         case .success(let config):
             return TabCatalog.build(config: config, source: source, host: host, dataRoot: dataRoot)

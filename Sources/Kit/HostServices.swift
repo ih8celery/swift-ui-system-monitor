@@ -20,7 +20,7 @@ public final class HostServices: Sendable {
     /// The `settings` object from this plugin's entry in plugins.json, or `.empty`. The keys
     /// are the plugin's own; see `PluginSettings`.
     public let settings: PluginSettings
-    /// A folder for this plugin alone, `~/Library/Application Support/SystemBar/Plugins/<id>/`
+    /// A folder for this plugin alone, `~/Library/Application Support/SystemBar/PluginData/<id>/`
     /// in the app. It may not exist yet: create it (with intermediate directories) before
     /// writing. A plugin that saves anything between launches saves it here and nowhere else,
     /// so a test can point the whole app at a temporary root with SYSTEMBAR_PLUGIN_DATA_ROOT.

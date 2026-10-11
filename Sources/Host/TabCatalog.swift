@@ -52,7 +52,7 @@ enum TabCatalog {
         config: PluginConfig,
         source: TabSource,
         host: HostServices,
-        dataRoot: URL = PluginDataRoot.standard()
+        dataRoot: URL
     ) -> [LoadedTab] {
         var tabs: [LoadedTab] = []
         // Identifier to the location of the entry that first claimed it, so a later duplicate

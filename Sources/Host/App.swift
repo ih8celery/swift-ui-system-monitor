@@ -14,6 +14,7 @@ struct SystemBarApp: App {
 
     init() {
         let store = PluginConfigStore.standard()
+        // The template forPlugin copies for each plugin; its own settings and data folder are unused.
         let host = HostServices(
             homeDirectory: NSHomeDirectory(),
             processes: processes,

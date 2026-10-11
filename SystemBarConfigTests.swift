@@ -57,13 +57,25 @@ struct SystemBarConfigTests {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let settings = PluginSettings(values: ["backgroundScans": .bool(false)])
-        let host = makeHost(settings: settings, dataDirectory: directory)
+        let commands = LogRecorder()
+        let logged = LogRecorder()
+        let host = makeHost(
+            runner: recordingRunner(commands, answers: ["/bin/echo hi": "hi"]),
+            log: { logged.record($0) },
+            settings: settings,
+            dataDirectory: directory
+        )
         expect(host.settings == settings, "the settings handed in are the settings read back")
         expect(host.dataDirectory == directory, "and so is the data directory")
         let child = host.forPlugin(identifier: "disk", settings: .empty, dataRoot: URL(fileURLWithPath: "/root"))
         expect(child.dataDirectory.path == "/root/disk", "a per-plugin host's folder is the root plus the identifier, got \(child.dataDirectory.path)")
         expect(child.settings == .empty && child.homeDirectory == host.homeDirectory, "and it keeps the home directory while taking its own settings")
         expect(!FileManager.default.fileExists(atPath: child.dataDirectory.path), "nothing is created until a plugin writes")
+        expect(child.processes === host.processes && child.fastStats === host.fastStats, "a per-plugin host reads the same feeds as the shared one")
+        let output = child.run(path: "/bin/echo", arguments: ["hi"])
+        expect(output.output == "hi" && commands.messages == ["/bin/echo hi"], "its run reaches the shared runner, got \(commands.messages)")
+        child.log("from the child")
+        expect(logged.messages == ["from the child"], "and its log reaches the shared log, got \(logged.messages)")
     }
 
     private static func testHostServicesOldInitializerStillWorksWithEmptySettings() {
@@ -80,11 +92,11 @@ struct SystemBarConfigTests {
 
     private static func testPluginDataRootUsesApplicationSupportOrTheOverride() {
         let standard = PluginDataRoot.standard(environment: [:], applicationSupport: URL(fileURLWithPath: "/as"))
-        expect(standard.path == "/as/SystemBar/Plugins", "plugin data lives beside plugins.json, got \(standard.path)")
+        expect(standard.path == "/as/SystemBar/PluginData", "plugin data lives beside plugins.json, got \(standard.path)")
         let overridden = PluginDataRoot.standard(environment: [PluginDataRoot.environmentOverride: "~/elsewhere"], applicationSupport: URL(fileURLWithPath: "/as"))
         expect(overridden.path == NSHomeDirectory() + "/elsewhere", "SYSTEMBAR_PLUGIN_DATA_ROOT wins and expands a tilde, got \(overridden.path)")
         let empty = PluginDataRoot.standard(environment: [PluginDataRoot.environmentOverride: ""], applicationSupport: URL(fileURLWithPath: "/as"))
-        expect(empty.path == "/as/SystemBar/Plugins", "an empty override is ignored")
+        expect(empty.path == "/as/SystemBar/PluginData", "an empty override is ignored")
     }
 
     private static func testPluginIsConstructedThroughItsMetatype() {

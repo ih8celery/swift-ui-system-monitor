@@ -43,7 +43,7 @@ struct SystemBarLoaderTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         let source = MapTabSource(types: ["Power.bundle": FakeTab.self, "CPU.bundle": OtherFakeTab.self])
-        let loaded = TabLoader.load(store: store, source: source, host: makeHost())
+        let loaded = TabLoader.load(store: store, source: source, host: makeHost(), dataRoot: testDataRoot)
         expect(loaded.map(\.title) == ["Fake", "Error", "Error", "Error", "Error", "Other"],
                "a fresh file lists all six defaults in order, each resolved through the source: the two it knows load and the four it does not are error tabs in their places, got \(loaded.map(\.title))")
         if case let .failed(location, _)? = loaded.dropFirst().first {
@@ -62,7 +62,7 @@ struct SystemBarLoaderTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         try? Data(#"{ "plugins": [ { "name": } ] }"#.utf8).write(to: store.fileURL)
-        let loaded = TabLoader.load(store: store, source: MapTabSource(types: [:]), host: makeHost())
+        let loaded = TabLoader.load(store: store, source: MapTabSource(types: [:]), host: makeHost(), dataRoot: testDataRoot)
         guard loaded.count == 1, case .failed(let location, let reason) = loaded[0] else {
             expect(false, "an unparseable file yields exactly one error tab, got \(loaded)")
             return
@@ -76,7 +76,7 @@ struct SystemBarLoaderTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         try? Data(#"{ "plugins": [ { "name": "CPU.bundle", "enabled": false } ] }"#.utf8).write(to: store.fileURL)
-        let loaded = TabLoader.load(store: store, source: MapTabSource(types: [:]), host: makeHost())
+        let loaded = TabLoader.load(store: store, source: MapTabSource(types: [:]), host: makeHost(), dataRoot: testDataRoot)
         expect(loaded.isEmpty, "a disabled-only config loads nothing, got \(loaded)")
         expect(PluginListReport.lines(for: loaded).isEmpty, "and --list-plugins prints nothing for it")
     }
@@ -91,14 +91,14 @@ struct SystemBarLoaderTests {
 
     private static func testCatalogKeepsOrderAndSkipsDisabledEntries() {
         let config = PluginConfig(plugins: [entry("other"), entry("fake-first", enabled: false), entry("fake-first")])
-        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost(), dataRoot: testDataRoot)
         expect(tabs.count == 2, "a disabled entry produces no tab at all, got \(tabs.count)")
         expect(tabs.map(\.title) == ["Other", "Fake"], "tabs come out in file order, got \(tabs.map(\.title))")
     }
 
     private static func testCatalogShowsAFailedEntryInItsPlace() {
         let config = PluginConfig(plugins: [entry("fake-first"), entry("nope")])
-        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost(), dataRoot: testDataRoot)
         guard tabs.count == 2, case let .failed(location, reason) = tabs[1] else {
             expect(false, "an entry the source cannot load is a failed tab at its own position, got \(tabs)")
             return
@@ -109,7 +109,7 @@ struct SystemBarLoaderTests {
 
     private static func testCatalogRefusesADuplicateIdentifier() {
         let config = PluginConfig(plugins: [entry("fake-first"), entry("fake-copy")])
-        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost(), dataRoot: testDataRoot)
         guard tabs.count == 2, case .loaded = tabs[0], case let .failed(location, reason) = tabs[1] else {
             expect(false, "the first of two plugins with one id loads and the second fails, got \(tabs)")
             return
@@ -121,7 +121,7 @@ struct SystemBarLoaderTests {
 
     private static func testCatalogCarriesOnAfterAFailure() {
         let config = PluginConfig(plugins: [entry("nope"), entry("other")])
-        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost(), dataRoot: testDataRoot)
         expect(tabs.map(\.title) == ["Error", "Other"], "a failure earlier in the list does not stop later entries, got \(tabs.map(\.title))")
     }
 
@@ -129,7 +129,7 @@ struct SystemBarLoaderTests {
         CountingTab.constructed = 0
         let source = MapTabSource(types: ["a": CountingTab.self, "b": CountingTab.self])
         let config = PluginConfig(plugins: [entry("a"), entry("b")])
-        let tabs = TabCatalog.build(config: config, source: source, host: makeHost())
+        let tabs = TabCatalog.build(config: config, source: source, host: makeHost(), dataRoot: testDataRoot)
         expect(tabs.compactMap(\.plugin).count == 1, "one of the two loads")
         expect(CountingTab.constructed == 1, "the duplicate is refused before its init runs, got \(CountingTab.constructed) constructions")
     }
@@ -139,7 +139,7 @@ struct SystemBarLoaderTests {
         let host = makeHost(log: { log.record($0) })
         let source = MapTabSource(types: ["slow-init": SlowInitTab.self])
         let config = PluginConfig(plugins: [entry("slow-init")])
-        let tabs = TabCatalog.build(config: config, source: source, host: host)
+        let tabs = TabCatalog.build(config: config, source: source, host: host, dataRoot: testDataRoot)
         expect(tabs.compactMap(\.plugin).count == 1, "a slow init(host:) still loads the plugin, got \(tabs)")
         expect(log.count == 1, "a slow init(host:) logs exactly one line, got \(log.count): \(log.messages)")
         let message = log.messages.first ?? ""
@@ -151,7 +151,7 @@ struct SystemBarLoaderTests {
         let log = LogRecorder()
         let host = makeHost(log: { log.record($0) })
         let config = PluginConfig(plugins: [entry("fake-first")])
-        let tabs = TabCatalog.build(config: config, source: fakeSource, host: host)
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: host, dataRoot: testDataRoot)
         expect(tabs.compactMap(\.plugin).count == 1, "the fast plugin loads, got \(tabs)")
         expect(log.count == 0, "a fast init(host:) logs nothing, got \(log.count): \(log.messages)")
     }
@@ -174,7 +174,7 @@ struct SystemBarLoaderTests {
 
     private static func testListReportPrintsOneLinePerEntry() {
         let config = PluginConfig(plugins: [entry("fake-first"), entry("nope")])
-        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
+        let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost(), dataRoot: testDataRoot)
         expect(PluginListReport.lines(for: tabs) == ["ok fake Fake fake-first", "error nope: no tab for nope"],
                "--list-plugins prints ok/error lines in order, got \(PluginListReport.lines(for: tabs))")
     }

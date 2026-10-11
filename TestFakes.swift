@@ -30,6 +30,10 @@ func makeHost(
     )
 }
 
+/// Where plugins built by the catalog or loader under test get their data folders: under the
+/// temporary directory, never the real Application Support folder.
+let testDataRoot = FileManager.default.temporaryDirectory.appendingPathComponent("systembar-tests-plugin-data", isDirectory: true)
+
 /// A fresh, empty folder under the system's temporary directory, so no test touches the real
 /// Application Support folder. The caller removes it.
 func temporaryDirectory() -> URL {
