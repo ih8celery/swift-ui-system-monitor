@@ -175,6 +175,7 @@ enum CPUTests {
     private static func testClusterLayoutPutsTheSlowestClusterAtCoreZero() {
         // This Mac: sysctl lists Super (6) then Performance (12); the device tree puts the
         // Performance cores at 0-11 and the Super cores at 12-17.
+        expect(CPUClusters.layout(names: ["A", "B"], counts: [0, 8], coreCount: 8) == nil, "a zero-core cluster means the counts are not trusted")
         let thisMac = CPUClusters.layout(names: ["Super", "Performance"], counts: [6, 12], coreCount: 18)
         expect(thisMac == [CPUCluster(name: "Super", cores: 12..<18), CPUCluster(name: "Performance", cores: 0..<12)],
                "perflevel 0 is the fastest cluster and takes the last core indices, got \(String(describing: thisMac))")

@@ -42,7 +42,7 @@ public final class CPUPlugin: NSObject, TabPlugin, ObservableObject {
         thermalObserver = NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
         ) { [weak self] _ in
-            DispatchQueue.global(qos: .utility).async { self?.collect() }
+            DispatchQueue.global(qos: .utility).async { [weak self] in self?.collect() }
         }
     }
 

@@ -30,9 +30,15 @@ enum CPUClusters {
     /// six "Super" cores at 12-17, and an M1 puts its four efficiency cores at 0-3. So the last
     /// perflevel takes the first indices, and so on back to perflevel 0. The result is in
     /// sysctl's order, fastest first, for display. Nil when the lists disagree or the counts do
-    /// not add up to the core count; the view then falls back to unnamed per-core bars.
+    /// not add up to the core count (or one is not positive); the view then falls back to unnamed
+    /// per-core bars. To re-check the rule on a new chip, compare each `cpuN` entry's
+    /// `cluster-type` from `ioreg -p IODeviceTree -r -c IOPlatformDevice` with `sysctl hw.perflevel*`;
+    /// the rule assumes `host_processor_info` index N is the device tree's `cpuN`. Its limit: a chip
+    /// whose kernel does not number the slowest cluster first would be mislabelled, not refused,
+    /// because no count check can tell.
     static func layout(names: [String], counts: [Int], coreCount: Int) -> [CPUCluster]? {
-        guard names.count == counts.count, !names.isEmpty, counts.reduce(0, +) == coreCount else { return nil }
+        guard names.count == counts.count, !names.isEmpty, counts.allSatisfy({ $0 > 0 }),
+              counts.reduce(0, +) == coreCount else { return nil }
         var next = 0
         var slowestFirst: [CPUCluster] = []
         for (name, count) in zip(names, counts).reversed() {
