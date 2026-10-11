@@ -92,9 +92,27 @@ struct DiskHogCandidate {
     }
 }
 
-/// How often the Disk tab samples, and how long its du scan may run.
+/// How often the Disk tab samples, and how long its scans may run. The README's interval table
+/// quotes these, so change them together.
 enum DiskSampling {
+    /// Volumes and `tmutil` while the tab shows.
     static let refreshInterval: TimeInterval = 30
+    /// The host's `collect()` while the tab is hidden: a due check, and the scans it starts.
+    static let backgroundInterval: TimeInterval = 900
+    /// One `du` per row. Generous, because `~/Library` alone takes a minute warm and far longer
+    /// cold; bounded, so one pathological tree cannot hold a plan open.
+    static let rowTimeout: TimeInterval = 300
+    /// Each plan's whole-run ceiling, well under every cadence so plans never overlap.
+    static let planBudget: TimeInterval = 900
+    static let overviewCadence: TimeInterval = 3 * 3600
+    static let developerCadence: TimeInterval = 6 * 3600
+    static let simulatorsCadence: TimeInterval = 6 * 3600
+    /// Every sample is kept this long, so same-day comparisons work.
+    static let fullRetention: TimeInterval = 2 * 86_400
+    /// After that, one sample per path per day up to this age; nothing older.
+    static let dailyRetention: TimeInterval = 30 * 86_400
+
+    // Old hog-scan members, still used by DiskCollector and DiskTests; removed in a later task.
     /// `du` walks real directory trees, so it runs far less often than the capacity read it ships with.
     static let hogRefreshInterval: TimeInterval = 600
     /// Per-tree ceiling. Generous, because a cold DerivedData or CoreSimulator walk is slow,

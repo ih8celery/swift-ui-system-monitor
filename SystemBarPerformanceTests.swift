@@ -18,6 +18,7 @@ struct SystemBarPerformanceTests {
         MainActor.assumeIsolated { CPUTests.runAll() }
         MainActor.assumeIsolated { PowerTests.runAll() }
         MainActor.assumeIsolated { DiskTests.runAll() }
+        MainActor.assumeIsolated { DiskLedgerTests.runAll() }
         testRunProcessDrainsLargeStderrConcurrently()
         testRunProcessTimesOutHungCommand()
         testCollectorsDoNotLeakHostPortRights()
