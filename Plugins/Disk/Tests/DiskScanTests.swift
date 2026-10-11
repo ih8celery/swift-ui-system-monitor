@@ -14,6 +14,8 @@ enum DiskScanTests {
         testSimulatorCatalogParsesSimctlAndPrettifiesTheRuntime()
         testMeasureRecordsEachFinishedRowAndCountsTheRest()
         testMeasureStopsAtTheBudgetAndCountsWhatItSkipped()
+        testMeasureStopsCheckingOnceTheBudgetIsSpent()
+        testDiskUsageThatWouldOverflowIsUnparseable()
         testScannerRunsDuAndSimctlThroughTheHost()
         testOutcomeStatusNamesEveryWayARowCanBeMissing()
     }
@@ -144,6 +146,27 @@ enum DiskScanTests {
         }, onRow: { rows.append($0) })
         expect(rows.map(\.path) == ["/a", "/b"], "the budget is checked before each du: the first two fit, the third is skipped, got \(rows.map(\.path))")
         expect(outcome.unmeasured == 1 && outcome.measured == 2, "and the skipped one is counted, got \(outcome)")
+    }
+
+    private static func testMeasureStopsCheckingOnceTheBudgetIsSpent() {
+        let plan = DiskScanPlan(kind: .overview, cadence: 1, budget: 10, roots: [""])
+        let targets = ["/a", "/b", "/c", "/d"].map { DiskScanTarget(path: $0, simulator: nil) }
+        var clock: TimeInterval = 0
+        var clockReads = 0
+        var duRuns: [String] = []
+        let outcome = DiskScanner.measure(targets: targets, plan: plan, now: { now }, elapsed: { clockReads += 1; return clock }, measure: { path in
+            duRuns.append(path)
+            clock += 60
+            return duFinished(path, kilobytes: 1)
+        }, onRow: { _ in })
+        expect(duRuns == ["/a"], "a budget spent by the first du runs no further du, got \(duRuns)")
+        expect(outcome == DiskScanOutcome(measured: 1, timedOut: 0, unreadable: 0, unmeasured: 3), "every target after it counts as not measured, got \(outcome)")
+        expect(clockReads == 2, "the loop stops at the spent budget rather than reading the clock once per remaining target, got \(clockReads)")
+    }
+
+    private static func testDiskUsageThatWouldOverflowIsUnparseable() {
+        expect(DiskScanner.parseDiskUsage("\(UInt64.max)\t/huge\n").isEmpty, "a kilobyte count too big for bytes is no answer rather than a wrapped one")
+        expect(DiskScanner.parseDiskUsage("2\t/a\n").first?.bytes == 2048, "an ordinary count converts to bytes")
     }
 
     private static func testScannerRunsDuAndSimctlThroughTheHost() {

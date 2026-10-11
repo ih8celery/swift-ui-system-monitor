@@ -47,14 +47,14 @@ final class DiskScanner: @unchecked Sendable {
     }
 
     func run(plan: DiskScanPlan, previous: DiskLedger, onRow: (DiskSample) -> Void) -> DiskScanOutcome {
-        let start = Date()
+        let start = ProcessInfo.processInfo.systemUptime
         let catalog = plan.kind == .simulators
             ? SimulatorCatalog.parse(host.run(path: SimulatorCatalog.command, arguments: SimulatorCatalog.arguments).output)
             : [:]
         // Each root is read once; the roots that could be read are the only ones whose missing
-        // children count as vanished.
-        let roots = Set(plan.resolvedRoots(homeDirectory: host.homeDirectory))
-        let listings = Dictionary(uniqueKeysWithValues: roots.map { ($0, listChildren($0)) })
+        // children count as vanished. A repeated root keeps its first listing rather than trapping.
+        let roots = plan.resolvedRoots(homeDirectory: host.homeDirectory)
+        let listings = Dictionary(roots.map { ($0, listChildren($0)) }, uniquingKeysWith: { first, _ in first })
         let listedRoots = Set(listings.compactMap { $0.value == nil ? nil : $0.key })
         let targets = DiskScanTargets.targets(for: plan, homeDirectory: host.homeDirectory, previous: previous, listChildren: { listings[$0] ?? nil }, catalog: catalog)
         DiskScanTargets.vanished(plan: plan, listedRoots: listedRoots, previous: previous, targets: targets, now: Date()).forEach(onRow)
@@ -63,7 +63,8 @@ final class DiskScanner: @unchecked Sendable {
             targets: targets,
             plan: plan,
             now: { Date() },
-            elapsed: { Date().timeIntervalSince(start) },
+            // Uptime only moves forward, so a wall-clock change can neither restart nor cut a scan.
+            elapsed: { ProcessInfo.processInfo.systemUptime - start },
             measure: { path in
                 // -x keeps du on one filesystem; -k normalises to KiB across macOS versions.
                 host.run(path: "/usr/bin/du", arguments: ["-s", "-k", "-x", path], timeout: DiskSampling.rowTimeout)
@@ -72,7 +73,9 @@ final class DiskScanner: @unchecked Sendable {
         )
     }
 
-    /// The loop, with its clock and its `du` injected so a test can run it in no time.
+    /// The loop, with its clock and its `du` injected so a test can run it in no time. `elapsed`
+    /// is the seconds since the run began; once it reaches the budget the loop stops, and every
+    /// target it did not reach is counted as not measured.
     static func measure(
         targets: [DiskScanTarget],
         plan: DiskScanPlan,
@@ -82,10 +85,10 @@ final class DiskScanner: @unchecked Sendable {
         onRow: (DiskSample) -> Void
     ) -> DiskScanOutcome {
         var outcome = DiskScanOutcome()
-        for target in targets {
+        for (index, target) in targets.enumerated() {
             guard elapsed() < plan.budget else {
-                outcome.unmeasured += 1
-                continue
+                outcome.unmeasured += targets.count - index
+                break
             }
             let result = measure(target.path)
             // `du -s` prints one "<kilobytes>\t<path>" line once the walk finishes; anything else
@@ -107,8 +110,9 @@ final class DiskScanner: @unchecked Sendable {
             guard parts.count == 2,
                   let kilobytes = UInt64(parts[0].trimmingCharacters(in: .whitespaces)) else { return nil }
             let path = String(parts[1]).trimmingCharacters(in: .whitespaces)
-            guard !path.isEmpty else { return nil }
-            return (path, kilobytes &* 1024)
+            let (bytes, overflowed) = kilobytes.multipliedReportingOverflow(by: 1024)
+            guard !path.isEmpty, !overflowed else { return nil }
+            return (path, bytes)
         }
     }
 }
