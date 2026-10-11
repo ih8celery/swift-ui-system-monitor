@@ -29,10 +29,14 @@ struct DiskScanOutcome: Equatable {
 final class DiskScanner: @unchecked Sendable {
     private let host: HostServices
     private let listChildren: (String) -> [String]?
+    /// Stamps every sample, so the plugin's injected clock dates samples, due checks and
+    /// compaction alike.
+    private let now: () -> Date
 
-    init(host: HostServices, listChildren: @escaping (String) -> [String]? = DiskScanner.subfolders(of:)) {
+    init(host: HostServices, listChildren: @escaping (String) -> [String]? = DiskScanner.subfolders(of:), now: @escaping () -> Date = { Date() }) {
         self.host = host
         self.listChildren = listChildren
+        self.now = now
     }
 
     /// The immediate subfolders of `directory`, hidden ones included, symlinks excluded (a link
@@ -60,12 +64,12 @@ final class DiskScanner: @unchecked Sendable {
         let listings = Dictionary(roots.map { ($0, listChildren($0)) }, uniquingKeysWith: { first, _ in first })
         let listedRoots = Set(listings.compactMap { $0.value == nil ? nil : $0.key })
         let targets = DiskScanTargets.targets(for: plan, homeDirectory: host.homeDirectory, previous: previous, listChildren: { listings[$0] ?? nil }, catalog: catalog)
-        DiskScanTargets.vanished(plan: plan, listedRoots: listedRoots, previous: previous, targets: targets, now: Date()).forEach(onRow)
+        DiskScanTargets.vanished(plan: plan, listedRoots: listedRoots, previous: previous, targets: targets, now: now()).forEach(onRow)
         let host = self.host
         return Self.measure(
             targets: targets,
             plan: plan,
-            now: { Date() },
+            now: now,
             // Uptime only moves forward, so a wall-clock change can neither restart nor cut a scan.
             elapsed: { ProcessInfo.processInfo.systemUptime - start },
             measure: { path in

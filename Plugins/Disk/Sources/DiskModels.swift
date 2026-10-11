@@ -68,17 +68,15 @@ struct DiskSnapshot {
         return next
     }
 
-    /// A copy with the rows derived from `ledger`; the volume and scan fields are left alone.
-    func applying(ledger: DiskLedger, homeDirectory: String, now: Date) -> DiskSnapshot {
+    /// A copy with derived rows applied; the volume and scan fields are left alone. Only copies,
+    /// so it is cheap enough to run on main.
+    func applying(_ derived: DiskDerivedRows) -> DiskSnapshot {
         var next = self
-        let rows = DiskRows.rows(from: ledger, homeDirectory: homeDirectory)
-        next.biggest = DiskRows.biggest(rows)
-        next.movers24h = DiskRows.movers(rows: rows, ledger: ledger, window: 86_400, now: now)
-        next.movers7d = DiskRows.movers(rows: rows, ledger: ledger, window: 7 * 86_400, now: now)
-        next.simulators = DiskRows.simulatorRows(from: ledger)
-        next.planAges = Dictionary(uniqueKeysWithValues: DiskPlanKind.allCases.compactMap { kind in
-            ledger.newestMeasurement(of: kind).map { (kind, $0) }
-        })
+        next.biggest = derived.biggest
+        next.movers24h = derived.movers24h
+        next.movers7d = derived.movers7d
+        next.simulators = derived.simulators
+        next.planAges = derived.planAges
         return next
     }
 
@@ -110,6 +108,30 @@ struct DiskSnapshot {
     }
 }
 
+/// The snapshot's ledger-derived fields. Deriving them takes several passes over every sample,
+/// so the plugin does it on its scan queue and hands main only the result.
+struct DiskDerivedRows {
+    let biggest: [DiskRow]
+    let movers24h: [DiskMover]
+    let movers7d: [DiskMover]
+    let simulators: [DiskRow]
+    /// When each plan last measured anything; absent for a plan that never ran.
+    let planAges: [DiskPlanKind: Date]
+
+    static func derive(from ledger: DiskLedger, homeDirectory: String, now: Date) -> DiskDerivedRows {
+        let rows = DiskRows.rows(from: ledger, homeDirectory: homeDirectory)
+        return DiskDerivedRows(
+            biggest: DiskRows.biggest(rows),
+            movers24h: DiskRows.movers(rows: rows, ledger: ledger, window: 86_400, now: now),
+            movers7d: DiskRows.movers(rows: rows, ledger: ledger, window: 7 * 86_400, now: now),
+            simulators: DiskRows.simulatorRows(from: ledger),
+            planAges: Dictionary(uniqueKeysWithValues: DiskPlanKind.allCases.compactMap { kind in
+                ledger.newestMeasurement(of: kind).map { (kind, $0) }
+            })
+        )
+    }
+}
+
 /// How often the Disk tab samples, and how long its scans may run. The README's interval table
 /// quotes these, so change them together.
 enum DiskSampling {
@@ -129,6 +151,9 @@ enum DiskSampling {
     static let fullRetention: TimeInterval = 2 * 86_400
     /// After that, one sample per path per day up to this age; nothing older.
     static let dailyRetention: TimeInterval = 30 * 86_400
+    /// The fastest the list refreshes while a plan runs. Rows still appear as trees finish, but a
+    /// burst of small folders cannot queue a derivation per folder on main.
+    static let previewInterval: TimeInterval = 1
 }
 
 /// What one 30-second volume read found.

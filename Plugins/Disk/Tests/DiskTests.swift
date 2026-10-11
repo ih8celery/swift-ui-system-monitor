@@ -16,6 +16,7 @@ enum DiskTests {
         testPluginDeclaresABackgroundIntervalUnlessTurnedOff()
         testCollectRunsDuePlansOnceAndSavesTheLedger()
         testAnIncompleteScanLeavesAWarningForTheFooter()
+        testACompleteRunClearsTheWarning()
         testAPlanThatMeasuredNothingWaitsItsCadence()
         testRepeatedRescanClicksQueueOneRun()
         testSaveProblemClearsAndLeavesTheLedgerNote()
@@ -74,7 +75,7 @@ enum DiskTests {
             DiskSample(path: "\(home)/proj", bytes: 40, measuredAt: now.addingTimeInterval(-3600), plan: .overview),
             DiskSample(path: "\(home)/Library", bytes: 90, measuredAt: now.addingTimeInterval(-7200), plan: .overview),
         ])
-        let mapped = read.applying(ledger: ledger, homeDirectory: home, now: now)
+        let mapped = read.applying(DiskDerivedRows.derive(from: ledger, homeDirectory: home, now: now))
         expect(mapped.biggest.map(\.name) == ["Library", "proj"], "the ledger becomes ranked rows, got \(mapped.biggest.map(\.name))")
         expect(mapped.movers24h.map(\.row.name) == ["proj"] && mapped.movers24h.first?.change == .grew(30), "and movers over a day, got \(mapped.movers24h)")
         expect(mapped.movers7d.first?.change == .grew(30), "and over a week")
@@ -169,6 +170,33 @@ enum DiskTests {
         waitUntil(5) { plugin.snapshot.scanWarning != nil && !plugin.snapshot.isScanning }
         let warning = plugin.snapshot.scanWarning ?? ""
         expect(warning.hasPrefix("Overview: ") && warning.contains("1 unreadable"), "the last incomplete scan's summary stays for the footer, got \(warning)")
+    }
+
+    private static func testACompleteRunClearsTheWarning() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // The first run lists "denied", which has no answer and so reads as unreadable; the
+        // forced run no longer lists it, so it measures everything.
+        var children = ["big", "denied"]
+        let plugin = DiskPlugin(
+            host: makeHost(runner: recordingRunner(LogRecorder(), answers: [
+                "/usr/bin/tmutil listlocalsnapshots /": "",
+                "/usr/bin/du -s -k -x \(home)/big": "100\t\(home)/big\n",
+            ]), dataDirectory: directory),
+            plans: [DiskScanPlan(kind: .overview, cadence: 3600, budget: 60, roots: [""])],
+            now: { Date() },
+            listChildren: { parent in parent == home ? children.map { "\(home)/\($0)" } : [] }
+        )
+        plugin.collect()
+        plugin.drainScanQueue()
+        waitUntil(5) { plugin.snapshot.scanWarning != nil }
+        expect(plugin.snapshot.scanWarning?.contains("1 unreadable") == true, "the first run leaves a warning, got \(String(describing: plugin.snapshot.scanWarning))")
+
+        children = ["big"]
+        plugin.requestScan(force: true)
+        plugin.drainScanQueue()
+        waitUntil(5) { plugin.snapshot.scanWarning == nil }
+        expect(plugin.snapshot.scanWarning == nil && plugin.snapshot.scanStatus == "Overview: Measured 1 path", "a later complete run clears it, got \(String(describing: plugin.snapshot.scanWarning))")
     }
 
     private static func testAPlanThatMeasuredNothingWaitsItsCadence() {

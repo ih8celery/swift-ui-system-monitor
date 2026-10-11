@@ -60,7 +60,7 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     @MainActor init(host: HostServices, plans: [DiskScanPlan], now: @escaping () -> Date, listChildren: @escaping (String) -> [String]?) {
         self.host = host
         collector = DiskCollector(host: host)
-        scanner = DiskScanner(host: host, listChildren: listChildren)
+        scanner = DiskScanner(host: host, listChildren: listChildren, now: now)
         store = DiskLedgerStore.standard(dataDirectory: host.dataDirectory)
         self.plans = plans
         self.now = now
@@ -70,6 +70,9 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
         initial.settingsProblem = setting.problem
         snapshot = initial
         super.init()
+        // The saved rows show as soon as the plugin exists, not at the first collect, which with
+        // the tab hidden is a background interval away.
+        requestLedgerLoad()
     }
 
     /// `backgroundScans`: absent or true means on; false means off; anything else keeps the
@@ -107,6 +110,12 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
         }
     }
 
+    /// Not main-actor isolated, like `requestScan`, so the closure it queues is not checked as
+    /// crossing from the main actor; the ledger is still touched only on `scanQueue`.
+    private func requestLedgerLoad() {
+        scanQueue.async { [self] in loadLedgerIfNeeded() }
+    }
+
     /// For tests: returns once everything queued on the scan queue so far has finished, so a
     /// test can check that something did not happen without guessing how long to wait.
     func drainScanQueue() {
@@ -138,9 +147,14 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
             lastAttempt[plan.kind] = now()
             publish { $0.scanning(true, status: "Measuring \(plan.kind.title.lowercased()) folders") }
             var fresh: [DiskSample] = []
+            var lastPreview = -TimeInterval.infinity
             let outcome = scanner.run(plan: plan, previous: ledger) { sample in
-                // Each tree lands in the list as it finishes rather than after the last one.
+                // Trees land in the list as they finish, at most once a second; the
+                // `publishLedger()` after the plan always shows the final state.
                 fresh.append(sample)
+                let uptime = ProcessInfo.processInfo.systemUptime
+                guard uptime - lastPreview >= DiskSampling.previewInterval else { return }
+                lastPreview = uptime
                 publishRows(from: ledger.appending(fresh))
             }
             ledger = ledger.appending(fresh).compacted(now: now())
@@ -178,12 +192,10 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
         publishRows(from: ledger)
     }
 
-    /// Reads the home folder and the clock here, on the scan queue, so the closure that runs on
-    /// main carries only values.
+    /// Derives the rows here, on the scan queue, so main only copies the result in.
     private func publishRows(from ledger: DiskLedger) {
-        let homeDirectory = host.homeDirectory
-        let at = now()
-        publish { $0.applying(ledger: ledger, homeDirectory: homeDirectory, now: at) }
+        let derived = DiskDerivedRows.derive(from: ledger, homeDirectory: host.homeDirectory, now: now())
+        publish { $0.applying(derived) }
     }
 
     @MainActor public func makeView() -> AnyView {
