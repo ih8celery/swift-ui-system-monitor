@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import SwiftUI
 import SystemBarKit
@@ -153,8 +152,15 @@ struct DiskPanel: View {
                 .foregroundStyle(.secondary)
         }
         ForEach(rows) { row in
-            DiskRowView(row: row, fraction: Double(row.bytes) / Double(max(top, 1)), change: nil, now: now, homeDirectory: plugin.homeDirectory)
-                .onTapGesture { if row.kind == .simulatorGroup { showsSimulators.toggle() } }
+            let fraction = Double(row.bytes) / Double(max(top, 1))
+            if row.kind == .simulatorGroup {
+                Button { showsSimulators.toggle() } label: {
+                    DiskRowView(row: row, fraction: fraction, change: nil, now: now, homeDirectory: plugin.homeDirectory, isExpanded: showsSimulators)
+                }
+                .buttonStyle(.plain)
+            } else {
+                DiskRowView(row: row, fraction: fraction, change: nil, now: now, homeDirectory: plugin.homeDirectory)
+            }
             if row.kind == .simulatorGroup, showsSimulators {
                 ForEach(snapshot.simulators) { device in
                     DiskRowView(row: device, fraction: Double(device.bytes) / Double(max(row.bytes, 1)), change: nil, now: now, homeDirectory: plugin.homeDirectory)

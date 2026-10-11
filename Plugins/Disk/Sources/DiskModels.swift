@@ -29,8 +29,6 @@ struct DiskSnapshot {
     var health = SampleHealth.degraded
     var lastUpdated: Date?
 
-    /// Every measured path at its deepest level, from `DiskRows.rows`.
-    var rows: [DiskRow] = []
     var biggest: [DiskRow] = []
     var movers24h: [DiskMover] = []
     var movers7d: [DiskMover] = []
@@ -71,7 +69,6 @@ struct DiskSnapshot {
     func applying(ledger: DiskLedger, homeDirectory: String, now: Date) -> DiskSnapshot {
         var next = self
         let rows = DiskRows.rows(from: ledger, homeDirectory: homeDirectory)
-        next.rows = rows
         next.biggest = DiskRows.biggest(rows)
         next.movers24h = DiskRows.movers(rows: rows, ledger: ledger, window: 86_400, now: now)
         next.movers7d = DiskRows.movers(rows: rows, ledger: ledger, window: 7 * 86_400, now: now)

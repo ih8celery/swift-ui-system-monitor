@@ -10,6 +10,8 @@ struct DiskRowView: View {
     let change: DiskMover.Change?
     let now: Date
     let homeDirectory: String
+    /// For the simulator group: its devices are showing, so the chevron points down.
+    var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -18,7 +20,7 @@ struct DiskRowView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 if row.kind == .simulatorGroup {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
