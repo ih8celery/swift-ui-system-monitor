@@ -53,7 +53,7 @@ expected="ok power Power Power.bundle
 ok hello Hello $tmp/HelloTab.bundle
 error $tmp/Missing.bundle: nothing at $tmp/Missing.bundle
 error Power.bundle: the id \"power\" is already used by \"Power.bundle\", which comes earlier in the list"
-actual=$(SYSTEMBAR_PLUGINS_FILE="$tmp/plugins.json" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
+actual=$(SYSTEMBAR_PLUGINS_FILE="$tmp/plugins.json" SYSTEMBAR_PLUGIN_DATA_ROOT="$tmp/plugin-data" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
   || { echo "Boundary check failed: SystemBar --list-plugins exited $?" >&2; exit 1; }
 
 if [[ "$actual" != "$expected" ]]; then
@@ -88,7 +88,7 @@ ok memory Memory Memory.bundle
 ok disk Disk Disk.bundle
 ok network Network Network.bundle
 ok cpu CPU CPU.bundle"
-actual_fresh=$(SYSTEMBAR_PLUGINS_FILE="$tmp/fresh/plugins.json" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
+actual_fresh=$(SYSTEMBAR_PLUGINS_FILE="$tmp/fresh/plugins.json" SYSTEMBAR_PLUGIN_DATA_ROOT="$tmp/plugin-data" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
   || { echo "Fresh-file check failed: SystemBar --list-plugins exited $?" >&2; exit 1; }
 
 if [[ "$actual_fresh" != "$expected_fresh" ]]; then
