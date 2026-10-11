@@ -43,6 +43,7 @@ enum CPUCollector {
         return loads[0]
     }
 
+    /// These are 32-bit `CTLTYPE_INT` values, so `Int32` is the right size; do not widen it to `Int`.
     private static func sysctlInt(_ name: String) -> Int? {
         var value: Int32 = 0
         var size = MemoryLayout<Int32>.size

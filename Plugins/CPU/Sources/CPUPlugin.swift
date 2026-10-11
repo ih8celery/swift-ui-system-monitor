@@ -8,6 +8,8 @@ import SystemBarKit
 /// does not carry (load average, thermal state, `pmset -g therm`) every ten seconds while the
 /// tab is showing, and again whenever macOS says the thermal state changed. The one other
 /// command it runs is a `ps` when a row is tapped, which the panel calls off the main thread.
+/// This plugin also calls `collect()` from its own thermal queue, so the SDK's "never
+/// concurrently with itself" promise does not cover it.
 @objc(SystemBarCPUPlugin)
 public final class CPUPlugin: NSObject, TabPlugin, ObservableObject {
     public static let identifier = "cpu"
@@ -63,10 +65,14 @@ public final class CPUPlugin: NSObject, TabPlugin, ObservableObject {
     }
 
     /// Reads the load average, thermal state and pmset's speed limit, and publishes them on the
-    /// main thread, where the panel observes them.
+    /// main thread, where the panel observes them. A reading older than the one showing is
+    /// dropped, because the thermal observer can run a collect alongside the scheduled one.
     public func collect() {
         let state = CPUCollector.machineState(using: host)
-        DispatchQueue.main.async { [weak self] in self?.machineState = state }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, state.sampledAt >= self.machineState.sampledAt else { return }
+            self.machineState = state
+        }
     }
 
     /// The tapped group's processes, from a fresh `ps`. Blocking: the panel calls it off main.

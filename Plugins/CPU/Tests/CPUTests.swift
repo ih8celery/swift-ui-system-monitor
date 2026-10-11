@@ -231,9 +231,10 @@ enum CPUTests {
 
     private static func testClustersOnThisMacCoverEveryCore() {
         // sysctl is read for real here: the layout rule has fixed-input tests above, this checks
-        // the plumbing against whichever chip runs the tests.
+        // the plumbing against whichever chip runs the tests. Everything builds for Apple silicon,
+        // so a nil here is a plumbing failure, not a tolerated case.
         guard let clusters = CPUCollector.clusters() else {
-            expect(true, "a chip whose perflevel counts do not add up falls back to per-core bars")
+            expect(false, "Apple silicon always reports perflevels whose counts add up to activeProcessorCount")
             return
         }
         let covered = clusters.flatMap { Array($0.cores) }.sorted()

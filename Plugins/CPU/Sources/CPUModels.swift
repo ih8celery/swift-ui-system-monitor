@@ -50,7 +50,8 @@ enum CPUClusters {
 }
 
 /// What the thermal line shows: the coarse state macOS reports to any process, and, while the
-/// tab is showing, the speed limit `pmset -g therm` reports (100 means no throttling).
+/// tab is showing and on every thermal-state change, the speed limit `pmset -g therm` reports
+/// (100 means no throttling).
 struct ThermalReading: Equatable {
     let state: ProcessInfo.ThermalState
     let speedLimitPercent: Int?
@@ -76,7 +77,7 @@ enum CPUThermal {
 }
 
 /// What the left column says beyond the headline and the feed: read every
-/// `CPUSampling.refreshInterval` while the tab is showing.
+/// `CPUSampling.refreshInterval` while the tab is showing, and on every thermal-state change.
 struct MachineState: Equatable {
     /// The 1-minute load average: runnable threads, so "6.2 of 18 cores" reads as how many
     /// cores could have been kept busy.
