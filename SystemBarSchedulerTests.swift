@@ -22,6 +22,8 @@ struct SystemBarSchedulerTests {
         testSchedulerReturnsAReplacedTabToItsBackgroundCadence()
         testSchedulerNeverOverlapsABackgroundCollectWithTheFirstForegroundTick()
         testSchedulerClampsABadBackgroundInterval()
+        testSchedulerSettlesBackgroundTimersAfterAWake()
+        testSchedulerLeavesTheShownTabAloneAfterAWake()
         testSamplersWantNothingWhileTheWindowIsClosed()
         testSamplersRunNothingWhileTheWindowIsClosed()
         testSamplersRunTheFastSamplerForEveryVisibleTab()
@@ -287,6 +289,54 @@ struct SystemBarSchedulerTests {
         expect(PluginScheduler.reportedBackgroundInterval(60) == 60, "a sane cadence is reported as declared")
         expect(PluginScheduler.minimumBackgroundInterval == 5, "the background floor the README documents is 5 seconds")
         expect(PluginScheduler.backgroundSettleAfterWake == 120, "the settle the README documents is 120 seconds")
+    }
+
+    private static func testSchedulerSettlesBackgroundTimersAfterAWake() {
+        let center = NotificationCenter()
+        let plugin = BackgroundTab(refresh: 0.02, background: 0.05)
+        let scheduler = PluginScheduler(
+            minimumRefreshInterval: 0.01,
+            minimumBackgroundInterval: 0.01,
+            settleAfterWake: 0.3,
+            wakeNotifications: center,
+            log: { _ in }
+        )
+        scheduler.start([plugin])
+        waitUntil { plugin.count >= 2 }
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        spinRunLoop(for: 0.02)
+        let atWake = plugin.count
+        spinRunLoop(for: 0.15)
+        // One tick may have been dispatched before the restart cancelled the old timer.
+        expect(plugin.count <= atWake + 1, "after a wake, no background tick runs until the settle passes, got \(plugin.count - atWake) in half the settle")
+        waitUntil(2) { plugin.count > atWake }
+        expect(plugin.count > atWake, "after the settle, the background cadence resumes")
+
+        // The screens waking is the other signal the real app hears.
+        let beforeScreens = plugin.count
+        center.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        spinRunLoop(for: 0.15)
+        expect(plugin.count <= beforeScreens + 1, "screensDidWake also restarts the timer with a settle, got \(plugin.count - beforeScreens) ticks in half the settle")
+    }
+
+    private static func testSchedulerLeavesTheShownTabAloneAfterAWake() {
+        let center = NotificationCenter()
+        let plugin = BackgroundTab(refresh: 0.02, background: 0.05)
+        let scheduler = PluginScheduler(
+            minimumRefreshInterval: 0.01,
+            minimumBackgroundInterval: 0.01,
+            settleAfterWake: 0.3,
+            wakeNotifications: center,
+            log: { _ in }
+        )
+        scheduler.start([plugin])
+        scheduler.show(plugin)
+        waitUntil { plugin.count >= 2 }
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        let atWake = plugin.count
+        waitUntil { plugin.count >= atWake + 3 }
+        expect(plugin.count >= atWake + 3, "a wake does not touch the shown tab's fast timer, got \(plugin.count - atWake) ticks")
+        scheduler.hide()
     }
 
     // MARK: - Host samplers
