@@ -132,6 +132,25 @@ file nobody opens. An empty list shows one tab saying where the file is.
 for per-user app state. If it is missing at launch the host writes one listing
 the six built-ins, so the first run looks exactly like today.
 
+### D9: May a plugin sample while its tab is hidden?
+
+Decided 2026-10-10 in `systembar-ewy-cpu-machine-state-and-background-sampling.md`
+(D2, D3, D7) and adopted by `systembar-ifd-disk-distribution-and-movers.md`.
+
+- **Option A — yes, by declaring a `backgroundInterval`:** nil by default; the
+  host keeps calling `collect()` at that cadence while the tab is not showing,
+  with a 5-second floor, and restarts every background timer two minutes after
+  the Mac wakes. Shared feeds stay visible-only.
+- **Option B — never:** the guarantee D5 relied on, kept absolute.
+- **Option C — a host-sampled background feed:** the host does the hidden work
+  and plugins read it.
+
+**Selected: A.** Two tabs need a memory of what normal looks like (the CPU
+tab's movers, the Disk tab's size ledger), and a memory that fills only while
+someone is looking is not one. The guarantee becomes opt-in per plugin, each
+opt-in is reported by `--list-plugins` and named in the README, and nothing
+changes for a plugin that declares nothing.
+
 ## Plugin Contract
 
 The SDK is one dylib, `SystemBarKit`, shipped inside the app at
@@ -156,6 +175,10 @@ public protocol TabPlugin: AnyObject {
     var refreshInterval: TimeInterval { get }
     /// Which shared samplers must be running while this tab is showing.
     var sharedFeeds: Set<SharedFeed> { get }
+    /// How often the host calls collect() while this tab is NOT showing. Nil (the
+    /// default) means never. Clamped to 5s...86,400s. Shared feeds do not run for a
+    /// hidden tab. The first tick after the Mac wakes waits 120s.
+    var backgroundInterval: TimeInterval? { get }
 
     /// @MainActor, and must not do slow work: the host times this call and logs a warning when
     /// it passes 100 ms, so slow work belongs in collect() instead.
@@ -214,7 +237,8 @@ sampler (CPU percent and network rates, with 90 seconds of history) runs
 whenever the window is open, whatever the tab, so switching tabs leaves no gap
 in the histories. The 10-second `ps` sampler runs only while the showing tab
 declares `.processes`. With the window closed, or an error tab showing,
-neither runs. A sampler samples at once when it starts, and one that keeps
+neither runs; the only work that does is the `collect()` of a plugin that
+declared a `backgroundInterval` (D9), on its own queue, at that cadence. A sampler samples at once when it starts, and one that keeps
 running across a tab switch keeps its rhythm.
 
 ## Config Contract
@@ -492,3 +516,6 @@ leaving a working, buildable, tested app:
   which is allowed only because that interface was never pushed and every
   shipped bundle rebuilds with the app. From here on, public SDK symbols are
   only added — Claude, from 2ik.6, for Adam to confirm.
+- 2026-10-10 — D9: chose A — a plugin may declare a `backgroundInterval`; the
+  window-closed guarantee is opt-out per plugin, reported by `--list-plugins`
+  — Adam, through the CPU and Disk epics.
