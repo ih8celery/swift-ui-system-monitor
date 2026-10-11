@@ -4,7 +4,7 @@ A single menu bar icon for Memory, CPU, Disk, Network, and Power — instead of 
 
 ![SystemBar screenshot](screenshot.png)
 
-SystemBar replaces a cluttered row of individual menu bar monitors with one icon and a tabbed popover. Tap between tabs to see memory pressure, per-process CPU share, disk usage hogs, network throughput, and battery/power state, all sampled live from macOS kernel APIs.
+SystemBar replaces a cluttered row of individual menu bar monitors with one icon and a tabbed popover. Tap between tabs to see memory pressure, per-process CPU share, where disk space goes, network throughput, and battery/power state, all sampled live from macOS kernel APIs.
 
 ## The tabs
 
@@ -12,7 +12,7 @@ SystemBar replaces a cluttered row of individual menu bar monitors with one icon
 |---|---|
 | **CPU** | Total load, process count, a 90-second history graph, and the top processes by CPU with their memory |
 | **Memory** | Used and available the way Activity Monitor counts them, the kernel's pressure level, the wired/active/inactive/compressed/free breakdown, swap, how busy the GPU is and how much memory it holds, and top processes by memory |
-| **Disk** | Capacity, free and purgeable space per volume, Time Machine local snapshots, and reclaimable space — caches, DerivedData, Downloads — with a hint on what each is safe to do about |
+| **Disk** | Free and used space per volume, Time Machine local snapshots, a map of which folders hold the space, and what grew or shrank over the last day or week, measured by scans that run in the background and saved between launches, every number stamped with its age. Free is what `df` reports; Finder's Available also counts purgeable space, so it can read higher |
 | **Network** | Live up/down bandwidth, which processes are talking and where to, latency, and an on-demand speed test |
 | **Power** | Battery and power source, and the sleep assertions keeping your Mac awake with their likely causes |
 | **Dev** | How much capacity the machine has left, and which projects are using it: one row per project with the kind of expensive work it is running (builds, simulators, test runs, bundlers, automation) and its measured CPU, memory and disk I/O, plus listening ports grouped by the project serving them |
@@ -36,6 +36,14 @@ It lists the six tabs above. Reorder the entries to reorder the tabs, set `"enab
 ```
 
 A `"path"` entry points at a bundle anywhere on disk (absolute, or starting with `~/`), which is how a tab you built yourself is added.
+
+An entry may carry a `"settings"` object for its plugin. The app checks only that it is an object; the keys are the plugin's own, and a plugin reports a value it cannot use in its own panel rather than refusing to load. The Disk tab reads one key: `"backgroundScans": false` stops its folder scans from running while the window is closed.
+
+```json
+{ "plugins": [
+  { "name": "Disk.bundle", "settings": { "backgroundScans": false } }
+] }
+```
 
 An entry the app cannot load, say a misspelt name, still gets a tab: it is titled Error and shows the entry, what went wrong, and where the file is, so a typo is never silent. A file that cannot be read or parsed at all gives one Error tab and nothing else. A key the app does not know, or a value of the wrong type, is reported with its place in the file. Two things the parser cannot catch: a trailing comma is accepted, and if a key appears twice the first one wins.
 
@@ -88,6 +96,8 @@ To test a plugin that follows a feed, make the feed with `Feed.forTesting(initia
 ```
 
 A plugin's `refreshInterval` is clamped to between 0.25 seconds and one day: NaN, zero, and negative values become 0.25 seconds, and infinity or anything larger becomes one day, with each substitution logged. Build your plugin with the same Xcode as the app, or a newer one — the SDK interface names types from that Xcode's SwiftUI, so an older Xcode cannot read it.
+
+A plugin gets two more things from `HostServices`. `settings` is its entry's `"settings"` object from `plugins.json`, as a `PluginSettings` with typed accessors (`bool(forKey:)`, `number(forKey:)`, `string(forKey:)`); a present key of the wrong type reads as nil from those and non-nil from the subscript, so the plugin can tell the person. The app never checks a key inside `settings`, only that `settings` is an object; `"settings": null` counts as leaving it out, while `"enabled": null` is rejected like any other wrong type. `dataDirectory` is a folder of its own, `~/Library/Application Support/SystemBar/PluginData/<identifier>/`, which may not exist until the plugin creates it; anything a plugin saves between launches goes there and nowhere else. `SYSTEMBAR_PLUGIN_DATA_ROOT=/some/folder` moves the root for every plugin, which is how tests and scripts keep the real folder untouched.
 
 A plugin that needs to keep sampling while its tab is hidden declares `backgroundInterval` (nil by default). The app then calls its `collect()` at that cadence, clamped to between 5 seconds and one day, while the window is closed or another tab is showing, and restarts the cadence with a call two minutes after every wake of the Mac or its screen, so no call lands on the login moment. That restart means a long interval still gets a call soon after each wake: keep one call cheap, and keep any slower cadence (a scan every few hours, say) in your own bookkeeping, checked on each call, as the Disk tab does. It is the same `collect()`; a plugin that wants to do less while hidden keeps a flag from `visibilityChanged(isVisible:)`. Shared feeds do not run for a hidden tab, so a background `collect()` samples for itself. Say in your plugin's README what it runs while hidden and how often; the app reports the cadence in `--list-plugins`.
 
@@ -153,14 +163,15 @@ Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU
 | `/usr/bin/nettop` | Per-process network throughput | Every 30s |
 | `/usr/sbin/lsof` | Active TCP connections; listening ports for the Dev tab; working directories of running build/test/bundler processes, to name the project each belongs to | Every 30–60s |
 | `/usr/bin/tmutil` | Count of Time Machine local snapshots | Every 30s |
-| `/usr/bin/du` | Sizes of known cache/junk directories for the Disk tab | One `du` per directory, every 10 min or on demand |
+| `/usr/bin/du` | Folder sizes for the Disk tab's map: one level under home, `~/Library`, `/Applications`, `/opt` and `/Library` every 3 hours; under the developer folders (`~/Library/Application Support`, `Containers`, `Group Containers`, `Developer/Xcode`, `~/.cache`, `~/.ollama`, `~/.android`, `~/proj`) and each simulator device every 6 hours | One `du` per folder, on those cadences while the Mac is awake, or all at once on the Disk tab's rescan button |
+| `/usr/bin/xcrun` | `simctl list devices -j`, to name each simulator device folder and say when it last booted | Once per simulator scan, every 6 hours |
 | `/usr/bin/networkQuality` | Speed test | **Only when you press the button** |
 
 Three things worth calling out:
 
 - **The Dev tab guesses which project a process belongs to, and says so when it cannot.** It reads absolute paths out of a process's command line and walks up to the nearest enclosing `.git` directory, treating that repository as the project. Only paths inside your home directory count, and repositories in hidden directories are ignored, so a tool that installs itself into Git — Homebrew does — cannot pose as a project of yours. Per-project CPU, memory and disk I/O come from two `proc_pid_rusage` reads a second apart across only the processes that matched a category. Anything that cannot be measured that way says "not measurable" rather than showing a zero. When the arguments name nothing — real Swift builds pass relative source paths — one `lsof` call asks for the working directories of the handful of processes actually running, capped at 64 per sample, and the repository they run in names them. Xcode builds are never given a CPU figure at all: the compile jobs are replaced between reads and a finished process's CPU time is gone with it, while the build driver that does survive spends its time waiting on children at a fraction of a percent. A build therefore shows as work being done, with no number attached, and the whole-machine CPU figure at the top of the tab is what reflects its cost.
 
-- **The disk scan reads directory sizes only.** It measures a fixed list of well-known space hogs (Xcode DerivedData, `~/Library/Caches`, `~/Downloads`, `~/.Trash`, npm/Cargo/Gradle/Maven/Go caches, and similar). It reads sizes, never file contents, and it never deletes anything — the hints in the UI are suggestions for you to act on yourself. Because `~/Downloads` is on the list, macOS may ask for Files and Folders permission the first time. Each directory is measured by its own `du`, capped at 45s, with the whole scan capped at 4 minutes — so one huge or unreadable tree costs only its own row, and rows appear in the list as they finish. The status line under the list says how many were measured and what happened to the rest.
+- **The disk scan reads folder sizes only, and remembers them.** It runs three plans: an overview of the top-level folders every 3 hours, the developer folders every 6 hours, and each iOS simulator device every 6 hours, each folder by its own `du` with a 5-minute cap and each plan capped at 15 minutes, so one huge or unreadable tree costs only its own row. It reads sizes, never file contents, and never deletes anything; the tab has no cleanup hints, only a map of where the space is and what changed. Sizes are saved in `~/Library/Application Support/SystemBar/PluginData/disk/disk-ledger.json`, every sample for two days and then one a day for thirty, so the popover shows the last scan at once with the age of every number, and the Movers list compares today with a day or a week ago. The plans run while the window is closed: the host calls the Disk tab every 15 minutes while it is hidden, waits two minutes after the Mac wakes, and the tab runs whatever is due. A plan that measured nothing waits its full cadence before trying again, rather than retrying on every call. `"backgroundScans": false` in the tab's settings stops that; the rescan button still works. Because `~/Library/Containers` and `~/Library/Group Containers` are on the list, macOS may ask for Files and Folders permission the first time. A folder it refuses is never recorded as empty: a `du` that fails leaves that folder's earlier size in place, and a root that cannot be listed at all keeps its folders' earlier sizes rather than marking them freed.
 - **The speed test is the only thing that leaves your machine.** Pressing it runs Apple's built-in `networkQuality`, which measures throughput against Apple's servers (`mensura.cdn-apple.com`). Nothing else here sends data anywhere; every other reading is computed locally and stays on your Mac. There is no telemetry, analytics, or crash reporting.
 
 SystemBar runs entirely as your user. It never asks for `sudo` or elevated privileges, and the tabs that ship with the app and the host itself launch every subprocess with an explicit executable path and argument array — never through a shell. A loaded plugin is not held to that rule and can run whatever it likes with your privileges, which is why you should only install plugins you trust.
@@ -174,7 +185,7 @@ Each interval lives in that tab's plugin, next to the code that uses it.
 | Power | `pmset` every 60s | — | `PowerPlugin.refreshInterval` |
 | Dev | `ps`, `lsof`, `pmset` and two usage reads a second apart, every 60s | — | `DevSampling` in `Plugins/Dev/Sources/CapacityModels.swift` |
 | Memory | Kernel counters and pressure level every 3s; `ioreg` every 30s | — | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
-| Disk | Volumes and `tmutil` every 30s; the `du` scan every 10 min or on demand | — | `DiskSampling` in `Plugins/Disk/Sources/DiskModels.swift` |
+| Disk | Volumes and `tmutil` every 30s; the overview scan every 3 h and the developer and simulator scans every 6 h, each folder one `du` capped at 5 min and each plan at 15 min | A due check every 15 min, unless `"backgroundScans": false` | `DiskSampling` in `Plugins/Disk/Sources/DiskModels.swift` |
 | Network | `nettop` and `lsof` every 30s; `networkQuality` only on the button | — | `NetworkSampling` in `Plugins/Network/Sources/NetworkModels.swift` |
 | CPU | Load average, thermal state and `pmset -g therm` every 10s; the headline, history, cluster bars and user/system split come from the 1-second feed | — | `CPUSampling` in `Plugins/CPU/Sources/CPUModels.swift` |
 

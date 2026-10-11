@@ -4,7 +4,9 @@ import SystemBarKit
 /// Reads and writes plugins.json. Uses JSONSerialization rather than Codable because the file
 /// is hand-edited: an unknown key or a wrong type must be an error that names its place, and
 /// Codable ignores unknown keys silently. What JSONSerialization cannot see, this cannot either:
-/// a duplicate key keeps its first value, and a trailing comma is accepted.
+/// a duplicate key keeps its first value, and a trailing comma is accepted. The keys inside an
+/// entry's `settings` are the plugin's own and are never checked here; only `settings` itself
+/// must be an object.
 enum PluginConfigParser {
     private static let topLevel = "the top level"
     private static let topLevelKeys: Set<String> = ["plugins"]
@@ -61,8 +63,9 @@ enum PluginConfigParser {
         return "line \(line): \(text)"
     }
 
-    /// JSON `null` arrives as NSNull. For a location key it means the same as leaving the key
-    /// out; for `enabled` it is not a boolean and is rejected like any other wrong type.
+    /// JSON `null` arrives as NSNull. For a location key or `settings` it means the same as
+    /// leaving the key out; for `enabled` it is not a boolean and is rejected like any other
+    /// wrong type.
     private static func present(_ value: Any?) -> Any? {
         value is NSNull ? nil : value
     }

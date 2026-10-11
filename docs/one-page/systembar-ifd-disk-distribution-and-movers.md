@@ -66,7 +66,9 @@ tab is hidden and every 30 seconds while it shows. Each call reads the volumes
 and runs every plan whose newest sample is older than its cadence, one plan at
 a time, in the order above, on the plugin's own scan queue. The scheduler
 restarts background timers two minutes after the Mac wakes, so a scan never
-lands on the login moment. Screen unlock is not a trigger: a wake plus the
+lands on the login moment. That restart also gives an extra background tick
+about two minutes after each wake, which is harmless and wanted: each tick is
+only a due check, so it runs a plan only if one is due. Screen unlock is not a trigger: a wake plus the
 15-minute cadence covers the morning, and an unlock without a sleep is not a
 moment worth scanning at (agreed with the CPU pane, 2026-10-10). The panel's
 button runs every plan now. A scan under way when the popover closes finishes.
@@ -122,9 +124,9 @@ started. Adam, 2026-10-10.
 │ [Snapshots 0]                │                  [24h | 7d]      │
 │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░  bar   │ Simulators · 130 devices  257 GB │
 │ Used  Free                   │ ████████████████  measured 2h ago│
-│                              │ Application Support       85 GB  │
+│                              │ Application Support (rest) 85 GB │
 │ Where the space is           │ ██████                  5h ago   │
-│ ▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒░░░░░  bar    │ proj                      84 GB  │
+│ ▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒░░░░░  bar    │ proj (rest)                84 GB │
 │ Simulators        257 GB     │ ██████                  2h ago   │
 │ App Support        85 GB     │ ...                              │
 │ Projects           84 GB     │                                  │
@@ -149,14 +151,19 @@ gone is shown as freed. Movers lists simulator devices individually, while
 Biggest shows them as one group. Every row shows name, path, a bar
 relative to the top row, and the age of its measurement. The simulator group
 shows as one row with a device count, expandable to one row per device with
-runtime and last boot. The footer shows each plan's newest sample age, scan
-progress while running, and the rescan button.
+runtime and last boot; the group row is a button whose chevron turns when it is
+open. The footer shows one line beside the rescan button: a problem first if
+there is one (a settings value the tab could not use, then a failed save, then
+a ledger moved aside), otherwise scan progress while a plan runs, otherwise each
+plan's newest sample age.
 
 **Double counting.** Library contains Developer, which contains CoreSimulator.
 The list shows the deepest measured level only. A parent appears as its own
 row only for the part its measured children do not explain, labelled
 "Library (rest)", and only when that remainder ranks among the 25 rows the
-list shows.
+list shows. A folder that is both measured and a root of a deeper plan, such as
+Application Support or proj, shows as its "(rest)" row plus its measured
+children.
 
 ### D6: Does the SDK change?
 

@@ -530,3 +530,11 @@ leaving a working, buildable, tested app:
   runs `collect()` from its own queue on a thermal-state change, so the
   "never concurrently with itself" promise is one it waives for itself —
   Claude, from the Stage 2 plan, for Adam to confirm.
+- 2026-10-10 — Per-plugin `settings` (passed through plugins.json untouched,
+  checked only to be an object) and `HostServices.dataDirectory` (one folder
+  per identifier under Application Support/SystemBar/PluginData, root
+  overridable) join the SDK; the catalog builds one `HostServices` per plugin.
+  Spec: systembar-ifd. — Adam.
+- 2026-10-10 — The Disk tab is the first plugin to declare `backgroundInterval`
+  (900 s) and the first to keep state between launches; it saves a size ledger
+  in its `dataDirectory`. — Adam.
