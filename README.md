@@ -39,7 +39,7 @@ A `"path"` entry points at a bundle anywhere on disk (absolute, or starting with
 
 An entry the app cannot load, say a misspelt name, still gets a tab: it is titled Error and shows the entry, what went wrong, and where the file is, so a typo is never silent. A file that cannot be read or parsed at all gives one Error tab and nothing else. A key the app does not know, or a value of the wrong type, is reported with its place in the file. Two things the parser cannot catch: a trailing comma is accepted, and if a key appears twice the first one wins.
 
-`./SystemBar.app/Contents/MacOS/SystemBar --list-plugins` prints the same outcome to the terminal, one line per enabled entry, and exits without opening a window (on a fresh machine it creates the file, just like a normal launch). It always exits 0, even when a line reports an error, so a script has to look at the text of each line rather than the exit code; a line for a failed entry starts with `error`, and the location it shows for a `name` entry is the name as written in `plugins.json` (say `Power.bundle`), not a resolved path. `SYSTEMBAR_PLUGINS_FILE=/some/other.json` points one run at a different file.
+`./SystemBar.app/Contents/MacOS/SystemBar --list-plugins` prints the same outcome to the terminal, one line per enabled entry, and exits without opening a window (on a fresh machine it creates the file, just like a normal launch). It always exits 0, even when a line reports an error, so a script has to look at the text of each line rather than the exit code; a line for a failed entry starts with `error`, and the location it shows for a `name` entry is the name as written in `plugins.json` (say `Power.bundle`), not a resolved path. A plugin that samples while hidden has `background every <n>s` at the end of its line. `SYSTEMBAR_PLUGINS_FILE=/some/other.json` points one run at a different file.
 
 Relaunch restarts the app in place: when SystemBar was installed as a login item it asks launchd to restart it, and otherwise it starts a fresh copy and quits. If a relaunch fails, the reason goes to the system log.
 
@@ -62,7 +62,7 @@ A plugin says in `sharedFeeds` which of the host's two shared readings it uses, 
 | `.fastStats` | CPU percent and network rates, with 90 seconds of history | Every second while the window is open, whatever the tab, so the history has no gaps |
 | `.processes` | The top processes by CPU and by memory | Every 10 seconds, only while a tab that declares it is showing |
 
-Nothing is sampled while the window is closed.
+Nothing is sampled while the window is closed, unless a plugin declares a `backgroundInterval`: then the app keeps calling that plugin's `collect()` at that cadence while its tab is hidden, on the plugin's own queue, with a floor of 5 seconds. The first such call after the Mac wakes waits two minutes, so nothing lands on the login moment. The shared feeds run for the open window and its showing tab, never for a hidden one, so a background `collect()` samples for itself. The table below says which tabs sample while hidden; `--list-plugins` reports it too, as `background every <n>s` on that plugin's line.
 
 To test a plugin that follows a feed, make the feed with `Feed.forTesting(initial:)`. It returns a new feed and a closure that writes to that feed alone, the way the host writes its own; a plugin cannot write the host's feeds, so this is the only writer it gets. Hand the feed to a `HostServices` you build yourself, push a reading, and let the main run loop turn once, because a feed delivers on the main thread:
 
@@ -88,6 +88,8 @@ To test a plugin that follows a feed, make the feed with `Feed.forTesting(initia
 ```
 
 A plugin's `refreshInterval` is clamped to between 0.25 seconds and one day: NaN, zero, and negative values become 0.25 seconds, and infinity or anything larger becomes one day, with each substitution logged. Build your plugin with the same Xcode as the app, or a newer one — the SDK interface names types from that Xcode's SwiftUI, so an older Xcode cannot read it.
+
+A plugin that needs to keep sampling while its tab is hidden declares `backgroundInterval` (nil by default). The app then calls its `collect()` at that cadence, clamped to between 5 seconds and one day, while the window is closed or another tab is showing, and restarts the cadence with a call two minutes after every wake of the Mac or its screen, so no call lands on the login moment. That restart means a long interval still gets a call soon after each wake: keep one call cheap, and keep any slower cadence (a scan every few hours, say) in your own bookkeeping, checked on each call, as the Disk tab does. It is the same `collect()`; a plugin that wants to do less while hidden keeps a flag from `visibilityChanged(isVisible:)`. Shared feeds do not run for a hidden tab, so a background `collect()` samples for itself. Say in your plugin's README what it runs while hidden and how often; the app reports the cadence in `--list-plugins`.
 
 The SDK's documentation is the doc comments in `Sources/Kit/`. The app ships them beside the interface, as `Contents/Resources/SDK/SystemBarKit.swiftdoc`, so tools that read a module's documentation through the compiler, such as `swift-symbolgraph-extract` (and so DocC), show them for a plugin built against the app. The `.swiftinterface` file itself holds only signatures; the comments themselves are in the repository under `Sources/Kit/`.
 
@@ -141,7 +143,7 @@ To uninstall:
 
 It's a system monitor, so it looks at your processes, disks, and network connections. Here is the complete list of what it runs and why — worth reading before you trust any tool like this.
 
-Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU, memory, and interface counters, SystemBar shells out to these stock macOS utilities. Every command below starts only while the window is open, and only while the tab that needs it is showing (a `du` scan or speed test already under way finishes even if you switch away).
+Alongside direct kernel calls (`host_statistics`, `sysctl`, and friends) for CPU, memory, and interface counters, SystemBar shells out to these stock macOS utilities. Every command below starts only while the tab that needs it is showing (a `du` scan or speed test already under way finishes even if you switch away), except where the "While hidden" column of the table further down says a tab keeps sampling with the window closed.
 
 | Command | Used for | How often |
 |---|---|---|
@@ -167,14 +169,14 @@ SystemBar runs entirely as your user. It never asks for `sudo` or elevated privi
 
 Each interval lives in that tab's plugin, next to the code that uses it.
 
-| Tab | Its own sampling | Where the number lives |
-|---|---|---|
-| Power | `pmset` every 60s | `PowerPlugin.refreshInterval` |
-| Dev | `ps`, `lsof`, `pmset` and two usage reads a second apart, every 60s | `DevSampling` in `Plugins/Dev/Sources/CapacityModels.swift` |
-| Memory | Kernel counters and pressure level every 3s; `ioreg` every 30s | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
-| Disk | Volumes and `tmutil` every 30s; the `du` scan every 10 min or on demand | `DiskSampling` in `Plugins/Disk/Sources/DiskModels.swift` |
-| Network | `nettop` and `lsof` every 30s; `networkQuality` only on the button | `NetworkSampling` in `Plugins/Network/Sources/NetworkModels.swift` |
-| CPU | Nothing of its own: everything it shows comes from the two shared feeds | `CPUPlugin.refreshInterval` (one day, so its empty collect almost never runs) |
+| Tab | Its own sampling | While hidden | Where the number lives |
+|---|---|---|---|
+| Power | `pmset` every 60s | — | `PowerPlugin.refreshInterval` |
+| Dev | `ps`, `lsof`, `pmset` and two usage reads a second apart, every 60s | — | `DevSampling` in `Plugins/Dev/Sources/CapacityModels.swift` |
+| Memory | Kernel counters and pressure level every 3s; `ioreg` every 30s | — | `MemorySampling` in `Plugins/Memory/Sources/MemoryModels.swift` |
+| Disk | Volumes and `tmutil` every 30s; the `du` scan every 10 min or on demand | — | `DiskSampling` in `Plugins/Disk/Sources/DiskModels.swift` |
+| Network | `nettop` and `lsof` every 30s; `networkQuality` only on the button | — | `NetworkSampling` in `Plugins/Network/Sources/NetworkModels.swift` |
+| CPU | Nothing of its own: everything it shows comes from the two shared feeds | — | `CPUPlugin.refreshInterval` (one day, so its empty collect almost never runs) |
 
 The shared feeds' intervals are `HostSamplers.fastInterval` and `HostSamplers.processInterval` in `Sources/Host/HostSamplers.swift`.
 

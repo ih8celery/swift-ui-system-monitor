@@ -52,6 +52,49 @@ final class FakeTab: TabPlugin {
     @MainActor func makeView() -> AnyView { AnyView(Text("fake")) }
 }
 
+/// A tab that counts its collects and declares whatever intervals a test gives it, so a test can
+/// watch the scheduler's fast and slow cadences, and whether the two ever overlap. `work` is how
+/// long each collect sleeps, for the tests that need one still running when the timers swap.
+final class BackgroundTab: TabPlugin {
+    static let identifier = "background"
+    let title = "Background"
+    let systemImage = "moon"
+    let accent = Color.gray
+    let refreshInterval: TimeInterval
+    let backgroundInterval: TimeInterval?
+    let sharedFeeds: Set<SharedFeed> = []
+    private let work: TimeInterval
+    private let lock = NSLock()
+    private var inFlight = false
+    private var collects = 0
+    private var didOverlap = false
+
+    convenience init(host: HostServices) {
+        self.init(refresh: 5, background: 60)
+    }
+
+    init(refresh: TimeInterval, background: TimeInterval?, work: TimeInterval = 0) {
+        refreshInterval = refresh
+        backgroundInterval = background
+        self.work = work
+    }
+
+    func collect() {
+        lock.withLock {
+            if inFlight { didOverlap = true }
+            inFlight = true
+            collects += 1
+        }
+        if work > 0 { Thread.sleep(forTimeInterval: work) }
+        lock.withLock { inFlight = false }
+    }
+
+    @MainActor func makeView() -> AnyView { AnyView(Text("background")) }
+
+    var count: Int { lock.withLock { collects } }
+    var overlapped: Bool { lock.withLock { didOverlap } }
+}
+
 /// Spins the run loop until `condition` holds or `timeout` elapses, so a test waits only as
 /// long as the machine actually needs rather than a fixed guess that either flakes under load
 /// or wastes time when the machine is fast.

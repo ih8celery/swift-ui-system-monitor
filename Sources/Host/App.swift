@@ -21,8 +21,9 @@ struct SystemBarApp: App {
             runner: ProcessRunner.run,
             log: { NSLog("%@", $0) }
         )
+        let scheduler = PluginScheduler()
         presenter = TabPresenter(
-            scheduler: PluginScheduler(),
+            scheduler: scheduler,
             samplers: HostSamplers.standard(processes: processes, fastStats: fastStats)
         )
         let source = BundleTabSource.standard()
@@ -36,6 +37,9 @@ struct SystemBarApp: App {
             PluginListReport.lines(for: loaded).forEach { print($0) }
             exit(0)
         }
+
+        // A plugin that declared a backgroundInterval starts sampling now, window or no window.
+        scheduler.start(loaded.compactMap(\.plugin))
     }
 
     var body: some Scene {

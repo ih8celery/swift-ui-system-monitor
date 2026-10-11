@@ -19,6 +19,7 @@ struct SystemBarLoaderTests {
         testCatalogLogsNothingForAFastInit()
         testCatalogGivesEachPluginItsOwnSettingsAndDataFolder()
         testListReportPrintsOneLinePerEntry()
+        testListReportSaysWhichPluginsSampleInTheBackground()
         testDefaultListNamesSixBundles()
         testPluginPathResolvesNamesInsideThePlugInsFolder()
         testPluginPathRejectsNamesThatLeaveTheFolder()
@@ -176,6 +177,22 @@ struct SystemBarLoaderTests {
         let tabs = TabCatalog.build(config: config, source: fakeSource, host: makeHost())
         expect(PluginListReport.lines(for: tabs) == ["ok fake Fake fake-first", "error nope: no tab for nope"],
                "--list-plugins prints ok/error lines in order, got \(PluginListReport.lines(for: tabs))")
+    }
+
+    private static func testListReportSaysWhichPluginsSampleInTheBackground() {
+        let tabs: [LoadedTab] = [
+            .loaded(location: "quiet", plugin: BackgroundTab(refresh: 5, background: nil)),
+            .loaded(location: "minute", plugin: BackgroundTab(refresh: 5, background: 60)),
+            .loaded(location: "eager", plugin: BackgroundTab(refresh: 5, background: 1)),
+            .loaded(location: "half", plugin: BackgroundTab(refresh: 5, background: 7.5)),
+        ]
+        let lines = PluginListReport.lines(for: tabs)
+        expect(lines == [
+            "ok background Background quiet",
+            "ok background Background minute background every 60s",
+            "ok background Background eager background every 5s",
+            "ok background Background half background every 7.5s",
+        ], "--list-plugins appends the clamped background cadence to a declaring plugin's line, got \(lines)")
     }
 
     // MARK: - Default list
