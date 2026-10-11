@@ -309,33 +309,42 @@ struct SystemBarSchedulerTests {
         spinRunLoop(for: 0.15)
         // One tick may have been dispatched before the restart cancelled the old timer.
         expect(plugin.count <= atWake + 1, "after a wake, no background tick runs until the settle passes, got \(plugin.count - atWake) in half the settle")
-        waitUntil(2) { plugin.count > atWake }
-        expect(plugin.count > atWake, "after the settle, the background cadence resumes")
+        let midSettle = plugin.count
+        waitUntil(2) { plugin.count > midSettle }
+        expect(plugin.count > midSettle, "after the settle, the background cadence resumes")
 
         // The screens waking is the other signal the real app hears.
-        let beforeScreens = plugin.count
         center.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        spinRunLoop(for: 0.02)
+        let beforeScreens = plugin.count
         spinRunLoop(for: 0.15)
         expect(plugin.count <= beforeScreens + 1, "screensDidWake also restarts the timer with a settle, got \(plugin.count - beforeScreens) ticks in half the settle")
+        withExtendedLifetime(scheduler) {}
     }
 
     private static func testSchedulerLeavesTheShownTabAloneAfterAWake() {
         let center = NotificationCenter()
-        let plugin = BackgroundTab(refresh: 0.02, background: 0.05)
+        let shownTab = BackgroundTab(refresh: 0.02, background: 0.05)
+        let hiddenTab = BackgroundTab(refresh: 0.02, background: 0.05)
+        // A settle longer than any wait below: if the wake wrongly touched the shown tab, its
+        // fast ticks would stop for the rest of the test.
         let scheduler = PluginScheduler(
             minimumRefreshInterval: 0.01,
             minimumBackgroundInterval: 0.01,
-            settleAfterWake: 0.3,
+            settleAfterWake: 5,
             wakeNotifications: center,
             log: { _ in }
         )
-        scheduler.start([plugin])
-        scheduler.show(plugin)
-        waitUntil { plugin.count >= 2 }
+        scheduler.start([shownTab, hiddenTab])
+        scheduler.show(shownTab)
+        waitUntil { shownTab.count >= 2 && hiddenTab.count >= 2 }
         center.post(name: NSWorkspace.didWakeNotification, object: nil)
-        let atWake = plugin.count
-        waitUntil { plugin.count >= atWake + 3 }
-        expect(plugin.count >= atWake + 3, "a wake does not touch the shown tab's fast timer, got \(plugin.count - atWake) ticks")
+        spinRunLoop(for: 0.02)
+        let shownAtWake = shownTab.count
+        let hiddenAtWake = hiddenTab.count
+        waitUntil { shownTab.count >= shownAtWake + 3 }
+        expect(shownTab.count >= shownAtWake + 3, "a wake does not touch the shown tab's fast timer, got \(shownTab.count - shownAtWake) ticks")
+        expect(hiddenTab.count <= hiddenAtWake + 1, "the same wake did settle the hidden tab, got \(hiddenTab.count - hiddenAtWake) ticks")
         scheduler.hide()
     }
 
