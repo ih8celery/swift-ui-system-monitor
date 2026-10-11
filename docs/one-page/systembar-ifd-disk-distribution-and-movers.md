@@ -68,10 +68,11 @@ a time, in the order above, on the plugin's own scan queue. The scheduler
 restarts background timers two minutes after the Mac wakes, so a scan never
 lands on the login moment. That restart also gives an extra background tick
 about two minutes after each wake, which is harmless and wanted: each tick is
-only a due check, so it runs a plan only if one is due. Screen unlock is not a trigger: a wake plus the
-15-minute cadence covers the morning, and an unlock without a sleep is not a
-moment worth scanning at (agreed with the CPU pane, 2026-10-10). The panel's
-button runs every plan now. A scan under way when the popover closes finishes.
+only a due check, so it runs a plan only if one is due. Screen unlock is not a
+trigger: a wake plus the 15-minute cadence covers the morning, and an unlock
+without a sleep is not a moment worth scanning at (agreed with the CPU pane,
+2026-10-10). The panel's button runs every plan now. A scan under way when the
+popover closes finishes.
 
 ### D3: How far does the scan reach?
 

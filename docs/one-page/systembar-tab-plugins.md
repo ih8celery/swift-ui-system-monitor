@@ -534,7 +534,7 @@ leaving a working, buildable, tested app:
   checked only to be an object) and `HostServices.dataDirectory` (one folder
   per identifier under Application Support/SystemBar/PluginData, root
   overridable) join the SDK; the catalog builds one `HostServices` per plugin.
-  Spec: systembar-ifd. — Adam.
+  Spec: systembar-ifd — Adam.
 - 2026-10-10 — The Disk tab is the first plugin to declare `backgroundInterval`
   (900 s) and the first to keep state between launches; it saves a size ledger
-  in its `dataDirectory`. — Adam.
+  in its `dataDirectory` — Adam.
