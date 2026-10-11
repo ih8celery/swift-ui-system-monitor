@@ -21,6 +21,7 @@ struct SystemBarSchedulerTests {
         testSchedulerSwapsToTheFastTimerWhenShownAndBackWhenHidden()
         testSchedulerReturnsAReplacedTabToItsBackgroundCadence()
         testSchedulerNeverOverlapsABackgroundCollectWithTheFirstForegroundTick()
+        testSchedulerClampsABadBackgroundInterval()
         testSamplersWantNothingWhileTheWindowIsClosed()
         testSamplersRunNothingWhileTheWindowIsClosed()
         testSamplersRunTheFastSamplerForEveryVisibleTab()
@@ -258,6 +259,34 @@ struct SystemBarSchedulerTests {
         spinRunLoop(for: 0.3)
         expect(!plugin.overlapped, "a background collect still running when the tab is shown must finish before the first foreground tick")
         scheduler.hide()
+    }
+
+    private static func testSchedulerClampsABadBackgroundInterval() {
+        let log = LogRecorder()
+        let scheduler = PluginScheduler(wakeNotifications: NotificationCenter(), log: { log.record($0) })
+        for tooShort in [0, -1, .nan, 1, 4.9] as [TimeInterval] {
+            let before = log.count
+            let effective = scheduler.effectiveBackgroundInterval(tooShort, identifier: "test")
+            expect(effective == PluginScheduler.minimumBackgroundInterval,
+                   "a backgroundInterval of \(tooShort) must be clamped to 5 seconds, got \(effective)")
+            expect(log.count == before + 1, "clamping a backgroundInterval of \(tooShort) must log exactly once, got \(log.count - before) messages")
+            expect((log.messages.last ?? "").contains("backgroundInterval"), "the clamp log names backgroundInterval, got: \(log.messages.last ?? "")")
+        }
+        for tooLong in [.infinity, 1e12, 86_401] as [TimeInterval] {
+            let effective = scheduler.effectiveBackgroundInterval(tooLong, identifier: "test")
+            expect(effective == PluginScheduler.maximumRefreshInterval,
+                   "a backgroundInterval of \(tooLong) must be clamped to one day, got \(effective)")
+        }
+        for ok in [5, 60, 900, 86_400] as [TimeInterval] {
+            let before = log.count
+            let effective = scheduler.effectiveBackgroundInterval(ok, identifier: "test")
+            expect(effective == ok, "a sane backgroundInterval of \(ok) must pass through unchanged")
+            expect(log.count == before, "a sane backgroundInterval of \(ok) must not log, got \(log.count - before) messages")
+        }
+        expect(PluginScheduler.reportedBackgroundInterval(1) == 5, "the reported cadence is the clamped one, got \(PluginScheduler.reportedBackgroundInterval(1))")
+        expect(PluginScheduler.reportedBackgroundInterval(60) == 60, "a sane cadence is reported as declared")
+        expect(PluginScheduler.minimumBackgroundInterval == 5, "the background floor the README documents is 5 seconds")
+        expect(PluginScheduler.backgroundSettleAfterWake == 120, "the settle the README documents is 120 seconds")
     }
 
     // MARK: - Host samplers
