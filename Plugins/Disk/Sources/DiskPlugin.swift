@@ -42,6 +42,10 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     /// When each plan last started a run, measured or not. Touched only on `scanQueue`; lost at
     /// relaunch, which costs at most one extra attempt per plan per launch.
     private var lastAttempt: [DiskPlanKind: Date] = [:]
+    /// Each plan's last incomplete outcome, worded for the footer; a complete run removes its
+    /// entry. Kept per plan so a later clean plan does not hide an earlier plan's gaps. Touched
+    /// only on `scanQueue`.
+    private var scanWarnings: [DiskPlanKind: String] = [:]
     /// A rescan is queued or running, so another click adds nothing. Set by the caller and
     /// cleared on `scanQueue`, so it sits behind a lock rather than on one queue.
     private let forcedRunLock = NSLock()
@@ -141,7 +145,10 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
             }
             ledger = ledger.appending(fresh).compacted(now: now())
             save()
-            publish { $0.scanning(false, status: "\(plan.kind.title): \(outcome.status)") }
+            let summary = "\(plan.kind.title): \(outcome.status)"
+            scanWarnings[plan.kind] = outcome.isComplete ? nil : summary
+            let warning = DiskPlanKind.allCases.compactMap { scanWarnings[$0] }.joined(separator: " · ")
+            publish { $0.scanning(false, status: summary).warning(warning.isEmpty ? nil : warning) }
             publishLedger()
         }
     }

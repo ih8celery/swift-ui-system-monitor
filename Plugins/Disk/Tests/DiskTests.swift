@@ -15,6 +15,7 @@ enum DiskTests {
         testBackgroundScansSettingDefaultsOnAndReportsAWrongType()
         testPluginDeclaresABackgroundIntervalUnlessTurnedOff()
         testCollectRunsDuePlansOnceAndSavesTheLedger()
+        testAnIncompleteScanLeavesAWarningForTheFooter()
         testAPlanThatMeasuredNothingWaitsItsCadence()
         testRepeatedRescanClicksQueueOneRun()
         testSaveProblemClearsAndLeavesTheLedgerNote()
@@ -115,7 +116,7 @@ enum DiskTests {
     }
 
     /// A plugin over a fake tree: home has two folders, one plan measures them.
-    private static func makePlugin(dataDirectory: URL, recorder: LogRecorder, extraAnswers: [String: String] = [:]) -> DiskPlugin {
+    private static func makePlugin(dataDirectory: URL, recorder: LogRecorder, extraAnswers: [String: String] = [:], children: [String] = ["big", "small"]) -> DiskPlugin {
         var answers = [
             "/usr/bin/tmutil listlocalsnapshots /": "Snapshots for disk /:\ncom.apple.TimeMachine.1.local\n",
             "/usr/bin/du -s -k -x \(home)/big": "100\t\(home)/big\n",
@@ -127,7 +128,7 @@ enum DiskTests {
             host: makeHost(runner: recordingRunner(recorder, answers: answers), dataDirectory: dataDirectory),
             plans: [plan],
             now: { Date() },
-            listChildren: { parent in parent == home ? ["\(home)/big", "\(home)/small"] : [] }
+            listChildren: { parent in parent == home ? children.map { "\(home)/\($0)" } : [] }
         )
     }
 
@@ -144,6 +145,7 @@ enum DiskTests {
         expect(plugin.snapshot.biggest.map(\.name) == ["big", "small"], "a fresh plugin's first collect finds the plan due, measures, and publishes rows, got \(plugin.snapshot.biggest.map(\.name))")
         expect(plugin.snapshot.biggest.first?.bytes == 100 * 1024, "in bytes")
         expect(plugin.snapshot.scanStatus == "Overview: Measured 2 paths", "the footer says what the scan did, got \(plugin.snapshot.scanStatus)")
+        expect(plugin.snapshot.scanWarning == nil, "a scan that measured everything leaves no warning, got \(String(describing: plugin.snapshot.scanWarning))")
         expect(duCount() == 2, "one du per folder, got \(recorder.messages)")
         expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("disk-ledger.json").path), "the ledger is saved in the plugin's data folder")
         expect(recorder.messages.allSatisfy { $0.hasPrefix("/usr/bin/tmutil ") || $0.hasPrefix("/usr/bin/du -s -k -x ") }, "every command goes through the host by explicit path, got \(recorder.messages)")
@@ -155,6 +157,18 @@ enum DiskTests {
         plugin.requestScan(force: true)
         waitUntil(5) { duCount() == 4 }
         expect(duCount() == 4, "the rescan button forces every plan, got \(duCount())")
+    }
+
+    private static func testAnIncompleteScanLeavesAWarningForTheFooter() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // "denied" has no answer, so its du fails without timing out: an unreadable row.
+        let plugin = makePlugin(dataDirectory: directory, recorder: LogRecorder(), children: ["big", "denied"])
+        plugin.collect()
+        plugin.drainScanQueue()
+        waitUntil(5) { plugin.snapshot.scanWarning != nil && !plugin.snapshot.isScanning }
+        let warning = plugin.snapshot.scanWarning ?? ""
+        expect(warning.hasPrefix("Overview: ") && warning.contains("1 unreadable"), "the last incomplete scan's summary stays for the footer, got \(warning)")
     }
 
     private static func testAPlanThatMeasuredNothingWaitsItsCadence() {

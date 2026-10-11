@@ -154,8 +154,9 @@ shows as one row with a device count, expandable to one row per device with
 runtime and last boot; the group row is a button whose chevron turns when it is
 open. The footer shows one line beside the rescan button: a problem first if
 there is one (a settings value the tab could not use, then a failed save, then
-a ledger moved aside), otherwise scan progress while a plan runs, otherwise each
-plan's newest sample age.
+a ledger moved aside), otherwise scan progress while a plan runs, otherwise the
+summary of the last scan that did not measure everything, otherwise each plan's
+newest sample age.
 
 **Double counting.** Library contains Developer, which contains CoreSimulator.
 The list shows the deepest measured level only. A parent appears as its own

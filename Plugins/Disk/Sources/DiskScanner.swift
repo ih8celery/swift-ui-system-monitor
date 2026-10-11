@@ -9,6 +9,9 @@ struct DiskScanOutcome: Equatable {
     var unreadable = 0
     var unmeasured = 0
 
+    /// Every target was measured: nothing timed out, was refused, or was left by the budget.
+    var isComplete: Bool { timedOut == 0 && unreadable == 0 && unmeasured == 0 }
+
     var status: String {
         var parts = ["Measured \(measured) path\(measured == 1 ? "" : "s")"]
         if timedOut > 0 { parts.append("\(timedOut) too slow to finish") }

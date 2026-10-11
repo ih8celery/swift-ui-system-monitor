@@ -43,6 +43,9 @@ struct DiskSnapshot {
     var ledgerNote: String?
     /// The last save failed, worded for the footer; cleared by the next save that succeeds.
     var saveProblem: String?
+    /// The last plan runs that did not measure everything, worded for the footer; nil when the
+    /// last run of every plan measured every target.
+    var scanWarning: String?
     /// A settings value the plugin could not use, worded for the footer.
     var settingsProblem: String?
 
@@ -96,6 +99,13 @@ struct DiskSnapshot {
     func savingProblem(_ problem: String?) -> DiskSnapshot {
         var next = self
         next.saveProblem = problem
+        return next
+    }
+
+    /// A copy with the incomplete-scan summary applied, or nil once every plan measured everything.
+    func warning(_ text: String?) -> DiskSnapshot {
+        var next = self
+        next.scanWarning = text
         return next
     }
 }
