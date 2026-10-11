@@ -22,6 +22,9 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     /// while the tab shows.
     public let backgroundInterval: TimeInterval?
 
+    /// For the panel, which shortens paths under home to `~/...`.
+    var homeDirectory: String { host.homeDirectory }
+
     static let backgroundScansKey = "backgroundScans"
 
     @Published private(set) var snapshot = DiskSnapshot()
@@ -103,6 +106,7 @@ public final class DiskPlugin: NSObject, TabPlugin, ObservableObject {
     /// For tests: returns once everything queued on the scan queue so far has finished, so a
     /// test can check that something did not happen without guessing how long to wait.
     func drainScanQueue() {
+        dispatchPrecondition(condition: .notOnQueue(scanQueue))
         scanQueue.sync {}
     }
 
