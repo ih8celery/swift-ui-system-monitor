@@ -8,6 +8,7 @@ struct SystemBarConfigTests {
     static func runAll() {
         testPluginIsConstructedThroughItsMetatype()
         testHostServicesForwardsToTheRunner()
+        testPluginSettingsReadsTypedValuesAndTellsAbsentFromWrongType()
         testRunnerPassesAnExplicitEnvironment()
         testRunnerInheritsTheEnvironmentByDefault()
         testParserReadsEveryEntryShape()
@@ -53,6 +54,21 @@ struct SystemBarConfigTests {
         _ = plugin.makeView()
         plugin.visibilityChanged(isVisible: true)
         // FakeTab does not write visibilityChanged; compiling it proves the default exists.
+    }
+
+    private static func testPluginSettingsReadsTypedValuesAndTellsAbsentFromWrongType() {
+        let settings = PluginSettings(values: [
+            "backgroundScans": .bool(false),
+            "limit": .number(25),
+            "label": .string("x"),
+            "oops": .string("true"),
+        ])
+        expect(settings.bool(forKey: "backgroundScans") == false, "a boolean reads back as a boolean")
+        expect(settings.number(forKey: "limit") == 25, "a number reads back as a double")
+        expect(settings.string(forKey: "label") == "x", "a string reads back as a string")
+        expect(settings.bool(forKey: "missing") == nil && settings["missing"] == nil, "an absent key is nil both ways")
+        expect(settings.bool(forKey: "oops") == nil && settings["oops"] == .string("true"), "a wrong-typed key is nil as a bool but present raw, so a plugin can report it")
+        expect(PluginSettings.empty.values.isEmpty, "empty has no keys")
     }
 
     private static func testHostServicesForwardsToTheRunner() {
