@@ -66,6 +66,25 @@ if [[ "$actual" != "$expected" ]]; then
 fi
 echo "Boundary check passed: a bundle built against the shipped SDK loads through the real loader"
 
+# The preview: one bundle outside the menu bar, from the built app, with fake answers, never
+# reading or writing plugins.json.
+cat > "$tmp/replies.json" <<'JSON'
+{ "replies": [ { "path": "/bin/date", "arguments": ["+%H:%M:%S"], "output": "12:34:56\n" } ] }
+JSON
+SYSTEMBAR_PLUGINS_FILE="$tmp/untouched/plugins.json" ./SystemBar.app/Contents/MacOS/SystemBar \
+  --preview "$tmp/HelloTab.bundle" --png "$tmp/hello.png" --replies "$tmp/replies.json" \
+  || { echo "Preview check failed: --preview --png exited $?" >&2; exit 1; }
+[[ -s "$tmp/hello.png" ]] || { echo "Preview check failed: no picture at $tmp/hello.png" >&2; exit 1; }
+[[ ! -e "$tmp/untouched/plugins.json" ]] || { echo "Preview check failed: the preview wrote plugins.json" >&2; exit 1; }
+
+missing_out=$(./SystemBar.app/Contents/MacOS/SystemBar --preview "$tmp/Missing.bundle" --png "$tmp/missing.png" 2>&1) \
+  && missing_status=0 || missing_status=$?
+if (( missing_status != 1 )) || [[ "$missing_out" != "error $tmp/Missing.bundle: nothing at $tmp/Missing.bundle" ]]; then
+  echo "Preview check failed: a missing bundle should exit 1 with the loader's line; got $missing_status: $missing_out" >&2
+  exit 1
+fi
+echo "Preview check passed: a bundle previews to a picture from the built app, and a missing one says why"
+
 # An outside project runs the copy of build-plugin.sh inside an installed app, from its own
 # directory, with no SDK argument; the script must find the app it sits in. The copy of the app
 # has no SystemBar.app beside the script, so only the enclosing-app default can succeed.

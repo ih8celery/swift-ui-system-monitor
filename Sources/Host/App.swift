@@ -4,7 +4,7 @@ import SwiftUI
 import SystemBarKit
 
 #if !TESTING
-@main
+/// Started by `SystemBarMain` when the command line is not a preview.
 struct SystemBarApp: App {
     private let tabs: [LoadedTab]
     private let configPath: String
