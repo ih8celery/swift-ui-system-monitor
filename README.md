@@ -109,6 +109,32 @@ A bundle runs inside the app with its privileges. Nothing checks or sandboxes it
 
 See `docs/one-page/systembar-tab-plugins.md` for the full contract.
 
+### Previewing a plugin without installing it
+
+`SystemBar --preview` shows one plugin outside the menu bar, through the same loader, without
+reading or writing `plugins.json`:
+
+```
+SystemBar.app/Contents/MacOS/SystemBar --preview MyTab.bundle --png my-tab.png
+SystemBar.app/Contents/MacOS/SystemBar --preview MyTab.bundle --window
+```
+
+`--png` tells the plugin it is showing, runs `collect()` once, waits for its update, saves a
+picture (900×680 points at 2×, or `--size WxH`) and exits. `--window` opens the tab in a
+window and refreshes it on its own timer until you close it. `--settings file.json` hands the
+plugin the same object a `"settings"` entry would. `--replies file.json` answers the plugin's
+commands from a file instead of running them:
+
+```json
+{ "replies": [ { "path": "/bin/date", "arguments": ["+%H:%M:%S"], "output": "12:34:56\n" } ] }
+```
+
+A reply matches on the exact path and arguments; `error` and `status` are optional. A command
+with no reply exits 127 with `no canned reply for <command>`. The plugin's data folder is a
+fresh temporary one. Exit codes: 0 done, 1 the bundle did not load or could not be drawn (the
+same line `--list-plugins` prints), 2 a wrong argument or file. Pictures are for looking at,
+not for comparing pixel by pixel: fonts change with macOS.
+
 ## Requirements
 
 - **macOS 14 (Sonoma) or later** — the SDK's stable interface records that target, and the code already used a macOS 14 API
