@@ -21,6 +21,13 @@ struct SystemBarPreviewTests {
         testRepliesFileRejectsAReplyWithoutPath()
         testCannedRunnerAnswersAnExactMatch()
         testCannedRunnerRefusesAnythingElseWith127()
+        testOptionsReadAPictureRunWithEveryFlag()
+        testOptionsReadAWindowRunWithTheDefaultSize()
+        testOptionsRefuseAMissingBundle()
+        testOptionsRefuseNeitherOrBothOutputs()
+        testOptionsRefuseAnUnknownFlag()
+        testOptionsRefuseAFlagWithoutItsValue()
+        testOptionsRefuseABadSize()
     }
 
     // MARK: - Settings file
@@ -124,5 +131,67 @@ struct SystemBarPreviewTests {
         let reply = runner("/bin/date", ["+%M"], nil, 5)
         expect(reply.status == CannedReplies.missingStatus, "no match exits 127, got \(reply.status)")
         expect(reply.error == "no canned reply for /bin/date +%M", "no match says which command: \(reply.error)")
+    }
+
+    // MARK: - Command line
+
+    static func options(_ words: [String]) -> Result<PreviewOptions, PreviewInputError> {
+        PreviewOptions.parse([PreviewOptions.flag] + words, currentDirectory: "/work")
+    }
+
+    static func testOptionsReadAPictureRunWithEveryFlag() {
+        let result = options(["Tab.bundle", "--png", "out/tab.png", "--replies", "/r.json",
+                              "--settings", "s.json", "--size", "400x300"])
+        guard case .success(let parsed) = result else { return expect(false, "a full picture run should parse: \(result)") }
+        expect(parsed == PreviewOptions(
+            bundlePath: "/work/Tab.bundle",
+            output: .png(URL(fileURLWithPath: "/work/out/tab.png")),
+            repliesURL: URL(fileURLWithPath: "/r.json"),
+            settingsURL: URL(fileURLWithPath: "/work/s.json"),
+            size: CGSize(width: 400, height: 300)
+        ), "relative paths resolve against the current folder: \(parsed)")
+    }
+
+    static func testOptionsReadAWindowRunWithTheDefaultSize() {
+        guard case .success(let parsed) = options(["/b/Tab.bundle", "--window"]) else {
+            return expect(false, "a window run should parse")
+        }
+        expect(parsed.output == .window && parsed.size == PreviewOptions.defaultSize
+               && parsed.repliesURL == nil && parsed.settingsURL == nil,
+               "a window run has the default size and no files: \(parsed)")
+    }
+
+    static func testOptionsRefuseAMissingBundle() {
+        guard case .failure(let error) = options(["--window"]) else { return expect(false, "no bundle should be refused") }
+        expect(error.description.contains("bundle"), "the error asks for the bundle: \(error.description)")
+    }
+
+    static func testOptionsRefuseNeitherOrBothOutputs() {
+        guard case .failure = options(["Tab.bundle"]) else { return expect(false, "no output should be refused") }
+        guard case .failure = options(["Tab.bundle", "--window", "--png", "a.png"]) else {
+            return expect(false, "two outputs should be refused")
+        }
+    }
+
+    static func testOptionsRefuseAnUnknownFlag() {
+        guard case .failure(let error) = options(["Tab.bundle", "--window", "--colour", "red"]) else {
+            return expect(false, "an unknown flag should be refused")
+        }
+        expect(error.description.contains("--colour"), "the error names the flag: \(error.description)")
+    }
+
+    static func testOptionsRefuseAFlagWithoutItsValue() {
+        guard case .failure(let error) = options(["Tab.bundle", "--png"]) else {
+            return expect(false, "--png with no file should be refused")
+        }
+        expect(error.description.contains("--png"), "the error names the flag: \(error.description)")
+    }
+
+    static func testOptionsRefuseABadSize() {
+        for size in ["big", "0x10", "10x", "-5x10"] {
+            guard case .failure = options(["Tab.bundle", "--window", "--size", size]) else {
+                return expect(false, "the size \(size) should be refused")
+            }
+        }
     }
 }
