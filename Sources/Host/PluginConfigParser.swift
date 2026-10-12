@@ -46,6 +46,18 @@ enum PluginConfigParser {
         return .success(PluginConfig(plugins: entries))
     }
 
+    /// A file holding one plugin's settings on its own, as `SystemBar --preview --settings` reads
+    /// it: the same object an entry's `"settings"` would hold, checked the same way.
+    static func parseSettingsFile(_ data: Data) -> Result<PluginSettings, PluginConfigError> {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            return .failure(.malformedJSON(malformedDetail(from: error as NSError, in: data)))
+        }
+        return parseSettings(object, where: "the settings file")
+    }
+
     /// The byte offset Foundation reports, turned into a line number this code owns. The debug
     /// description's wording has changed between macOS releases; a count of newlines has not. On
     /// current macOS, Foundation's own text already says "around line N, column M", so the

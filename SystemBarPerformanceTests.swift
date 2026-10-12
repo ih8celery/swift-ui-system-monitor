@@ -35,6 +35,7 @@ struct SystemBarPerformanceTests {
         MainActor.assumeIsolated { SystemBarConfigTests.runAll() }
         MainActor.assumeIsolated { SystemBarLoaderTests.runAll() }
         MainActor.assumeIsolated { SystemBarSchedulerTests.runAll() }
+        MainActor.assumeIsolated { SystemBarPreviewTests.runAll() }
         print("SystemBarPerformanceTests passed")
     }
 
