@@ -19,8 +19,8 @@ only show whatever the real machine happens to be doing.
 The SystemBar app gets a second command-line mode beside `--list-plugins`:
 
 ```
-SystemBar --preview <bundle> --png <out.png> [--replies <file>] [--size <W>x<H>]
-SystemBar --preview <bundle> --window        [--replies <file>]
+SystemBar --preview <bundle> --png <out.png> [--replies <file>] [--settings <file>] [--size <W>x<H>]
+SystemBar --preview <bundle> --window        [--replies <file>] [--settings <file>]
 ```
 
 - `--png` makes the plugin, tells it it is showing, runs `collect()` once,
@@ -34,6 +34,15 @@ It is part of the app, not a separate program, so it loads the bundle with the
 same loader, SDK and name checks as the menu bar. A plugin that loads in the
 preview loads in the app. A plugin that fails to load prints the same
 one-sentence error the app's error tab shows, and the preview exits 1.
+
+## Settings and data folder
+
+`--settings <file>` is a JSON object handed to the plugin as
+`host.settings`, exactly as an entry's `"settings"` in `plugins.json` would
+be, and checked the same way (it must be an object). Without it the plugin
+gets empty settings. The plugin's `dataDirectory` is a fresh temporary folder
+for each preview, so a preview never reads or writes the real
+`PluginData` folder.
 
 ## Fake answers
 
