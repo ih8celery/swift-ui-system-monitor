@@ -35,7 +35,12 @@ enum CannedReplies {
         var replies: [CannedReply] = []
         for (index, raw) in list.enumerated() {
             switch parseReply(raw, place: "reply \(index + 1)") {
-            case .success(let reply): replies.append(reply)
+            case .success(let reply):
+                if let first = replies.firstIndex(where: { $0.path == reply.path && $0.arguments == reply.arguments }) {
+                    return .failure(PreviewInputError(
+                        description: "reply \(index + 1) in the replies file repeats the command in reply \(first + 1)"))
+                }
+                replies.append(reply)
             case .failure(let error): return .failure(error)
             }
         }
@@ -58,8 +63,9 @@ enum CannedReplies {
         let error = object["error"] ?? ""
         guard let errorText = error as? String else { return problem("has an \"error\" that is not a string") }
         let status = object["status"] ?? NSNumber(value: 0)
-        guard !isBoolean(status), let number = status as? NSNumber, number.doubleValue == number.doubleValue.rounded() else {
-            return problem("has a \"status\" that is not a whole number")
+        guard !isBoolean(status), let number = status as? NSNumber, number.doubleValue == number.doubleValue.rounded(),
+              Double(Int32.min)...Double(Int32.max) ~= number.doubleValue else {
+            return problem("has a \"status\" that is not a whole number that fits in 32 bits")
         }
         return .success(CannedReply(path: path, arguments: arguments, output: output, error: errorText, status: number.int32Value))
     }

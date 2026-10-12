@@ -6,7 +6,7 @@ import SystemBarKit
 /// and scheduler as the menu bar. Closing the window ends the preview.
 @MainActor
 enum PreviewWindow {
-    static func run(plugin: TabPlugin, size: CGSize, presenter: TabPresenter) -> Never {
+    static func run(plugin: TabPlugin, size: CGSize, presenter: TabPresenter, cleanup: @escaping () -> Void) -> Never {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         let window = NSWindow(
@@ -17,19 +17,27 @@ enum PreviewWindow {
         )
         window.title = "\(plugin.title) — SystemBar preview"
         window.contentView = NSHostingView(rootView: plugin.makeView())
-        let closer = PreviewQuitOnClose()
+        let closer = PreviewQuitOnClose(cleanup: cleanup)
         window.delegate = closer
         window.center()
         window.makeKeyAndOrderFront(nil)
         presenter.present(plugin: plugin, isVisible: true)
         app.activate(ignoringOtherApps: true)
         withExtendedLifetime(closer) { app.run() }
+        cleanup()
         exit(PreviewExit.ok)
     }
 }
 
 private final class PreviewQuitOnClose: NSObject, NSWindowDelegate {
+    private let cleanup: () -> Void
+
+    init(cleanup: @escaping () -> Void) {
+        self.cleanup = cleanup
+    }
+
     func windowWillClose(_ notification: Notification) {
+        cleanup()
         exit(PreviewExit.ok)
     }
 }

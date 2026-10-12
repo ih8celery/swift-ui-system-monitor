@@ -42,7 +42,9 @@ enum SystemBarMain {
                 scheduler: PluginScheduler(),
                 samplers: HostSamplers.standard(processes: processes, fastStats: fastStats)
             )
-            PreviewWindow.run(plugin: plugin, size: size, presenter: presenter)
+            PreviewWindow.run(plugin: plugin, size: size, presenter: presenter) {
+                try? FileManager.default.removeItem(at: dataRoot)
+            }
         }
     }
 }

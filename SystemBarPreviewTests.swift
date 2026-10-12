@@ -18,6 +18,8 @@ struct SystemBarPreviewTests {
         testRepliesFileRejectsAnUnknownReplyKey()
         testRepliesFileRejectsANonNumberStatus()
         testRepliesFileRejectsABooleanStatus()
+        testRepliesFileRejectsAStatusOutsideInt32()
+        testRepliesFileRejectsADuplicateCommand()
         testRepliesFileRejectsAReplyWithoutPath()
         testCannedRunnerAnswersAnExactMatch()
         testCannedRunnerRefusesAnythingElseWith127()
@@ -116,6 +118,29 @@ struct SystemBarPreviewTests {
         guard case .failure = CannedReplies.parse(data) else {
             return expect(false, "a boolean status should be refused, not read as 1")
         }
+    }
+
+    static func testRepliesFileRejectsAStatusOutsideInt32() {
+        let data = repliesData(#"{ "replies": [ { "path": "/a", "arguments": [], "output": "", "status": 1000000000000 } ] }"#)
+        guard case .failure(let error) = CannedReplies.parse(data) else {
+            return expect(false, "a status beyond Int32 should be refused, not truncated")
+        }
+        expect(error.description.contains("\"status\"") && error.description.contains("reply 1"),
+               "the error names status and the reply: \(error.description)")
+    }
+
+    static func testRepliesFileRejectsADuplicateCommand() {
+        let data = repliesData(#"""
+        { "replies": [
+          { "path": "/a", "arguments": ["x"], "output": "1" },
+          { "path": "/b", "arguments": [], "output": "2" },
+          { "path": "/a", "arguments": ["x"], "output": "3" } ] }
+        """#)
+        guard case .failure(let error) = CannedReplies.parse(data) else {
+            return expect(false, "two replies for the same command should be refused")
+        }
+        expect(error.description.contains("reply 3") && error.description.contains("reply 1"),
+               "the error names both replies: \(error.description)")
     }
 
     static func testRepliesFileRejectsAReplyWithoutPath() {

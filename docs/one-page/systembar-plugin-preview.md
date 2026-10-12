@@ -64,6 +64,8 @@ A reply matches on the exact path and argument list; `error` (stderr) and
 `status` are optional, defaulting to empty and 0. A command with no matching
 reply gets status 127 and the stderr line `no canned reply for <path> <args>`,
 so a missing fake answer shows up instead of a real command quietly running.
+Two replies for the same path and arguments are an error, so the first never
+quietly wins.
 Without `--replies`, real commands run, as in the app.
 
 The file is parsed as strictly as `plugins.json`: an unknown key or a wrong
