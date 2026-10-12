@@ -28,6 +28,8 @@ struct SystemBarPreviewTests {
         testOptionsRefuseAnUnknownFlag()
         testOptionsRefuseAFlagWithoutItsValue()
         testOptionsRefuseABadSize()
+        testSessionHandsThePluginItsSettingsAndAFolderUnderTheRoot()
+        testSessionKeepsTheLoadersReason()
     }
 
     // MARK: - Settings file
@@ -194,4 +196,83 @@ struct SystemBarPreviewTests {
             }
         }
     }
+
+    // MARK: - Loading
+
+    static func testSessionHandsThePluginItsSettingsAndAFolderUnderTheRoot() {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let settings = PluginSettings(values: ["command": .string("/opt/backup")])
+        let tab = PreviewSession.load(bundlePath: "/b/Echo.bundle", settings: settings,
+                                      source: PreviewOneTabSource(type: PreviewEchoTab.self),
+                                      host: makeHost(), dataRoot: root)
+        guard case let .loaded(_, loaded) = tab, let plugin = loaded as? PreviewEchoTab else {
+            return expect(false, "the echo tab should load: \(tab)")
+        }
+        expect(plugin.host.settings == settings, "the plugin gets the settings file's values")
+        expect(plugin.host.dataDirectory == root.appendingPathComponent("preview-echo", isDirectory: true),
+               "the plugin's folder is under the preview's root: \(plugin.host.dataDirectory)")
+    }
+
+    static func testSessionKeepsTheLoadersReason() {
+        let tab = PreviewSession.load(bundlePath: "/b/Gone.bundle", settings: .empty,
+                                      source: PreviewFailingSource(reason: "nothing at /b/Gone.bundle"),
+                                      host: makeHost(), dataRoot: temporaryDirectory())
+        guard case let .failed(location, reason) = tab else { return expect(false, "a failing source should fail") }
+        expect(location == "/b/Gone.bundle" && reason == "nothing at /b/Gone.bundle",
+               "the failure keeps the path and the loader's sentence: \(location) \(reason)")
+    }
+}
+
+/// Runs `/bin/echo hi` in collect and shows what came back, so a test can see that collect ran,
+/// through which runner, and that the update reached main before the picture was drawn.
+final class PreviewEchoTab: TabPlugin {
+    static let identifier = "preview-echo"
+    @MainActor static var lastMade: PreviewEchoTab?
+
+    let title = "Echo"
+    let systemImage = "text.bubble"
+    let accent = Color.white
+    let refreshInterval: TimeInterval = 5
+    let sharedFeeds: Set<SharedFeed> = []
+    let host: HostServices
+    @MainActor private(set) var shown = "not collected"
+    @MainActor private(set) var toldVisible = false
+
+    @MainActor init(host: HostServices) {
+        self.host = host
+        PreviewEchoTab.lastMade = self
+    }
+
+    func collect() {
+        let text = host.run(path: "/bin/echo", arguments: ["hi"]).output
+        DispatchQueue.main.async { MainActor.assumeIsolated { self.shown = text } }
+    }
+
+    @MainActor func visibilityChanged(isVisible: Bool) { toldVisible = isVisible }
+    @MainActor func makeView() -> AnyView { AnyView(Text(shown)) }
+}
+
+/// A collect that takes longer than a test is willing to wait.
+final class PreviewSlowTab: TabPlugin {
+    static let identifier = "preview-slow"
+    let title = "Slow"
+    let systemImage = "tortoise"
+    let accent = Color.white
+    let refreshInterval: TimeInterval = 5
+    let sharedFeeds: Set<SharedFeed> = []
+
+    @MainActor init(host: HostServices) {}
+    func collect() { Thread.sleep(forTimeInterval: 0.3) }
+    @MainActor func makeView() -> AnyView { AnyView(Text("slow")) }
+}
+
+struct PreviewOneTabSource: TabSource {
+    let type: TabPlugin.Type
+    func resolve(_ entry: PluginEntry) throws -> TabPlugin.Type { type }
+}
+
+struct PreviewFailingSource: TabSource {
+    let reason: String
+    func resolve(_ entry: PluginEntry) throws -> TabPlugin.Type { throw TabLoadError(description: reason) }
 }
