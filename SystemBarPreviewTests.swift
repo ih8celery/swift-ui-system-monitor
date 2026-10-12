@@ -33,6 +33,11 @@ struct SystemBarPreviewTests {
         testCollectOnceWaitsForTheUpdateOnMain()
         testCollectOnceGivesUpAfterItsTimeout()
         testPictureHasTheRequestedSizeAtTheRendererScale()
+        testCommandSavesAPictureUsingTheRepliesAndSettingsFiles()
+        testCommandRefusesBadInputWithUsageAndExit2()
+        testCommandRefusesABadRepliesFileWithExit2()
+        testCommandReportsALoadFailureLikeListPlugins()
+        testCommandHandsAWindowRunBackWithThePlugin()
     }
 
     // MARK: - Settings file
@@ -250,6 +255,73 @@ struct SystemBarPreviewTests {
         let scale = Int(PreviewRenderer.renderScale)
         expect(image.pixelsWide == 120 * scale && image.pixelsHigh == 80 * scale,
                "the picture is the requested size at scale \(scale): \(image.pixelsWide)x\(image.pixelsHigh)")
+    }
+
+    // MARK: - Command
+
+    static func prepare(_ words: [String], folder: URL, source: TabSource) -> PreviewOutcome {
+        PreviewCommand.prepare(
+            arguments: [PreviewOptions.flag] + words,
+            currentDirectory: folder.path,
+            source: source,
+            dataRoot: folder.appendingPathComponent("data", isDirectory: true),
+            processes: Feed(initial: ProcessSummary()),
+            fastStats: Feed(initial: FastStatsSnapshot())
+        )
+    }
+
+    static func testCommandSavesAPictureUsingTheRepliesAndSettingsFiles() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try? Data(#"{ "replies": [ { "path": "/bin/echo", "arguments": ["hi"], "output": "from replies" } ] }"#.utf8)
+            .write(to: folder.appendingPathComponent("replies.json"))
+        try? Data(#"{ "command": "/opt/backup" }"#.utf8).write(to: folder.appendingPathComponent("settings.json"))
+        let outcome = prepare(["Echo.bundle", "--png", "echo.png", "--replies", "replies.json",
+                               "--settings", "settings.json", "--size", "200x100"],
+                              folder: folder, source: PreviewOneTabSource(type: PreviewEchoTab.self))
+        guard case let .finished(code, _) = outcome else { return expect(false, "a picture run finishes: \(outcome)") }
+        expect(code == PreviewExit.ok, "a picture run exits 0, got \(code)")
+        expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("echo.png").path), "the picture is saved")
+        guard let plugin = PreviewEchoTab.lastMade else { return expect(false, "the echo tab was made") }
+        expect(plugin.shown == "from replies", "collect ran through the canned runner: \(plugin.shown)")
+        expect(plugin.toldVisible, "the plugin was told it is showing")
+        expect(plugin.host.settings.string(forKey: "command") == "/opt/backup", "the settings file reached the plugin")
+    }
+
+    static func testCommandRefusesBadInputWithUsageAndExit2() {
+        let outcome = prepare(["--window"], folder: temporaryDirectory(), source: PreviewOneTabSource(type: PreviewEchoTab.self))
+        guard case let .finished(code, message) = outcome else { return expect(false, "bad input finishes") }
+        expect(code == PreviewExit.badInput, "bad input exits 2, got \(code)")
+        expect(message?.contains("usage:") == true, "bad input prints the usage: \(message ?? "nil")")
+    }
+
+    static func testCommandRefusesABadRepliesFileWithExit2() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try? Data(#"{ "answers": [] }"#.utf8).write(to: folder.appendingPathComponent("replies.json"))
+        let outcome = prepare(["Echo.bundle", "--window", "--replies", "replies.json"], folder: folder,
+                              source: PreviewOneTabSource(type: PreviewEchoTab.self))
+        guard case let .finished(code, message) = outcome else { return expect(false, "a bad replies file finishes") }
+        expect(code == PreviewExit.badInput && message?.contains("\"answers\"") == true,
+               "a bad replies file exits 2 naming the key: \(code) \(message ?? "nil")")
+    }
+
+    static func testCommandReportsALoadFailureLikeListPlugins() {
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let bundle = folder.appendingPathComponent("Gone.bundle").path
+        let outcome = prepare([bundle, "--png", "x.png"], folder: folder,
+                              source: PreviewFailingSource(reason: "nothing at \(bundle)"))
+        guard case let .finished(code, message) = outcome else { return expect(false, "a load failure finishes") }
+        expect(code == PreviewExit.failed, "a load failure exits 1, got \(code)")
+        expect(message == "error \(bundle): nothing at \(bundle)", "the same line --list-plugins prints: \(message ?? "nil")")
+    }
+
+    static func testCommandHandsAWindowRunBackWithThePlugin() {
+        let outcome = prepare(["Echo.bundle", "--window", "--size", "300x200"], folder: temporaryDirectory(),
+                              source: PreviewOneTabSource(type: PreviewEchoTab.self))
+        guard case let .openWindow(plugin, size) = outcome else { return expect(false, "a window run opens a window: \(outcome)") }
+        expect(plugin is PreviewEchoTab && size == CGSize(width: 300, height: 200), "the window gets the plugin and size")
     }
 }
 
