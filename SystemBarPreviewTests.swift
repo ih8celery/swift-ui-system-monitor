@@ -30,6 +30,9 @@ struct SystemBarPreviewTests {
         testOptionsRefuseABadSize()
         testSessionHandsThePluginItsSettingsAndAFolderUnderTheRoot()
         testSessionKeepsTheLoadersReason()
+        testCollectOnceWaitsForTheUpdateOnMain()
+        testCollectOnceGivesUpAfterItsTimeout()
+        testPictureHasTheRequestedSizeAtTheRendererScale()
     }
 
     // MARK: - Settings file
@@ -221,6 +224,32 @@ struct SystemBarPreviewTests {
         guard case let .failed(location, reason) = tab else { return expect(false, "a failing source should fail") }
         expect(location == "/b/Gone.bundle" && reason == "nothing at /b/Gone.bundle",
                "the failure keeps the path and the loader's sentence: \(location) \(reason)")
+    }
+
+    // MARK: - Drawing
+
+    static func testCollectOnceWaitsForTheUpdateOnMain() {
+        let plugin = PreviewEchoTab(host: makeHost(runner: CannedReplies.runner([
+            CannedReply(path: "/bin/echo", arguments: ["hi"], output: "canned", error: "", status: 0),
+        ])))
+        expect(PreviewRenderer.collectOnce(plugin), "collect should finish in time")
+        expect(plugin.shown == "canned", "the main-queue update has landed when collectOnce returns: \(plugin.shown)")
+    }
+
+    static func testCollectOnceGivesUpAfterItsTimeout() {
+        let plugin = PreviewSlowTab(host: makeHost())
+        expect(!PreviewRenderer.collectOnce(plugin, timeout: 0.05), "a collect slower than the timeout reports false")
+    }
+
+    static func testPictureHasTheRequestedSizeAtTheRendererScale() {
+        let plugin = PreviewEchoTab(host: makeHost())
+        guard let data = PreviewRenderer.pngData(of: plugin, size: CGSize(width: 120, height: 80)),
+              let image = NSBitmapImageRep(data: data) else {
+            return expect(false, "the view should draw to a PNG")
+        }
+        let scale = Int(PreviewRenderer.renderScale)
+        expect(image.pixelsWide == 120 * scale && image.pixelsHigh == 80 * scale,
+               "the picture is the requested size at scale \(scale): \(image.pixelsWide)x\(image.pixelsHigh)")
     }
 }
 
