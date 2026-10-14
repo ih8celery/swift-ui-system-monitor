@@ -46,12 +46,10 @@ chmod 755 SystemBar.app/Contents/MacOS/SystemBar
 cp -f build/Frameworks/libSystemBarKit.dylib SystemBar.app/Contents/Frameworks/
 cp -f build/SDK/SystemBarKit.swiftinterface build/SDK/SystemBarKit.swiftdoc SystemBar.app/Contents/Resources/SDK/
 
-# 4. Every plugin directory, into the app's PlugIns folder, the way a user's would be built.
-# The (N) glob qualifier means zero matches is an empty list, not the literal pattern, so a
-# checkout with no Plugins/ subdirectories yet does not abort the build.
-for dir in Plugins/*/(N); do
-  name=$(basename "$dir")
-  ./build-plugin.sh "$dir" "SystemBar.app/Contents/PlugIns/$name.bundle" build
-done
+# 4. build-plugin.sh, so a plugin project outside this repository can build against the app
+#    it has installed without a checkout of this one. The app ships no tabs of its own: they
+#    live in system-monitor-core-plugins and are installed by path like any other plugin.
+cp -f build-plugin.sh SystemBar.app/Contents/Resources/build-plugin.sh
+chmod 755 SystemBar.app/Contents/Resources/build-plugin.sh
 
 echo "Built $(pwd)/SystemBar.app"

@@ -7,7 +7,7 @@ import SystemBarKit
 @MainActor
 struct SystemBarLoaderTests {
     static func runAll() {
-        testLoaderWritesTheDefaultListAndResolvesEveryEntryOnFirstRun()
+        testLoaderWritesAnEmptyListOnFirstRun()
         testLoaderTurnsAnUnparseableFileIntoOneErrorTab()
         testLoaderReportsNothingForAnEmptyList()
         testCatalogKeepsOrderAndSkipsDisabledEntries()
@@ -20,7 +20,6 @@ struct SystemBarLoaderTests {
         testCatalogGivesEachPluginItsOwnSettingsAndDataFolder()
         testListReportPrintsOneLinePerEntry()
         testListReportSaysWhichPluginsSampleInTheBackground()
-        testDefaultListNamesSixBundles()
         testPluginPathResolvesNamesInsideThePlugInsFolder()
         testPluginPathRejectsNamesThatLeaveTheFolder()
         testPluginPathKeepsAStrangeNameInsideTheFolder()
@@ -38,20 +37,17 @@ struct SystemBarLoaderTests {
 
     // MARK: - Loader
 
-    private static func testLoaderWritesTheDefaultListAndResolvesEveryEntryOnFirstRun() {
+    private static func testLoaderWritesAnEmptyListOnFirstRun() {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = PluginConfigStore(fileURL: directory.appendingPathComponent("plugins.json"))
         let source = MapTabSource(types: ["Power.bundle": FakeTab.self, "CPU.bundle": OtherFakeTab.self])
         let loaded = TabLoader.load(store: store, source: source, host: makeHost(), dataRoot: testDataRoot)
-        expect(loaded.map(\.title) == ["Fake", "Error", "Error", "Error", "Error", "Other"],
-               "a fresh file lists all six defaults in order, each resolved through the source: the two it knows load and the four it does not are error tabs in their places, got \(loaded.map(\.title))")
-        if case let .failed(location, _)? = loaded.dropFirst().first {
-            expect(location == "Dev.bundle", "an error tab names its entry, got \(location)")
-        }
+        expect(loaded.isEmpty, "the app ships no tabs, so a fresh file loads none, even of bundles the source knows, got \(loaded.map(\.title))")
+        expect(DefaultPlugins.names.isEmpty, "the default list is empty")
         expect(FileManager.default.fileExists(atPath: store.fileURL.path), "and the default file is written")
-        if case .success(let written) = store.loadOrCreate(default: PluginConfig(plugins: [])) {
-            expect(written == .defaults(named: DefaultPlugins.names), "the file written is the default list, got \(written)")
+        if case .success(let written) = store.loadOrCreate(default: .defaults(named: ["Other.bundle"])) {
+            expect(written == PluginConfig(plugins: []), "the file written is an empty list, got \(written)")
         } else {
             expect(false, "the file written must read back")
         }
@@ -193,13 +189,6 @@ struct SystemBarLoaderTests {
             "ok background Background eager background every 5s",
             "ok background Background half background every 7.5s",
         ], "--list-plugins appends the clamped background cadence to a declaring plugin's line, got \(lines)")
-    }
-
-    // MARK: - Default list
-
-    private static func testDefaultListNamesSixBundles() {
-        expect(DefaultPlugins.names.count == 6 && Set(DefaultPlugins.names).count == 6, "six distinct default names")
-        expect(DefaultPlugins.names.allSatisfy { $0.hasSuffix(".bundle") }, "every default is a bundle in the app's PlugIns")
     }
 
     // MARK: - Bundles

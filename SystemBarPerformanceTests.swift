@@ -15,23 +15,12 @@ struct SystemBarPerformanceTests {
         testProcessTableNeverStatsARelativeCommand()
         testProcessTableCapCountsWords()
         testRegularFileCheckAcceptsOnlyRegularFiles()
-        MainActor.assumeIsolated { CPUTests.runAll() }
-        MainActor.assumeIsolated { PowerTests.runAll() }
-        MainActor.assumeIsolated { DiskTests.runAll() }
-        MainActor.assumeIsolated { DiskLedgerTests.runAll() }
-        MainActor.assumeIsolated { DiskRowsTests.runAll() }
-        MainActor.assumeIsolated { DiskStoreTests.runAll() }
-        MainActor.assumeIsolated { DiskScanTests.runAll() }
         testRunProcessDrainsLargeStderrConcurrently()
         testRunProcessTimesOutHungCommand()
         testCollectorsDoNotLeakHostPortRights()
         testGroupsNeedingRefinement()
-        MainActor.assumeIsolated { MemoryTests.runAll() }
         testUpdatedAgoText()
-        MainActor.assumeIsolated { NetworkTests.runAll() }
         testSampleHealthFromIsOK()
-        MainActor.assumeIsolated { CapacityTests.runAll() }
-        MainActor.assumeIsolated { DevPluginTests.runAll() }
         MainActor.assumeIsolated { SystemBarConfigTests.runAll() }
         MainActor.assumeIsolated { SystemBarLoaderTests.runAll() }
         MainActor.assumeIsolated { SystemBarSchedulerTests.runAll() }

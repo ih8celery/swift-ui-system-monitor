@@ -5,7 +5,8 @@ cd "$(dirname "$0")"
 source ./toolchain.env
 
 # The tests link the same SDK dylib the app does, built by build.sh a moment ago. Everything
-# else (host without its @main, each plugin's sources and tests, the test files) is one module.
+# else (host without its @main, the test files) is one module. The tabs live in their own
+# repository, system-monitor-core-plugins, with their own tests.
 ./build.sh
 
 # The SDK's doc comments ship beside its interface, where the compiler looks for a module's
@@ -24,7 +25,6 @@ swiftc \
   -framework SwiftUI -framework AppKit \
   -o build/SystemBarTests \
   $(find Sources/Host -name '*.swift' | sort) \
-  $(find Plugins -path '*/Sources/*.swift' -o -path '*/Tests/*.swift' | sort) \
   TestSupport.swift \
   TestFakes.swift \
   SystemBarConfigTests.swift \
@@ -43,17 +43,17 @@ trap 'rm -rf "$tmp"' EXIT
 
 cat > "$tmp/plugins.json" <<JSON
 { "plugins": [
-  { "name": "Power.bundle" },
   { "path": "$tmp/HelloTab.bundle" },
   { "path": "$tmp/Missing.bundle" },
-  { "name": "Power.bundle" }
+  { "name": "Missing.bundle" },
+  { "path": "$tmp/HelloTab.bundle" }
 ] }
 JSON
 
-expected="ok power Power Power.bundle
-ok hello Hello $tmp/HelloTab.bundle
+expected="ok hello Hello $tmp/HelloTab.bundle
 error $tmp/Missing.bundle: nothing at $tmp/Missing.bundle
-error Power.bundle: the id \"power\" is already used by \"Power.bundle\", which comes earlier in the list"
+error Missing.bundle: nothing at $PWD/SystemBar.app/Contents/PlugIns/Missing.bundle
+error $tmp/HelloTab.bundle: the id \"hello\" is already used by \"$tmp/HelloTab.bundle\", which comes earlier in the list"
 actual=$(SYSTEMBAR_PLUGINS_FILE="$tmp/plugins.json" SYSTEMBAR_PLUGIN_DATA_ROOT="$tmp/plugin-data" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
   || { echo "Boundary check failed: SystemBar --list-plugins exited $?" >&2; exit 1; }
 
@@ -86,12 +86,14 @@ fi
 echo "Preview check passed: a bundle previews to a picture from the built app, and a missing one says why"
 
 # An outside project runs the copy of build-plugin.sh inside an installed app, from its own
-# directory, with no SDK argument; the script must find the app it sits in. The copy of the app
-# has no SystemBar.app beside the script, so only the enclosing-app default can succeed.
+# directory, with no SDK argument; the script must find the app it sits in. build.sh puts that
+# copy in the app; the copy of the app has no SystemBar.app beside the script, so only the
+# enclosing-app default can succeed.
+cmp -s build-plugin.sh SystemBar.app/Contents/Resources/build-plugin.sh \
+  || { echo "Shipped-script check failed: the app does not carry this build-plugin.sh" >&2; exit 1; }
 repo=$PWD
 shipped="$tmp/Shipped.app"
 cp -R SystemBar.app "$shipped"
-cp -f build-plugin.sh "$shipped/Contents/Resources/build-plugin.sh"
 (cd "$tmp" && "$shipped/Contents/Resources/build-plugin.sh" "$repo/Examples/HelloTab" "$tmp/FromApp.bundle" > /dev/null) \
   || { echo "Shipped-script check failed: the copy inside an app could not build with two arguments" >&2; exit 1; }
 if [[ ! -x "$tmp/FromApp.bundle/Contents/MacOS/HelloTab" ]]; then
@@ -100,14 +102,9 @@ if [[ ! -x "$tmp/FromApp.bundle/Contents/MacOS/HelloTab" ]]; then
 fi
 echo "Shipped-script check passed: build-plugin.sh inside an app builds against that app"
 
-# A new user's first launch: no plugins.json yet. The app writes the default list, and every
-# entry in it loads from a bundle inside the app, in the order a new user sees.
-expected_fresh="ok power Power Power.bundle
-ok dev Dev Dev.bundle
-ok memory Memory Memory.bundle
-ok disk Disk Disk.bundle background every 900s
-ok network Network Network.bundle
-ok cpu CPU CPU.bundle"
+# A new user's first launch: no plugins.json yet. The app ships no tabs, so it writes an empty
+# list and loads nothing; a tab repository's installer adds its tabs by path.
+expected_fresh=""
 actual_fresh=$(SYSTEMBAR_PLUGINS_FILE="$tmp/fresh/plugins.json" SYSTEMBAR_PLUGIN_DATA_ROOT="$tmp/plugin-data" ./SystemBar.app/Contents/MacOS/SystemBar --list-plugins) \
   || { echo "Fresh-file check failed: SystemBar --list-plugins exited $?" >&2; exit 1; }
 
@@ -118,16 +115,20 @@ if [[ "$actual_fresh" != "$expected_fresh" ]]; then
   echo "$actual_fresh" >&2
   exit 1
 fi
-if [[ ! -f "$tmp/fresh/plugins.json" ]]; then
-  echo "Fresh-file check failed: no plugins.json was written at $tmp/fresh/plugins.json" >&2
+if [[ "$(jq -c . "$tmp/fresh/plugins.json" 2>/dev/null)" != '{"plugins":[]}' ]]; then
+  echo "Fresh-file check failed: $tmp/fresh/plugins.json should hold an empty list" >&2
   exit 1
 fi
-echo "Fresh-file check passed: a new plugins.json loads all six tabs from the app's bundles"
+if [[ -n "$(ls -A SystemBar.app/Contents/PlugIns)" ]]; then
+  echo "Fresh-file check failed: the app ships bundles in Contents/PlugIns: $(ls SystemBar.app/Contents/PlugIns)" >&2
+  exit 1
+fi
+echo "Fresh-file check passed: a new plugins.json is an empty list and the app ships no tabs"
 
 # The old central sampler, its job type, the compiled-in tab table and the five adapter tabs are gone;
 # nothing may bring their names back. The brackets keep this pattern from matching its own line.
 deleted_names='Unified[M]onitor|Monitor[M]ode|Monitor[J]ob|Monitor[S]amplingPlan|Monitor[B]ackedTab|Builtin[T]abSource|Host[T]abSource|(Dev|Memory|Disk|Network|CPU)[T]ab([^A-Za-z]|$)'
-found_names=$(grep -rnE "$deleted_names" Sources Plugins *.swift *.sh) && grep_status=0 || grep_status=$?
+found_names=$(grep -rnE "$deleted_names" Sources *.swift *.sh) && grep_status=0 || grep_status=$?
 if (( grep_status == 0 )); then
   echo "Name check failed: a deleted name is back:" >&2
   echo "$found_names" >&2

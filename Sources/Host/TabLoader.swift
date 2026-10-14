@@ -1,11 +1,11 @@
 import Foundation
 import SystemBarKit
 
-/// What a fresh plugins.json lists, in the tab order the app has always had. Each is a bundle in
-/// the app's Contents/PlugIns. This is the default file's content, not a list the host treats
-/// specially: a tab removed from plugins.json is gone, like any other.
+/// What a fresh plugins.json lists: nothing. The app ships no tabs; each tab repository's
+/// installer adds its own by path. A name entry still resolves to a bundle in the app's
+/// Contents/PlugIns, which is empty unless someone puts one there.
 enum DefaultPlugins {
-    static let names = ["Power.bundle", "Dev.bundle", "Memory.bundle", "Disk.bundle", "Network.bundle", "CPU.bundle"]
+    static let names: [String] = []
 }
 
 /// What the app does at launch, in one testable place: read (or create) plugins.json, then
