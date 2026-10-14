@@ -78,7 +78,7 @@ struct RootView: View {
             .buttonStyle(.borderless)
             .labelStyle(.titleAndIcon)
             .help("Quit SystemBar")
-            .accessibilityHint("Quits SystemBar and removes it from the menu bar")
+            .accessibilityHint("Quits SystemBar")
         }
     }
 
