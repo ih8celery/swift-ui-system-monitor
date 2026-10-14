@@ -62,19 +62,23 @@ struct RootView: View {
             Button {
                 relaunch()
             } label: {
-                Image(systemName: "arrow.clockwise")
+                Label("Relaunch", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
+            .labelStyle(.titleAndIcon)
             .disabled(isRelaunching)
             .help("Relaunch SystemBar to apply plugins.json")
+            .accessibilityHint("Restarts SystemBar so changes to plugins.json take effect")
 
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
-                Image(systemName: "power")
+                Label("Quit", systemImage: "power")
             }
             .buttonStyle(.borderless)
+            .labelStyle(.titleAndIcon)
             .help("Quit SystemBar")
+            .accessibilityHint("Quits SystemBar and removes it from the menu bar")
         }
     }
 

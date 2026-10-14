@@ -6,7 +6,7 @@ A single menu bar icon for Memory, CPU, Disk, Network and whatever else you plug
 
 SystemBar replaces a cluttered row of individual menu bar monitors with one icon and a tabbed popover. Tap between tabs to see memory pressure, per-process CPU share, where disk space goes and network throughput, all sampled live from macOS kernel APIs.
 
-Every tab is a plugin. The app ships none of its own: the Memory, Disk, Network and CPU tabs (and Power and Dev, kept but not installed by default) live in [system-monitor-core-plugins](../system-monitor-core-plugins), whose `scripts/install.sh install` builds them against the installed app and adds them to `plugins.json`.
+Every tab is a plugin. The app ships none of its own: the Memory, Disk, Network and CPU tabs (and Power and Dev, kept but not installed by default) live in [system-monitor-core-plugins](https://github.com/ih8celery/system-monitor-core-plugins), whose `scripts/install.sh install` builds them against the installed app and adds them to `plugins.json`.
 
 ## Choosing tabs
 
@@ -52,7 +52,7 @@ A tab is a `.bundle` built in Swift against the SDK inside the app. `Examples/He
 
 Then add `{ "path": "~/Library/Application Support/SystemBar/PlugIns/HelloTab.bundle" }` to `plugins.json` and press Relaunch. The plugin can run subprocesses through the host (an executable path and arguments, never a shell), read the shared process summary (`host.processes.value` now, or `host.processes.publisher` to follow it, as the core Power tab does), and use the app's palette and components. Give your plugin its own executable name in Info.plist (it doubles as the Swift module name, so make it a valid identifier) and its own `@objc(...)` class name; the app refuses a bundle whose class name another loaded bundle already defines.
 
-The core tabs in [system-monitor-core-plugins](../system-monitor-core-plugins) are built this way: `Plugins/Power/` there is the smallest, and `Plugins/Network/` shows following the 1-second feed and running slow work on a queue of its own. The app carries this `build-plugin.sh` at `Contents/Resources/build-plugin.sh`, so a plugin project needs only an installed app, not this repository.
+The core tabs in [system-monitor-core-plugins](https://github.com/ih8celery/system-monitor-core-plugins) are built this way: `Plugins/Power/` there is the smallest, and `Plugins/Network/` shows following the 1-second feed and running slow work on a queue of its own. The app carries this `build-plugin.sh` at `Contents/Resources/build-plugin.sh`, so a plugin project needs only an installed app, not this repository.
 
 A plugin says in `sharedFeeds` which of the host's two shared readings it uses, and the host samples only what the showing tab asks for:
 
@@ -168,7 +168,7 @@ To uninstall:
 
 ## What SystemBar reads from your system
 
-The app on its own reads two things, and only while its window is open: CPU and network counters from the kernel (`host_statistics`, `sysctl`) every second, and `/bin/ps` every 10 seconds while the showing tab asks for the process list. Everything else is run by the tabs you install; the core tabs list theirs in [system-monitor-core-plugins](../system-monitor-core-plugins/README.md#what-the-tabs-read-from-your-system), and the Disk tab's scans run with the window closed.
+The app on its own reads two things, and only while its window is open: CPU and network counters from the kernel (`host_statistics`, `sysctl`) every second, and `/bin/ps` every 10 seconds while the showing tab asks for the process list. Everything else is run by the tabs you install; the core tabs list theirs in [system-monitor-core-plugins](https://github.com/ih8celery/system-monitor-core-plugins#what-the-tabs-read-from-your-system), and the Disk tab's scans run with the window closed.
 
 SystemBar runs entirely as your user and never asks for `sudo`. The host launches every subprocess with an explicit executable path and argument array, never through a shell. A loaded plugin is not held to that rule and can run whatever it likes with your privileges, which is why you should only install plugins you trust.
 
