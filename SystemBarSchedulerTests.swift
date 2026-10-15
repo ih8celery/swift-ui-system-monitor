@@ -36,6 +36,11 @@ struct SystemBarSchedulerTests {
         testFastStatsSamplerTurnsCountersIntoRates()
         testFastStatsSamplerKeepsNinetySeconds()
         testFastStatsSamplerReportsPerCoreAndUserSystemShares()
+        testNetworkCountersKeepOnlyPhysicalInterfaces()
+        testNetworkRateIsRightAcrossThe32BitBoundary()
+        testVPNTrafficCountsOnce()
+        testAnInterfaceComingOrGoingIsNoSpike()
+        testInterfaceCountersAgreeWithNetstat()
         testProcessSamplerGroupsRowsAndDropsTinyOnes()
         testProcessSamplerUsesTheFootprintOnlyForShownGroups()
         testProcessSamplerRunsPsThroughTheRunner()
@@ -634,6 +639,86 @@ struct SystemBarSchedulerTests {
         )
         expect(reset.currentDownloadRate == 0, "a counter that went backwards (an interface reset) reads as no traffic, not a huge wrapped number")
         expect(reset.cpuUsagePercent == 40, "with no CPU time elapsed the last percent stands, got \(reset.cpuUsagePercent)")
+    }
+
+    private static func traffic(_ interfaces: [String: (received: UInt64, sent: UInt64)]) -> NetworkCounters {
+        NetworkCounters(interfaces: interfaces.map { InterfaceCounters(name: $0.key, received: $0.value.received, sent: $0.value.sent) })
+    }
+
+    private static func downloadRate(from before: NetworkCounters, to after: NetworkCounters) -> Double? {
+        let start = Date(timeIntervalSince1970: 1_000)
+        return FastStatsSampler.rates(from: before, at: start, to: after, at: start.addingTimeInterval(1))?.download
+    }
+
+    private static func testNetworkCountersKeepOnlyPhysicalInterfaces() {
+        let thisMac = ["lo0", "gif0", "stf0", "anpi0", "anpi1", "anpi2", "en0", "en1", "en5", "bridge0",
+                       "utun0", "utun6", "ap1", "awdl0", "llw0"]
+        let counters = traffic(Dictionary(uniqueKeysWithValues: thisMac.map { ($0, (received: 1, sent: 1)) }))
+        expect(Set(counters.interfaces.keys) == ["en0", "en1", "en5"], "only en* interfaces are physical, got \(counters.interfaces.keys.sorted())")
+    }
+
+    private static func testNetworkRateIsRightAcrossThe32BitBoundary() {
+        // en0 on the Mac this was written on had received 124.9 GB since boot, 29 times past 2^32.
+        let before = traffic(["en0": (received: 4_294_966_296, sent: 124_912_442_956)])
+        let after = traffic(["en0": (received: 4_294_968_296, sent: 124_912_443_956)])
+        let start = Date(timeIntervalSince1970: 1_000)
+        let rates = FastStatsSampler.rates(from: before, at: start, to: after, at: start.addingTimeInterval(1))
+        expect(rates?.download == 2_000, "a counter crossing 2^32 still gives the bytes that moved, got \(String(describing: rates))")
+        expect(rates?.upload == 1_000, "and so does one far past it")
+    }
+
+    private static func testVPNTrafficCountsOnce() {
+        // A download through a VPN arrives on en0 and again, decrypted, on utun3.
+        let before = traffic(["en0": (received: 10_000, sent: 0), "utun3": (received: 5_000, sent: 0)])
+        let after = traffic(["en0": (received: 11_000, sent: 0), "utun3": (received: 6_000, sent: 0)])
+        expect(downloadRate(from: before, to: after) == 1_000, "the tunnel's copy of the traffic is not added, got \(String(describing: downloadRate(from: before, to: after)))")
+    }
+
+    private static func testAnInterfaceComingOrGoingIsNoSpike() {
+        let plugged = downloadRate(
+            from: traffic(["en0": (received: 1_000, sent: 0)]),
+            to: traffic(["en0": (received: 2_000, sent: 0), "en5": (received: 50_000_000_000, sent: 0)])
+        )
+        expect(plugged == 1_000, "an interface that appears adds nothing until it has a reading to compare with, got \(String(describing: plugged))")
+        let unplugged = downloadRate(
+            from: traffic(["en0": (received: 1_000, sent: 0), "en5": (received: 50_000_000_000, sent: 0)]),
+            to: traffic(["en0": (received: 2_000, sent: 0)])
+        )
+        expect(unplugged == 1_000, "an interface that disappears takes nothing away, got \(String(describing: unplugged))")
+        let reset = downloadRate(
+            from: traffic(["en0": (received: 50_000, sent: 0), "en5": (received: 900, sent: 0)]),
+            to: traffic(["en0": (received: 10, sent: 0), "en5": (received: 1_900, sent: 0)])
+        )
+        expect(reset == 1_000, "a counter that went backwards counts as nothing, and the others still count, got \(String(describing: reset))")
+    }
+
+    /// The counters the sampler reads are netstat's own, all 64 bits: an app reading the route
+    /// table or getifaddrs instead gets them cut to 32 bits and rounded to a KiB, which a check
+    /// of the low bits alone would not catch. Traffic between the two reads may move them a little.
+    private static func testInterfaceCountersAgreeWithNetstat() {
+        let ours = FastStatsSampler.readInterfaceCounters()
+        let netstat = ProcessRunner.run(path: "/usr/sbin/netstat", arguments: ["-ib"], environment: nil, timeout: ProcessRunner.defaultTimeout)
+        expect(!ours.isEmpty && ours.allSatisfy { NetworkCounters.isPhysical($0.name) }, "this Mac's physical interfaces are read, and only those, got \(ours.map(\.name))")
+        expect(netstat.status == 0, "netstat -ib runs, got status \(netstat.status)")
+        let theirs = netstatReceivedBytes(netstat.output)
+        for interface in ours {
+            guard let reference = theirs[interface.name] else { continue }
+            let drift = Int64(bitPattern: reference &- interface.received)
+            expect((0..<64 * 1_048_576).contains(drift), "\(interface.name): read \(interface.received) bytes received, netstat says \(reference)")
+        }
+        expect(ours.contains { theirs[$0.name] != nil }, "at least one interface is checked against netstat")
+    }
+
+    /// Ibytes per interface from `netstat -ib`'s link rows. A row may lack its address column, so
+    /// Ibytes is found from the end: Ibytes, Opkts, Oerrs, Obytes, Coll.
+    private static func netstatReceivedBytes(_ output: String) -> [String: UInt64] {
+        var result: [String: UInt64] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            let fields = line.split(whereSeparator: \.isWhitespace)
+            guard fields.count >= 8, fields[2].hasPrefix("<Link#"), let bytes = UInt64(fields[fields.count - 5]) else { continue }
+            result[String(fields[0])] = bytes
+        }
+        return result
     }
 
     private static func testFastStatsSamplerKeepsNinetySeconds() {

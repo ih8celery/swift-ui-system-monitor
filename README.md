@@ -62,7 +62,7 @@ A plugin says in `sharedFeeds` which of the host's two shared readings it uses, 
 
 | Feed | What it holds | When the host samples it |
 |---|---|---|
-| `.fastStats` | CPU percent (the whole machine, each core, and the user/system split) and network rates, with 90 seconds of history for the headline figures | Every second while the window is open, whatever the tab, so the history has no gaps |
+| `.fastStats` | CPU percent (the whole machine, each core, and the user/system split) and network rates over the physical (`en`) interfaces only, so a VPN download counts once, with 90 seconds of history for the headline figures | Every second while the window is open, whatever the tab, so the history has no gaps |
 | `.processes` | The top processes by CPU and by memory | Every 10 seconds, only while a tab that declares it is showing |
 
 Nothing is sampled while the window is closed, unless a plugin declares a `backgroundInterval`: then the app keeps calling that plugin's `collect()` at that cadence while its tab is hidden, on the plugin's own queue, with a floor of 5 seconds. The first such call after the Mac wakes waits two minutes, so nothing lands on the login moment. The shared feeds run for the open window and its showing tab, never for a hidden one, so a background `collect()` samples for itself. The table below says which tabs sample while hidden; `--list-plugins` reports it too, as `background every <n>s` on that plugin's line.

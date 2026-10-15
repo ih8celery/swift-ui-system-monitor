@@ -77,8 +77,10 @@ public enum BoundedHistory {
 /// how far the kernel's counters moved since the previous second, so the very first reading is
 /// all zeros.
 public struct FastStatsSnapshot: Sendable {
-    /// Bytes per second received, summed over every network interface that is up, loopback
-    /// excluded.
+    /// Bytes per second received, summed over the Mac's physical network interfaces (Wi-Fi,
+    /// Ethernet, Thunderbolt and USB adapters: the `en` ones) from their 64-bit counters. VPN
+    /// tunnels, AirDrop's peer links, bridges and loopback are left out, because their traffic
+    /// either repeats what a physical interface already carries or never leaves the Mac.
     public var currentDownloadRate: Double = 0
     /// Bytes per second sent, summed the same way as `currentDownloadRate`.
     public var currentUploadRate: Double = 0

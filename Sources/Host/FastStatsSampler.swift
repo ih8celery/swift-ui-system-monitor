@@ -16,7 +16,7 @@ final class FastStatsSampler: @unchecked Sendable {
     private var last = FastStatsSnapshot()
 
     func sample() -> FastStatsSnapshot {
-        sample(cpu: Self.collectCPUCounters(), network: Self.collectNetworkCounters(), at: Date())
+        sample(cpu: Self.collectCPUCounters(), network: NetworkCounters(interfaces: Self.readInterfaceCounters()), at: Date())
     }
 
     /// The rate math, kept apart from the kernel reads so a test can feed it counters. Until
@@ -82,8 +82,9 @@ final class FastStatsSampler: @unchecked Sendable {
         after >= before ? after - before : 0
     }
 
-    /// Bytes per second since the previous reading; nil for the first one. A counter that went
-    /// backwards (an interface reset) reads as no traffic.
+    /// Bytes per second since the previous reading, summed over the interfaces present in both;
+    /// nil for the first one. An interface in only one reading adds nothing, and one whose
+    /// counter went backwards (an interface reset) reads as no traffic, so neither can spike.
     static func rates(
         from previous: NetworkCounters?,
         at previousDate: Date?,
@@ -92,8 +93,13 @@ final class FastStatsSampler: @unchecked Sendable {
     ) -> (download: Double, upload: Double)? {
         guard let previous, let previousDate else { return nil }
         let elapsed = max(0.001, date.timeIntervalSince(previousDate))
-        let received = current.received >= previous.received ? current.received - previous.received : 0
-        let sent = current.sent >= previous.sent ? current.sent - previous.sent : 0
+        var received: UInt64 = 0
+        var sent: UInt64 = 0
+        for (name, now) in current.interfaces {
+            guard let before = previous.interfaces[name] else { continue }
+            received += delta(before.received, now.received)
+            sent += delta(before.sent, now.sent)
+        }
         return (download: Double(received) / elapsed, upload: Double(sent) / elapsed)
     }
 
@@ -137,37 +143,6 @@ final class FastStatsSampler: @unchecked Sendable {
 
         return CPUCounters(cores: cores)
     }
-
-    private static func collectNetworkCounters() -> NetworkCounters {
-        var addresses: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&addresses) == 0, let firstAddress = addresses else {
-            return NetworkCounters(received: 0, sent: 0)
-        }
-        defer { freeifaddrs(addresses) }
-
-        var received: UInt64 = 0
-        var sent: UInt64 = 0
-        var pointer: UnsafeMutablePointer<ifaddrs>? = firstAddress
-
-        while let current = pointer {
-            let interface = current.pointee
-            let flags = Int32(interface.ifa_flags)
-            let isUp = (flags & IFF_UP) != 0
-            let isLoopback = (flags & IFF_LOOPBACK) != 0
-
-            if isUp, !isLoopback,
-               interface.ifa_addr.pointee.sa_family == UInt8(AF_LINK),
-               let data = interface.ifa_data {
-                let networkData = data.assumingMemoryBound(to: if_data.self).pointee
-                received += UInt64(networkData.ifi_ibytes)
-                sent += UInt64(networkData.ifi_obytes)
-            }
-
-            pointer = interface.ifa_next
-        }
-
-        return NetworkCounters(received: received, sent: sent)
-    }
 }
 
 /// One core's cumulative tick counts, as `host_processor_info` reports them.
@@ -204,9 +179,4 @@ struct CPUCounters {
     init(user: UInt64, system: UInt64, idle: UInt64, nice: UInt64) {
         self.init(cores: [CoreTicks(user: user, system: system, idle: idle, nice: nice)])
     }
-}
-
-struct NetworkCounters {
-    let received: UInt64
-    let sent: UInt64
 }
