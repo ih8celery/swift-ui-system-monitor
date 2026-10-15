@@ -22,6 +22,8 @@ struct SystemBarConfigTests {
         testParserRejectsNeitherNameNorPath()
         testParserRejectsNonBooleanEnabled()
         testParserRejectsNonListPlugins()
+        testParserReadsTheNotificationsSwitch()
+        testEncodeWritesTheNotificationsSwitchOnlyWhenOff()
         testParserReportsMalformedJSON()
         testEncodeThenParseRoundTrips()
         testParserNamesTheLineOfMalformedJSON()
@@ -218,6 +220,25 @@ struct SystemBarConfigTests {
         let error = failure(parse(#"{ "plugins": [ { "name": "A.bundle", "enabled": 1 } ] }"#))
         expect(error == .wrongType(key: "enabled", expected: "true or false", where: "plugins[0]"),
                "JSON 1 is not a boolean even though NSNumber would let it through, got \(String(describing: error))")
+    }
+
+    private static func testParserReadsTheNotificationsSwitch() {
+        let off = success(parse(#"{ "plugins": [], "notifications": false }"#))
+        expect(off?.notificationsEnabled == false, "\"notifications\": false turns every plugin's notifications off, got \(String(describing: off))")
+        let absent = success(parse(#"{ "plugins": [] }"#))
+        expect(absent?.notificationsEnabled == true, "notifications are on when the key is absent")
+        let error = failure(parse(#"{ "plugins": [], "notifications": 0 }"#))
+        expect(error == .wrongType(key: "notifications", expected: "true or false", where: "the top level"),
+               "a non-boolean switch is a type error at the top level, got \(String(describing: error))")
+    }
+
+    private static func testEncodeWritesTheNotificationsSwitchOnlyWhenOff() {
+        let on = String(decoding: try! PluginConfigParser.encode(PluginConfig(plugins: [])), as: UTF8.self)
+        expect(!on.contains("notifications"), "the default, on, is not written, got \(on)")
+        let offConfig = PluginConfig(plugins: [], notificationsEnabled: false)
+        let offData = try! PluginConfigParser.encode(offConfig)
+        expect(String(decoding: offData, as: UTF8.self).contains(#""notifications" : false"#), "off is written")
+        expect(success(PluginConfigParser.parse(offData)) == offConfig, "the switch round-trips")
     }
 
     private static func testParserRejectsNonListPlugins() {

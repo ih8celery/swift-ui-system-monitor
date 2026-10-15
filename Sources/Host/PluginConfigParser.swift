@@ -9,7 +9,7 @@ import SystemBarKit
 /// must be an object.
 enum PluginConfigParser {
     private static let topLevel = "the top level"
-    private static let topLevelKeys: Set<String> = ["plugins"]
+    private static let topLevelKeys: Set<String> = ["plugins", "notifications"]
     private static let entryKeys: Set<String> = ["name", "path", "enabled", "settings"]
     /// Foundation's own userInfo key for the byte offset a parse failed at. Named by string
     /// because the constant is not exposed to Swift on every SDK.
@@ -43,7 +43,9 @@ enum PluginConfigParser {
                 return .failure(error)
             }
         }
-        return .success(PluginConfig(plugins: entries))
+        return parseBoolean(root["notifications"], key: "notifications", where: topLevel).map { notificationsEnabled in
+            PluginConfig(plugins: entries, notificationsEnabled: notificationsEnabled)
+        }
     }
 
     /// A file holding one plugin's settings on its own, as `SystemBar --preview --settings` reads
@@ -103,17 +105,18 @@ enum PluginConfigParser {
         if let path, !(path is String) {
             return .failure(.wrongType(key: "path", expected: "a string", where: place))
         }
-        return parseEnabled(object["enabled"], where: place).flatMap { isEnabled in
+        return parseBoolean(object["enabled"], key: "enabled", where: place).flatMap { isEnabled in
             parseSettings(object["settings"], where: place).map { settings in
                 PluginEntry(name: name as? String, path: path as? String, isEnabled: isEnabled, settings: settings)
             }
         }
     }
 
-    private static func parseEnabled(_ raw: Any?, where place: String) -> Result<Bool, PluginConfigError> {
+    /// A switch that is on unless the file says `false`; `null` or a number is a type error.
+    private static func parseBoolean(_ raw: Any?, key: String, where place: String) -> Result<Bool, PluginConfigError> {
         guard let raw else { return .success(true) }
         guard isBoolean(raw), let value = raw as? Bool else {
-            return .failure(.wrongType(key: "enabled", expected: "true or false", where: place))
+            return .failure(.wrongType(key: key, expected: "true or false", where: place))
         }
         return .success(value)
     }
@@ -157,9 +160,13 @@ enum PluginConfigParser {
     }
 
     static func encode(_ config: PluginConfig) throws -> Data {
-        let entries = config.plugins.map(object(for:))
+        var root: [String: Any] = ["plugins": config.plugins.map(object(for:))]
+        // Written only when off, as `enabled` is, so a fresh file stays an empty list.
+        if !config.notificationsEnabled {
+            root["notifications"] = false
+        }
         return try JSONSerialization.data(
-            withJSONObject: ["plugins": entries],
+            withJSONObject: root,
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         )
     }
