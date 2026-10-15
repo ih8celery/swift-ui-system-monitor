@@ -19,7 +19,8 @@ enum PreviewCommand {
         source: TabSource,
         dataRoot: URL,
         processes: Feed<ProcessSummary>,
-        fastStats: Feed<FastStatsSnapshot>
+        fastStats: Feed<FastStatsSnapshot>,
+        notify: @escaping @Sendable (PluginNotification) -> Void = { fputs(notificationLine($0) + "\n", stderr) }
     ) -> PreviewOutcome {
         let options: PreviewOptions
         switch PreviewOptions.parse(arguments, currentDirectory: currentDirectory) {
@@ -41,7 +42,10 @@ enum PreviewCommand {
             processes: processes,
             fastStats: fastStats,
             runner: runner,
-            log: { NSLog("%@", $0) }
+            log: { NSLog("%@", $0) },
+            settings: .empty,
+            dataDirectory: dataRoot,
+            notify: notify
         )
         let tab = PreviewSession.load(bundlePath: options.bundlePath, settings: settings, source: source,
                                       host: host, dataRoot: dataRoot)
@@ -57,6 +61,12 @@ enum PreviewCommand {
             }
             return .finished(code: PreviewExit.ok, message: nil)
         }
+    }
+
+    /// How a preview shows a notification the plugin posted, on standard error, with no
+    /// cooldown, so a plugin's author sees each time a rule fires.
+    nonisolated static func notificationLine(_ notification: PluginNotification) -> String {
+        "notification \(notification.qualifiedID): \(notification.title) - \(notification.body)"
     }
 
     private static func badInput(_ message: String) -> PreviewOutcome {

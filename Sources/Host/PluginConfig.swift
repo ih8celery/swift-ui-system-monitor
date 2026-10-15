@@ -24,6 +24,14 @@ struct PluginEntry: Equatable {
 /// The whole file. Tab order is list order.
 struct PluginConfig: Equatable {
     let plugins: [PluginEntry]
+    /// The one off switch for every plugin's notifications: `"notifications": false` at the top
+    /// level of the file. On when the key is absent.
+    let notificationsEnabled: Bool
+
+    init(plugins: [PluginEntry], notificationsEnabled: Bool = true) {
+        self.plugins = plugins
+        self.notificationsEnabled = notificationsEnabled
+    }
 
     /// The file the app writes when there is none: every default bundle, enabled, in the given order.
     static func defaults(named names: [String]) -> PluginConfig {

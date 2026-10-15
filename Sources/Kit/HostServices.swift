@@ -27,6 +27,7 @@ public final class HostServices: Sendable {
     public let dataDirectory: URL
     private let runner: CommandRunner
     private let logger: @Sendable (String) -> Void
+    private let notifier: @Sendable (PluginNotification) -> Void
 
     /// Anyone may build one; the tests do. By convention only the app does, and the rule that
     /// subprocesses never go through a shell is upheld by the runner's shape: an explicit
@@ -47,6 +48,43 @@ public final class HostServices: Sendable {
         self.logger = log
         self.settings = settings
         self.dataDirectory = dataDirectory
+        self.notifier = { _ in }
+    }
+
+    /// As the initializer above, with somewhere for `notify(id:title:body:)` to go. A plugin's
+    /// test passes the `notify` half of `recordingNotifications()`, so nothing reaches
+    /// Notification Center; the app passes its own delivery. The initializers without it drop
+    /// every notification.
+    public init(
+        homeDirectory: String,
+        processes: Feed<ProcessSummary>,
+        fastStats: Feed<FastStatsSnapshot>,
+        runner: @escaping CommandRunner,
+        log: @escaping @Sendable (String) -> Void,
+        settings: PluginSettings,
+        dataDirectory: URL,
+        notify: @escaping @Sendable (PluginNotification) -> Void
+    ) {
+        self.homeDirectory = homeDirectory
+        self.processes = processes
+        self.fastStats = fastStats
+        self.runner = runner
+        self.logger = log
+        self.settings = settings
+        self.dataDirectory = dataDirectory
+        self.notifier = notify
+    }
+
+    /// For a plugin's tests, as `Feed.forTesting` is for feeds: pass `notify` to
+    /// `init(homeDirectory:processes:fastStats:runner:log:settings:dataDirectory:notify:)`, and
+    /// `posted()` returns every notification the plugin asked for, in order, from any thread.
+    /// No cooldown applies here, so a test sees exactly what its rule decided.
+    public static func recordingNotifications() -> (
+        notify: @Sendable (PluginNotification) -> Void,
+        posted: @Sendable () -> [PluginNotification]
+    ) {
+        let recording = NotificationRecording()
+        return ({ recording.record($0) }, { recording.all })
     }
 
     /// The original initializer, kept so plugin tests written against it still compile: empty
@@ -72,15 +110,27 @@ public final class HostServices: Sendable {
 
     /// The host's side: this host's feeds, runner and log, with one plugin's settings and its
     /// own folder under `dataRoot`. Package-only: the catalog builds one per loaded plugin.
-    package func forPlugin(identifier: String, settings: PluginSettings, dataRoot: URL) -> HostServices {
-        HostServices(
+    /// The plugin's notifications reach this host's with `plugin` set to `identifier`, so the
+    /// app's cooldown counts per plugin whatever ids it makes up and two plugins' rules never
+    /// share one; they are dropped when `notificationsEnabled` is false.
+    package func forPlugin(
+        identifier: String, settings: PluginSettings, dataRoot: URL, notificationsEnabled: Bool
+    ) -> HostServices {
+        let notifier = self.notifier
+        return HostServices(
             homeDirectory: homeDirectory,
             processes: processes,
             fastStats: fastStats,
             runner: runner,
             log: logger,
             settings: settings,
-            dataDirectory: dataRoot.appendingPathComponent(identifier, isDirectory: true)
+            dataDirectory: dataRoot.appendingPathComponent(identifier, isDirectory: true),
+            notify: { notification in
+                guard notificationsEnabled else { return }
+                notifier(PluginNotification(
+                    id: notification.id, title: notification.title, body: notification.body, plugin: identifier
+                ))
+            }
         )
     }
 
@@ -96,6 +146,26 @@ public final class HostServices: Sendable {
         timeout: TimeInterval = ProcessRunner.defaultTimeout
     ) -> CommandOutput {
         runner(path, arguments, environment, timeout)
+    }
+
+    /// Asks the host to show a notification. `id` names the rule that fired, and is the plugin's
+    /// own: the host shows one notification per rule per cooldown (an hour in the app) and
+    /// drops repeats inside it, so a rule may call this on every sample while it holds. Nothing
+    /// is shown when the user has set `"notifications": false` in plugins.json or refused
+    /// permission; macOS asks for that permission the first time any plugin's rule fires. Any
+    /// thread; returns at once and does not say whether the notification was shown.
+    /// A notification with neither a title nor a body would be a blank banner, so it is
+    /// dropped with a line in the log instead.
+    public func notify(id: String, title: String, body: String) {
+        guard !Self.isBlank(title) || !Self.isBlank(body) else {
+            logger("Notification \(id) not shown: its title and body are both empty")
+            return
+        }
+        notifier(PluginNotification(id: id, title: title, body: body))
+    }
+
+    private static func isBlank(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Writes one line to the app's log (the system log, through `NSLog`, in the shipped app).
