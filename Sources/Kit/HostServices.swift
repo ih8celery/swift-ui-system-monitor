@@ -154,8 +154,18 @@ public final class HostServices: Sendable {
     /// is shown when the user has set `"notifications": false` in plugins.json or refused
     /// permission; macOS asks for that permission the first time any plugin's rule fires. Any
     /// thread; returns at once and does not say whether the notification was shown.
+    /// A notification with neither a title nor a body would be a blank banner, so it is
+    /// dropped with a line in the log instead.
     public func notify(id: String, title: String, body: String) {
+        guard !Self.isBlank(title) || !Self.isBlank(body) else {
+            logger("Notification \(id) not shown: its title and body are both empty")
+            return
+        }
         notifier(PluginNotification(id: id, title: title, body: body))
+    }
+
+    private static func isBlank(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Writes one line to the app's log (the system log, through `NSLog`, in the shipped app).

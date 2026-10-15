@@ -13,6 +13,7 @@ struct SystemBarNotificationTests {
         testGateCountsEachRuleSeparately()
         testGateCapsEachPluginWithinTheCooldown()
         testGateForgetsDeliveriesOlderThanTheCooldown()
+        testABlankNotificationIsDroppedWithALogLine()
         testSystemNotificationsSkipOutsideAnAppBundle()
         testPreviewPrintsWhatAPluginPosts()
         testForPluginNamesTheRuleAfterThePlugin()
@@ -114,6 +115,26 @@ struct SystemBarNotificationTests {
         gate.post(stamped("disk", "fresh"))
         expect(gate.trackedCount == 1, "deliveries older than the cooldown are pruned on the next post, got \(gate.trackedCount)")
         expect(delivered().last?.qualifiedID == "disk/fresh", "the ceiling resets once its hour has passed")
+    }
+
+    private static func testABlankNotificationIsDroppedWithALogLine() {
+        let (notify, posted) = HostServices.recordingNotifications()
+        let log = LogRecorder()
+        let host = HostServices(
+            homeDirectory: "/tmp/systembar-tests",
+            processes: Feed(initial: ProcessSummary()),
+            fastStats: Feed(initial: FastStatsSnapshot()),
+            runner: { _, _, _, _ in CommandOutput(output: "", error: "", status: 0, didTimeout: false) },
+            log: { log.record($0) },
+            settings: .empty,
+            dataDirectory: testDataRoot,
+            notify: notify
+        )
+        host.notify(id: "low", title: "  ", body: "\n")
+        expect(posted().isEmpty, "a notification with no title and no body would be a blank banner, so it is dropped")
+        expect(log.count == 1 && log.messages.first?.contains("low") == true, "and the plugin's author can find out why in the log, got \(log.messages)")
+        host.notify(id: "low", title: "", body: "12 GB free")
+        expect(posted().count == 1, "a body alone is enough to show")
     }
 
     private static func testSystemNotificationsSkipOutsideAnAppBundle() {
