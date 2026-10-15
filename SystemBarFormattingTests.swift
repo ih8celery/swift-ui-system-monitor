@@ -8,7 +8,20 @@ struct SystemBarFormattingTests {
         testFileBytesCountInThousands()
         testMemoryBytesCountInKibibytes()
         testFileRatesCountInThousands()
+        testUnitIsChosenAfterRounding()
         testOlderFormattersAreUnchanged()
+    }
+
+    private static func testUnitIsChosenAfterRounding() {
+        expect(fileByteString(999_999) == "1.0 MB", "a size that rounds to 1000 KB should read 1.0 MB")
+        expect(fileByteString(999_949) == "999.9 KB", "a size that stays below 1000 KB once rounded keeps its unit")
+        expect(memoryByteString(1_048_575) == "1.0 MB", "memory that rounds to 1024 KB should read 1.0 MB")
+        expect(memoryByteString(1_099_511_627_775) == "1.0 TB", "memory that rounds to 1024 GB should read 1.0 TB")
+        expect(memoryByteString(1_023) == "1023 B", "whole bytes never round up a unit")
+        expect(fileRateString(999_999) == "1.0 MB/s", "a speed that rounds to 1000 KB/s should read 1.0 MB/s")
+        expect(fileRateString(999.5) == "1.0 KB/s", "a speed that rounds to 1000 B/s should read 1.0 KB/s")
+        expect(fileRateString(9_999) == "10 KB/s", "a speed that rounds to 10 of a unit should read as a whole number")
+        expect(fileRateString(10_000) == "10 KB/s", "ten of a unit should read as a whole number")
     }
 
     private static func testFileBytesCountInThousands() {

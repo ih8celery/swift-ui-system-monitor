@@ -35,7 +35,10 @@ public func rateString(_ bytesPerSecond: Double) -> String {
 /// Disk Utility count them, B/s to GB/s: whole numbers from 10 of a unit, e.g. `12 KB/s`, one
 /// decimal below, e.g. 2 500 000 reads `2.5 MB/s`. A negative rate reads as `0 B/s`.
 public func fileRateString(_ bytesPerSecond: Double) -> String {
-    rateText(bytesPerSecond, base: 1000)
+    let (value, index) = scaledAsPrinted(
+        max(0, bytesPerSecond), base: 1000, unitCount: rateUnits.count
+    ) { value, index in printsWhole(value, index) ? 0 : 1 }
+    return String(format: printsWhole(value, index) ? "%.0f %@" : "%.1f %@", value, rateUnits[index])
 }
 
 private let byteUnits = ["B", "KB", "MB", "GB", "TB"]
@@ -53,8 +56,32 @@ private func scaled(_ value: Double, base: Double, unitCount: Int) -> (Double, I
     return (value, index)
 }
 
+/// Like `scaled`, but steps up one more unit when the value, rounded to the `decimals` it will
+/// print with, reaches `base`, so 999 999 bytes reads `1.0 MB` rather than `1000.0 KB`.
+private func scaledAsPrinted(
+    _ value: Double, base: Double, unitCount: Int, decimals: (Double, Int) -> Int
+) -> (Double, Int) {
+    let (value, index) = scaled(value, base: base, unitCount: unitCount)
+    guard index < unitCount - 1, rounded(value, places: decimals(value, index)) >= base else {
+        return (value, index)
+    }
+    return (value / base, index + 1)
+}
+
+private func rounded(_ value: Double, places: Int) -> Double {
+    let scale = pow(10, Double(places))
+    return (value * scale).rounded() / scale
+}
+
+/// Whether a speed prints as a whole number: bytes always, any unit from 10 once rounded.
+private func printsWhole(_ value: Double, _ index: Int) -> Bool {
+    index == 0 || rounded(value, places: 1) >= 10
+}
+
 private func oneDecimalByteString(_ bytes: UInt64, base: Double) -> String {
-    let (value, index) = scaled(Double(bytes), base: base, unitCount: byteUnits.count)
+    let (value, index) = scaledAsPrinted(
+        Double(bytes), base: base, unitCount: byteUnits.count
+    ) { _, index in index == 0 ? 0 : 1 }
     if index == 0 {
         return "\(Int(value)) \(byteUnits[index])"
     }
