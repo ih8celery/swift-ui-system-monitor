@@ -38,9 +38,10 @@ public protocol TabPlugin: AnyObject {
     /// How often the host calls `collect()` while this tab is NOT showing: the window closed,
     /// or open on another tab. Nil, the default, means never: the tab samples only while it is
     /// on screen, as every tab did before this existed. A number is clamped to between 5 seconds
-    /// and one day, and each substitution is logged. Shared feeds run only for the window and the
-    /// showing tab, never for this one while it is hidden, so a background `collect()` must sample
-    /// for itself; a feed value read then is whatever the feed last held. Every wake of the Mac
+    /// and one day, and each substitution is logged. `fastStats` runs whenever the app runs, so a
+    /// background `collect()` may read it; `processes` runs only for the showing tab, so a value
+    /// read from it then is whatever it last held, and a hidden tab that needs `ps` runs it
+    /// itself. Every wake of the Mac
     /// or its screen restarts the cadence with a tick two minutes later, so no sample lands on
     /// the login moment and a long interval still gets a tick soon after each wake: keep the
     /// work of one tick cheap, and keep any slower cadence (a scan every few hours, say) in

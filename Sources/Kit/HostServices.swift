@@ -15,7 +15,8 @@ public final class HostServices: Sendable {
     /// visible plugin lists `.processes` in its `sharedFeeds`.
     public let processes: Feed<ProcessSummary>
     /// The 1-second sample: CPU percent and network rates with their short histories. Sampled
-    /// whenever the window is open, so listing `.fastStats` only documents the dependency today.
+    /// whenever the app runs, window open or closed, so a background `collect()` reads it live
+    /// and listing `.fastStats` only documents the dependency today.
     public let fastStats: Feed<FastStatsSnapshot>
     /// The `settings` object from this plugin's entry in plugins.json, or `.empty`. The keys
     /// are the plugin's own; see `PluginSettings`.
