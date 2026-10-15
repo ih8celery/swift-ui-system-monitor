@@ -33,6 +33,9 @@ struct SystemBarLoaderTests {
         testSameBundleCheckFollowsSymlinks()
         testRelauncherBuildsLaunchctlArguments()
         testRelauncherReadsThePidFromLaunchctlPrint()
+        testScreenLockerLocksWithoutRunningAnything()
+        testScreenLockerSleepsTheDisplayWhenItCannotLock()
+        testScreenLockerLogsWhenNeitherWayWorks()
     }
 
     // MARK: - Loader
@@ -380,6 +383,49 @@ struct SystemBarLoaderTests {
         expect(Relauncher.pid(fromLaunchctlPrint: "pid = abc") == nil, "a pid that is not a number is no pid")
         expect(Relauncher.pid(fromLaunchctlPrint: "pid = 99999999999") == nil, "a pid too big for Int32 is no pid")
     }
+
+    // MARK: - Screen lock
+
+    private static func testScreenLockerLocksWithoutRunningAnything() {
+        var commands: [[String]] = []
+        var logged: [String] = []
+        ScreenLocker.lock(
+            lockNow: { true },
+            runner: { path, arguments, _, _ in
+                commands.append([path] + arguments)
+                return CommandOutput(output: "", error: "", status: 0, didTimeout: false)
+            },
+            log: { logged.append($0) }
+        )
+        expect(commands.isEmpty, "a lock that works needs no display sleep")
+        expect(logged.isEmpty, "a lock that works logs nothing")
+    }
+
+    private static func testScreenLockerSleepsTheDisplayWhenItCannotLock() {
+        var commands: [[String]] = []
+        var logged: [String] = []
+        ScreenLocker.lock(
+            lockNow: { false },
+            runner: { path, arguments, _, _ in
+                commands.append([path] + arguments)
+                return CommandOutput(output: "", error: "", status: 0, didTimeout: false)
+            },
+            log: { logged.append($0) }
+        )
+        expect(commands == [["/usr/bin/pmset", "displaysleepnow"]], "without the lock call, the display is put to sleep")
+        expect(logged.count == 1, "falling back to display sleep is logged once")
+    }
+
+    private static func testScreenLockerLogsWhenNeitherWayWorks() {
+        var logged: [String] = []
+        ScreenLocker.lock(
+            lockNow: { false },
+            runner: { _, _, _, _ in CommandOutput(output: "", error: "boom", status: 1, didTimeout: false) },
+            log: { logged.append($0) }
+        )
+        expect(logged.count == 2, "a failed display sleep is logged after the fallback")
+        expect(logged.last?.contains("boom") == true, "the failure log carries pmset's error")
+    }
 }
 
 /// A second plugin with its own id, for duplicate-id and ordering tests.
@@ -500,4 +546,5 @@ struct FakeBundleLoader: BundleLoading {
         }
         return cls
     }
+
 }

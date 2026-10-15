@@ -71,14 +71,14 @@ struct RootView: View {
             .accessibilityHint("Restarts SystemBar so changes to plugins.json take effect")
 
             Button {
-                NSApplication.shared.terminate(nil)
+                ScreenLocker.lock(log: { NSLog("%@", $0) })
             } label: {
-                Label("Quit", systemImage: "power")
+                Label("Lock", systemImage: "lock")
             }
             .buttonStyle(.borderless)
             .labelStyle(.titleAndIcon)
-            .help("Quit SystemBar")
-            .accessibilityHint("Quits SystemBar")
+            .help("Lock the screen")
+            .accessibilityHint("Locks the Mac's screen, like Control-Command-Q")
         }
     }
 

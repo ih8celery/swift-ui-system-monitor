@@ -16,7 +16,7 @@ Which tabs appear, and in what order, comes from a file the app writes, empty, t
 ~/Library/Application Support/SystemBar/plugins.json
 ```
 
-A plugin's installer adds its entries. Reorder the entries to reorder the tabs, set `"enabled": false` on one to hide it, and press the Relaunch button in the popover header (the circular arrow next to Quit) or quit and reopen to apply the change. The first tab listed is the one that opens; with nothing listed the popover says so and names the file.
+A plugin's installer adds its entries. Reorder the entries to reorder the tabs, set `"enabled": false` on one to hide it, and press Relaunch in the popover header to apply the change. The first tab listed is the one that opens; with nothing listed the popover says so and names the file.
 
 ```json
 { "plugins": [
@@ -41,6 +41,8 @@ An entry the app cannot load, say a misspelt name, still gets a tab: it is title
 `./SystemBar.app/Contents/MacOS/SystemBar --list-plugins` prints the same outcome to the terminal, one line per enabled entry, and exits without opening a window (on a fresh machine it creates the file, just like a normal launch). It always exits 0, even when a line reports an error, so a script has to look at the text of each line rather than the exit code; a line for a failed entry starts with `error`, and the location it shows for a `name` entry is the name as written in `plugins.json` (say `Clock.bundle`), not a resolved path. A plugin that samples while hidden has `background every <n>s` at the end of its line. `SYSTEMBAR_PLUGINS_FILE=/some/other.json` points one run at a different file.
 
 Relaunch restarts the app in place: when SystemBar was installed as a login item it asks launchd to restart it, and otherwise it starts a fresh copy and quits. If a relaunch fails, the reason goes to the system log.
+
+Lock, beside it, locks the Mac's screen, the same as Control-Command-Q. The popover has no Quit: the login service would start SystemBar again at once, so `./install.sh uninstall` is how to stop it.
 
 ## Writing a plugin
 
