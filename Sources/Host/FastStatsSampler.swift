@@ -36,6 +36,8 @@ final class FastStatsSampler: @unchecked Sendable {
         next.perCoreUsage = perCore
         next.currentDownloadRate = rates.download
         next.currentUploadRate = rates.upload
+        next.bytesReceivedSinceBoot = network.interfaces.values.reduce(0) { $0 + $1.received }
+        next.bytesSentSinceBoot = network.interfaces.values.reduce(0) { $0 + $1.sent }
         BoundedHistory.append(cpuPercent, to: &next.cpuHistory, limit: Self.historyLimit)
         BoundedHistory.append(rates.download, to: &next.downloadHistory, limit: Self.historyLimit)
         BoundedHistory.append(rates.upload, to: &next.uploadHistory, limit: Self.historyLimit)
