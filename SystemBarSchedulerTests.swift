@@ -37,6 +37,7 @@ struct SystemBarSchedulerTests {
         testFastStatsSamplerKeepsNinetySeconds()
         testFastStatsSamplerReportsPerCoreAndUserSystemShares()
         testFastStatsSamplerDoesNotSpikeAfterALongGap()
+        testFastStatsSamplerCarriesTotalsSinceBoot()
         testNetworkCountersKeepOnlyPhysicalInterfaces()
         testNetworkRateIsRightAcrossThe32BitBoundary()
         testVPNTrafficCountsOnce()
@@ -686,6 +687,30 @@ struct SystemBarSchedulerTests {
         expect(afterWake.currentUploadRate == 100, "360 KB sent over the hour reads 100 B/s, got \(afterWake.currentUploadRate)")
         expect(afterWake.cpuUsagePercent == 15, "CPU is a share of the ticks that passed, so it stays a percent, got \(afterWake.cpuUsagePercent)")
         expect(afterWake.downloadHistory.count == 2, "the gap adds one point to the history, not an hour of them, got \(afterWake.downloadHistory.count)")
+    }
+
+    /// The totals are the raw since-boot counters summed over the physical interfaces in this
+    /// reading: there from the first reading, past 4 GiB, without the VPN, and lower when an
+    /// interface goes away.
+    private static func testFastStatsSamplerCarriesTotalsSinceBoot() {
+        let sampler = FastStatsSampler()
+        let start = Date(timeIntervalSince1970: 1_000)
+        let cpu = CPUCounters(user: 100, system: 50, idle: 850, nice: 0)
+        let fiveGiB: UInt64 = 5 << 30
+        let first = sampler.sample(
+            cpu: cpu,
+            network: traffic(["en0": (fiveGiB, 2_000), "en7": (3_000, 400), "utun4": (9_000, 9_000)]),
+            at: start
+        )
+        expect(first.bytesReceivedSinceBoot == fiveGiB + 3_000, "the first reading already carries the totals, summed over en0 and en7 past 4 GiB, got \(first.bytesReceivedSinceBoot)")
+        expect(first.bytesSentSinceBoot == 2_400, "and sent the same way, without the VPN's bytes, got \(first.bytesSentSinceBoot)")
+
+        let unplugged = sampler.sample(cpu: cpu, network: traffic(["en0": (fiveGiB + 1_000, 2_100)]), at: start.addingTimeInterval(1))
+        expect(unplugged.bytesReceivedSinceBoot == fiveGiB + 1_000, "an unplugged adapter takes its bytes out of the total, got \(unplugged.bytesReceivedSinceBoot)")
+        expect(unplugged.bytesSentSinceBoot == 2_100, "so the sent total goes down too, got \(unplugged.bytesSentSinceBoot)")
+        expect(unplugged.currentDownloadRate == 1_000, "while the rate counts only en0's real traffic, got \(unplugged.currentDownloadRate)")
+
+        expect(FastStatsSnapshot().bytesReceivedSinceBoot == 0 && FastStatsSnapshot().bytesSentSinceBoot == 0, "an empty reading's totals are zero")
     }
 
     private static func traffic(_ interfaces: [String: (received: UInt64, sent: UInt64)]) -> NetworkCounters {

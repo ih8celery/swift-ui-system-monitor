@@ -75,7 +75,7 @@ public enum BoundedHistory {
 /// The host's 1-second reading of CPU load (the whole machine, each core, and the user/system
 /// split) and network traffic, behind `HostServices.fastStats`. Every figure is worked out from
 /// how far the kernel's counters moved since the previous second, so the very first reading is
-/// all zeros.
+/// all zeros, except the since-boot totals, which are the counters themselves.
 public struct FastStatsSnapshot: Sendable {
     /// Bytes per second received, summed over the Mac's physical network interfaces (Wi-Fi,
     /// Ethernet, Thunderbolt and USB adapters: the `en` ones) from their 64-bit counters: the
@@ -108,6 +108,16 @@ public struct FastStatsSnapshot: Sendable {
     /// Past values of `currentUploadRate` in bytes per second, oldest first, one per second, at
     /// most ninety.
     public var uploadHistory: [Double] = []
+    /// Bytes received since boot: the sum of the 64-bit counters of the physical (`en`)
+    /// interfaces present in this reading, the same set `currentDownloadRate` uses. It is a sum
+    /// of what is plugged in now, not a running total: when an interface goes away (a USB or
+    /// Thunderbolt adapter unplugged), its bytes leave the sum and the figure goes down, and one
+    /// that comes back may restart from zero. A plugin keeping its own running total adds up the
+    /// change between readings, skipping a fall, rather than storing this figure. Zero until the
+    /// host's first reading.
+    public var bytesReceivedSinceBoot: UInt64 = 0
+    /// Bytes sent since boot, summed the same way as `bytesReceivedSinceBoot`.
+    public var bytesSentSinceBoot: UInt64 = 0
 
     /// An empty reading: every figure zero and every history empty.
     public init() {}
