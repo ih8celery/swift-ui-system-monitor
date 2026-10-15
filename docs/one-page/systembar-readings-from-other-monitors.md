@@ -38,6 +38,8 @@ with 6 "Super" and 12 "Performance" cores), without `sudo`.
 | Charger | same, `AdapterDetails.Watts` | 94 W |
 | Whole-Mac power draw | same, `PowerTelemetryData.SystemLoad` (mW) | 31598 = 31.6 W, on AC |
 | Battery-only watts | `Voltage` × `Amperage` (jhi D2) | **0 W** on AC, because the battery is idle: wrong as "power draw" |
+| Whole-Mac draw, on battery (2026-10-14, P1 probe) | `SystemLoad`, `BatteryPower`, `Voltage` × `Amperage` | `SystemLoad` **−15.8 W** (negative), `BatteryPower` 15.8 W, `Voltage × |Amperage|` **50.4 W** (12.14 V × 4.15 A); `TimeRemaining` 67 min on ~58 Wh left implies ~52 W |
+| Telemetry freshness | `PowerTelemetryData` | lags: still showed 84.8 W charger input 50 s after unplugging; updates about once a minute, while `Voltage`/`Amperage` follow at once |
 | Disk activity | `ioreg -r -c IOBlockStorageDriver`, `Statistics` | `Bytes (Read)` 742 GB, `Bytes (Write)` 1.47 TB since boot |
 | GPU | `ioreg -r -c AGXAccelerator`, `PerformanceStatistics` | Device 34%, Renderer 32%, Tiler 21% |
 | Interface totals | `netstat -ib` (64-bit) | `en0` received 113 GB since boot — far past the 4 GiB at which our counters wrap |
@@ -47,8 +49,11 @@ Two findings change earlier decisions:
 
 - **jhi D2's watts are battery watts, not Mac watts.** On AC with the battery
   held, `Voltage × Amperage` is zero while the Mac draws 31.6 W. `SystemLoad`
-  measures the Mac. It is an undocumented key, so it must be re-checked on battery
-  and on a desktop Mac before the panel relies on it (P1 below).
+  measures the Mac on AC. It is an undocumented key, so it was re-checked on
+  battery (P1 probe, 2026-10-14): there it turns negative and reads a third of the
+  real draw, so it is **not** whole-Mac watts on battery. On battery the Mac's draw
+  is the battery's discharge, `Voltage × |Amperage|`, which agrees with the
+  driver's own time-remaining estimate (P1 below).
 - **The charge limit is readable.** It lives in a world-readable preferences file
   as a keyed archive. Undocumented, so it is shown only when it parses, and is
   absent otherwise.
@@ -196,12 +201,16 @@ noted; jhi.3–jhi.5 (sleep blockers, sleep cause, keep-awake) are unchanged.
   `ChargerData.NotChargingReason`, not from words in `pmset` output. States:
   Charging, Discharging, Full, Held at limit, On AC (not charging). Accept: the
   `pmset` and `ioreg` text captured from this Mac reads "Held at 80% limit".
-- **P1 — Real power draw (amends jhi.2).** Mac watts = `SystemLoad`; battery
-  watts = `Voltage × Amperage` (signed, as jhi warns); charger watts = rated
-  `AdapterDetails.Watts`. Before building, probe `SystemLoad` on battery (it
-  should be close to the battery's discharge watts) and on a desktop Mac. If it
-  fails either probe, the tab falls back to jhi's battery watts on battery and
-  shows none on AC.
+- **P1 — Real power draw (amends jhi.2).** Battery watts = `Voltage × Amperage`
+  (signed, as jhi warns: negative is discharge). Mac watts: on battery,
+  `Voltage × |Amperage|`; on AC, `SystemPowerIn` (equal to `SystemLoad` there)
+  less the battery's charging watts when it is charging. Charger watts = rated
+  `AdapterDetails.Watts`. The probe ruled out `SystemLoad` on battery (negative,
+  a third of the real draw); no desktop Mac was available, so a Mac with no
+  battery shows `SystemPowerIn` when present and otherwise says it reports no
+  power figures. Telemetry lags about a minute behind a plug or unplug, so for
+  the minute after the source changes the tab prefers `Voltage × Amperage` and
+  never shows charger input while `ExternalConnected` is false.
 - **P2 — Battery detail.** Health (`AppleRawMaxCapacity ÷ DesignCapacity`, which
   can read over 100% on a new battery and will not match System Settings exactly),
   cycle count, battery temperature (labelled as the battery's), charger wattage,
