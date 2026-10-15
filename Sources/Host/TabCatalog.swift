@@ -47,7 +47,8 @@ enum TabCatalog {
 
     /// Every enabled entry, in order, as a loaded tab or a failure. Nothing here stops on error.
     /// Each plugin is constructed with a host of its own: the shared feeds and runner, plus its
-    /// entry's settings and a folder named by its identifier under `dataRoot`.
+    /// entry's settings, a folder named by its identifier under `dataRoot`, and notifications
+    /// that reach `host` only while the file's off switch is not set.
     @MainActor static func build(
         config: PluginConfig,
         source: TabSource,
@@ -59,7 +60,10 @@ enum TabCatalog {
         // can name which earlier entry it clashes with.
         var loadedIDs: [String: String] = [:]
         for entry in config.plugins where entry.isEnabled {
-            let tab = makeTab(for: entry, source: source, host: host, dataRoot: dataRoot, alreadyLoaded: loadedIDs)
+            let tab = makeTab(
+                for: entry, source: source, host: host, dataRoot: dataRoot,
+                notificationsEnabled: config.notificationsEnabled, alreadyLoaded: loadedIDs
+            )
             tabs.append(tab)
             if let plugin = tab.plugin {
                 loadedIDs[type(of: plugin).identifier] = entry.location
@@ -73,6 +77,7 @@ enum TabCatalog {
         source: TabSource,
         host: HostServices,
         dataRoot: URL,
+        notificationsEnabled: Bool,
         alreadyLoaded: [String: String]
     ) -> LoadedTab {
         let type: TabPlugin.Type
@@ -88,7 +93,9 @@ enum TabCatalog {
         if let earlier = alreadyLoaded[id] {
             return .failed(location: entry.location, reason: "the id \"\(id)\" is already used by \"\(earlier)\", which comes earlier in the list")
         }
-        let pluginHost = host.forPlugin(identifier: id, settings: entry.settings, dataRoot: dataRoot)
+        let pluginHost = host.forPlugin(
+            identifier: id, settings: entry.settings, dataRoot: dataRoot, notificationsEnabled: notificationsEnabled
+        )
         return .loaded(location: entry.location, plugin: timedInit(of: type, host: pluginHost))
     }
 

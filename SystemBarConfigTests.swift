@@ -69,7 +69,7 @@ struct SystemBarConfigTests {
         )
         expect(host.settings == settings, "the settings handed in are the settings read back")
         expect(host.dataDirectory == directory, "and so is the data directory")
-        let child = host.forPlugin(identifier: "disk", settings: .empty, dataRoot: URL(fileURLWithPath: "/root"))
+        let child = host.forPlugin(identifier: "disk", settings: .empty, dataRoot: URL(fileURLWithPath: "/root"), notificationsEnabled: true)
         expect(child.dataDirectory.path == "/root/disk", "a per-plugin host's folder is the root plus the identifier, got \(child.dataDirectory.path)")
         expect(child.settings == .empty && child.homeDirectory == host.homeDirectory, "and it keeps the home directory while taking its own settings")
         expect(!FileManager.default.fileExists(atPath: child.dataDirectory.path), "nothing is created until a plugin writes")
