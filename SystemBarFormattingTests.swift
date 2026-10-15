@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import SystemBarKit
 
 /// Tests for the SDK's text formatters: the Apple-convention byte and rate strings (files and
@@ -10,6 +11,20 @@ struct SystemBarFormattingTests {
         testFileRatesCountInThousands()
         testUnitIsChosenAfterRounding()
         testOlderFormattersAreUnchanged()
+        MainActor.assumeIsolated { testLegendUsesTheFormatterItIsGiven() }
+    }
+
+    /// The Disk tab's capacity bar: its header read `Used 709.7 GB` with `fileByteString` while
+    /// the legend under it read `661.0 GB` with `byteString`.
+    @MainActor private static func testLegendUsesTheFormatterItIsGiven() {
+        let used = BarSegment(label: "Used", value: 709_700_000_000, color: .blue)
+        let plain = SegmentedLegend(rows: [used])
+        expect(plain.valueText(used) == "661.0 GB", "a legend built as before still reads byteString, got \(plain.valueText(used))")
+        let files = SegmentedLegend(rows: [used], format: fileByteString)
+        expect(files.valueText(used) == "709.7 GB", "a legend given fileByteString reads as Finder does, got \(files.valueText(used))")
+        let wired = BarSegment(label: "Wired", value: 1_500_000_000, color: .red)
+        let memory = SegmentedLegend(rows: [wired], format: memoryByteString)
+        expect(memory.valueText(wired) == "1.4 GB", "a legend given memoryByteString reads as Activity Monitor does")
     }
 
     private static func testUnitIsChosenAfterRounding() {

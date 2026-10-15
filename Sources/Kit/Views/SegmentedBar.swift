@@ -7,7 +7,7 @@ public struct BarSegment: Identifiable, Hashable, Sendable {
     /// must differ.
     public let label: String
     /// The slice's size in bytes: the bar sizes it against the bar's total, and the legend
-    /// prints it with `byteString(_:)`.
+    /// prints it with the formatter it was given, `byteString(_:)` unless told otherwise.
     public let value: UInt64
     /// The slice's fill in the bar and its dot in the legend.
     public let color: Color
@@ -56,10 +56,25 @@ public struct SegmentedBar: View {
 /// per row. It shows every row it is given, zero-sized ones included.
 public struct SegmentedLegend: View {
     let rows: [BarSegment]
+    let format: (UInt64) -> String
 
-    /// One legend row per segment, in the order given.
+    /// One legend row per segment, in the order given, each value printed with
+    /// `byteString(_:)`. Use `init(rows:format:)` to match the units the rest of a tab shows.
     public init(rows: [BarSegment]) {
+        self.init(rows: rows, format: byteString)
+    }
+
+    /// One legend row per segment, in the order given, each value printed with `format`: pass
+    /// the formatter the rest of the tab uses, e.g. `fileByteString` for a disk's sizes or
+    /// `memoryByteString` for memory, so the legend reads the same as the numbers beside it.
+    public init(rows: [BarSegment], format: @escaping (UInt64) -> String) {
         self.rows = rows
+        self.format = format
+    }
+
+    /// What the legend prints for `row`. Package-only, for tests.
+    package func valueText(_ row: BarSegment) -> String {
+        format(row.value)
     }
 
     public var body: some View {
@@ -72,7 +87,7 @@ public struct SegmentedLegend: View {
                     Text(row.label)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    Text(byteString(row.value))
+                    Text(valueText(row))
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 }
                 .font(.caption)
