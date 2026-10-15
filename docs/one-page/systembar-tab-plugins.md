@@ -235,11 +235,12 @@ joins it or, when it is a line or two, is copied.
 
 The host runs two shared samplers of its own, in `HostSamplers`. The 1-second
 sampler (CPU percent for the whole machine, each core and the user/system split, and network rates, with 90 seconds of history for the headline figures) runs
-whenever the window is open, whatever the tab, so switching tabs leaves no gap
-in the histories. The 10-second `ps` sampler runs only while the showing tab
-declares `.processes`. With the window closed, or an error tab showing,
-neither runs; the only work that does is the `collect()` of a plugin that
-declared a `backgroundInterval` (D9), on its own queue, at that cadence. A
+whenever the app runs, from launch, window open or closed, so the histories are
+full when the window opens and a hidden tab can read a live CPU figure. The
+10-second `ps` sampler runs only while the window is open on a tab that
+declares `.processes`. With the window closed, or an error tab showing, `ps`
+does not run, and no tab is collected except a plugin that declared a
+`backgroundInterval` (D9), on its own queue, at that cadence. A
 sampler samples at once when it starts, and one that keeps running across a
 tab switch keeps its rhythm.
 
@@ -402,8 +403,8 @@ plugin, the SDK would be wrong.
 - A wrong path, a bad bundle, or a duplicate id shows up as a tab that says so.
 - `UnifiedMonitor` no longer exists; nothing in `Sources/Host/` names a
   specific tab.
-- The window closed still means no heavy sampling, and switching tabs still
-  means only that tab's samplers run.
+- The window closed still means no heavy sampling (only the 1-second counter
+  reads), and switching tabs still means `ps` runs only for a tab that wants it.
 
 ## Non-Goals
 

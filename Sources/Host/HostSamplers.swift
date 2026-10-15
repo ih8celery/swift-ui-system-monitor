@@ -3,10 +3,11 @@ import SystemBarKit
 
 /// The two samplers the host runs on every plugin's behalf, and when each one runs.
 ///
-/// The 1-second sampler runs whenever the window is open, whatever the tab: the CPU and network
-/// histories are ninety seconds long, and stopping it on a tab switch would leave a gap in them.
-/// The 10-second process sampler runs only while the visible tab lists `.processes`, because a
-/// `ps` of every process is the heavy one. With the window closed, neither runs.
+/// The 1-second sampler runs whenever the app runs, from launch, window open or closed: the CPU
+/// and network histories are ninety seconds long, so they are full when the window opens, and a
+/// tab that watches the CPU in the background reads a live feed. It is a few counter reads a
+/// second. The 10-second process sampler runs only while the window is open on a tab that lists
+/// `.processes`, because a `ps` of every process is the heavy one.
 ///
 /// Main thread only. Each sampler has its own serial queue, so a slow `ps` (it can take up to
 /// its 15-second timeout) cannot stall the 1-second ticks and leave a gap in their history.
@@ -61,10 +62,10 @@ final class HostSamplers {
         )
     }
 
-    /// Which samplers a tab that declares `feeds` needs.
+    /// Which samplers should run while a tab that declares `feeds` is shown, or the window is
+    /// closed: the 1-second one always, and `ps` only for a visible tab that declares it.
     nonisolated static func wanted(isVisible: Bool, feeds: Set<SharedFeed>) -> Set<SharedFeed> {
-        guard isVisible else { return [] }
-        return feeds.contains(.processes) ? [.fastStats, .processes] : [.fastStats]
+        isVisible && feeds.contains(.processes) ? [.fastStats, .processes] : [.fastStats]
     }
 
     /// Which samplers are running now.
@@ -74,9 +75,9 @@ final class HostSamplers {
 
     /// Starts what the visible tab now needs and stops what it no longer does. A sampler that
     /// starts reads at once, so a tab never opens on a stale feed; one that keeps running keeps
-    /// its rhythm, so calling this on every tab switch costs nothing extra. Stopping a sampler
-    /// also takes back its first reading if that has not started yet, so opening the window and
-    /// closing it straight away runs nothing.
+    /// its rhythm, so calling this on every tab switch or open and close costs nothing extra.
+    /// Stopping a sampler also takes back its first reading if that has not started yet, so
+    /// opening the window and closing it straight away runs no `ps`.
     func update(isVisible: Bool, feeds: Set<SharedFeed>) {
         let wanted = Self.wanted(isVisible: isVisible, feeds: feeds)
         let fastStats = self.fastStats
@@ -89,6 +90,20 @@ final class HostSamplers {
         processSampler = reconciled(processSampler, isWanted: wanted.contains(.processes), interval: processInterval, on: processQueue) {
             processes.send(sampleProcesses())
         }
+    }
+
+    /// Starts what runs with no window open: the 1-second sampler. The app calls it at launch.
+    func start() {
+        update(isVisible: false, feeds: [])
+    }
+
+    /// Stops both samplers. For tests, whose short-interval samplers would otherwise tick on
+    /// through the rest of the suite; the app's run until it quits.
+    func stopAll() {
+        fastSampler?.cancel()
+        processSampler?.cancel()
+        fastSampler = nil
+        processSampler = nil
     }
 
     private func reconciled(

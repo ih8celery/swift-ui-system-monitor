@@ -34,10 +34,8 @@ struct SystemBarApp: App {
             notify: { gate.post($0) }
         )
         let scheduler = PluginScheduler()
-        presenter = TabPresenter(
-            scheduler: scheduler,
-            samplers: HostSamplers.standard(processes: processes, fastStats: fastStats)
-        )
+        let samplers = HostSamplers.standard(processes: processes, fastStats: fastStats)
+        presenter = TabPresenter(scheduler: scheduler, samplers: samplers)
         let source = BundleTabSource.standard()
         let loaded = TabLoader.load(store: store, source: source, host: host, dataRoot: dataRoot)
         tabs = loaded
@@ -52,6 +50,8 @@ struct SystemBarApp: App {
 
         // A plugin that declared a backgroundInterval starts sampling now, window or no window.
         scheduler.start(loaded.compactMap(\.plugin))
+        // The CPU and network histories fill from launch, so they are full when the window opens.
+        samplers.start()
     }
 
     var body: some Scene {

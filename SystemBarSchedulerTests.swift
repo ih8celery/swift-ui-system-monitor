@@ -25,17 +25,18 @@ struct SystemBarSchedulerTests {
         testSchedulerSettlesBackgroundTimersAfterAWake()
         testSchedulerLeavesTheShownTabAloneAfterAWake()
         testSchedulerStartLeavesAShownTabOnItsFastTimer()
-        testSamplersWantNothingWhileTheWindowIsClosed()
-        testSamplersRunNothingWhileTheWindowIsClosed()
+        testSamplersWantOnlyTheFastSamplerWhileTheWindowIsClosed()
+        testSamplersKeepTheFastSamplerWhileTheWindowIsClosed()
         testSamplersRunTheFastSamplerForEveryVisibleTab()
         testSamplersRunTheProcessSamplerOnlyWhileATabDeclaresIt()
         testSamplersSampleAtOnceWhenStartedAndKeepTheirRhythm()
         testSamplersFillTheFeeds()
-        testSamplersRunNothingWhenClosedBeforeTheFirstReadingRuns()
+        testSamplersRunNoPsWhenClosedBeforeItsFirstReadingRuns()
         testSamplersStillSampleAfterAQuickCloseAndReopen()
         testFastStatsSamplerTurnsCountersIntoRates()
         testFastStatsSamplerKeepsNinetySeconds()
         testFastStatsSamplerReportsPerCoreAndUserSystemShares()
+        testFastStatsSamplerDoesNotSpikeAfterALongGap()
         testNetworkCountersKeepOnlyPhysicalInterfaces()
         testNetworkRateIsRightAcrossThe32BitBoundary()
         testVPNTrafficCountsOnce()
@@ -44,10 +45,10 @@ struct SystemBarSchedulerTests {
         testProcessSamplerGroupsRowsAndDropsTinyOnes()
         testProcessSamplerUsesTheFootprintOnlyForShownGroups()
         testProcessSamplerRunsPsThroughTheRunner()
-        testPresenterRunsNothingWhileTheWindowIsClosed()
+        testPresenterRunsOnlyTheFastSamplerWhileTheWindowIsClosed()
         testPresenterSwitchRunsOnlyTheShownTabsSamplers()
         testPresenterPausesEverythingForAnErrorTab()
-        testPresenterStopsEverythingWhenTheWindowCloses()
+        testPresenterStopsTheTabAndPsWhenTheWindowCloses()
     }
 
     // MARK: - Feed
@@ -406,20 +407,28 @@ struct SystemBarSchedulerTests {
         return (fast, processes)
     }
 
-    private static func testSamplersWantNothingWhileTheWindowIsClosed() {
-        expect(HostSamplers.wanted(isVisible: false, feeds: [.processes, .fastStats]).isEmpty, "a closed window wants no sampler, whatever the tab declares")
+    private static func testSamplersWantOnlyTheFastSamplerWhileTheWindowIsClosed() {
+        expect(HostSamplers.wanted(isVisible: false, feeds: [.processes, .fastStats]) == [.fastStats], "a closed window still wants the 1-second sampler, so the histories are full when it opens, but never ps")
         expect(HostSamplers.wanted(isVisible: true, feeds: []) == [.fastStats], "an open window always wants the 1-second sampler, so the histories have no gaps")
         expect(HostSamplers.wanted(isVisible: true, feeds: [.processes]) == [.fastStats, .processes], "a tab that declares the process feed adds the process sampler")
     }
 
-    private static func testSamplersRunNothingWhileTheWindowIsClosed() {
+    private static func testSamplersKeepTheFastSamplerWhileTheWindowIsClosed() {
         let fast = CallCounter()
         let processes = CallCounter()
         let samplers = makeTestSamplers(fast: fast, processes: processes)
         samplers.update(isVisible: false, feeds: [.processes, .fastStats])
-        spinRunLoop(for: 0.2)
-        expect(fast.count == 0 && processes.count == 0, "a closed window runs no sampler, got fast \(fast.count) processes \(processes.count)")
-        expect(samplers.running.isEmpty, "and reports none running, got \(samplers.running)")
+        waitUntil { fast.count >= 3 }
+        expect(fast.count >= 3, "the 1-second sampler ticks with the window closed, got \(fast.count)")
+        expect(processes.count == 0, "but ps never runs while it is closed, got \(processes.count)")
+        expect(samplers.running == [.fastStats], "and only the 1-second sampler is running, got \(samplers.running)")
+        samplers.stopAll()
+        expect(samplers.running.isEmpty, "stopAll stops both, got \(samplers.running)")
+
+        let launched = makeTestSamplers(fast: CallCounter(), processes: CallCounter())
+        launched.start()
+        expect(launched.running == [.fastStats], "the app's launch start runs the 1-second sampler before any window opens, got \(launched.running)")
+        launched.stopAll()
     }
 
     private static func testSamplersRunTheFastSamplerForEveryVisibleTab() {
@@ -430,7 +439,7 @@ struct SystemBarSchedulerTests {
         waitUntil { fast.count >= 3 }
         expect(fast.count >= 3, "the 1-second sampler ticks for a tab that declares nothing, got \(fast.count)")
         expect(processes.count == 0, "but ps never runs for it, got \(processes.count)")
-        samplers.update(isVisible: false, feeds: [])
+        samplers.stopAll()
     }
 
     private static func testSamplersRunTheProcessSamplerOnlyWhileATabDeclaresIt() {
@@ -450,9 +459,12 @@ struct SystemBarSchedulerTests {
         expect(samplers.running == [.fastStats], "only the 1-second sampler is left, got \(samplers.running)")
 
         samplers.update(isVisible: false, feeds: [])
-        let afterClose = fast.count
-        spinRunLoop(for: 0.2)
-        expect(fast.count <= afterClose + 1, "closing the window stops the 1-second sampler too, went \(afterClose) -> \(fast.count)")
+        let afterClose = (fast: fast.count, processes: processes.count)
+        waitUntil { fast.count >= afterClose.fast + 2 }
+        expect(fast.count >= afterClose.fast + 2, "closing the window leaves the 1-second sampler ticking, went \(afterClose.fast) -> \(fast.count)")
+        expect(processes.count == afterClose.processes, "and ps stays stopped, went \(afterClose.processes) -> \(processes.count)")
+        expect(samplers.running == [.fastStats], "so only the 1-second sampler runs, got \(samplers.running)")
+        samplers.stopAll()
     }
 
     private static func testSamplersSampleAtOnceWhenStartedAndKeepTheirRhythm() {
@@ -471,6 +483,9 @@ struct SystemBarSchedulerTests {
         expect(processes.count == 1, "the process sampler reads at once when a tab starts wanting it, got \(processes.count)")
         expect(fast.count == 1, "a sampler that keeps running is not restarted by a tab switch, so it keeps its rhythm, got \(fast.count)")
         samplers.update(isVisible: false, feeds: [])
+        spinRunLoop(for: 0.1)
+        expect(fast.count == 1, "nor by the window closing, got \(fast.count)")
+        samplers.stopAll()
     }
 
     private static func testSamplersFillTheFeeds() {
@@ -491,14 +506,15 @@ struct SystemBarSchedulerTests {
         waitUntil { fastFeed.value.cpuUsagePercent == 42 && processFeed.value.totalCount == 1 }
         expect(fastFeed.value.cpuUsagePercent == 42, "the 1-second reading lands in the fastStats feed plugins read")
         expect(processFeed.value.topCPU.map(\.name) == ["clang"], "the process reading lands in the processes feed plugins read")
-        samplers.update(isVisible: false, feeds: [])
+        samplers.stopAll()
     }
 
-    private static func testSamplersRunNothingWhenClosedBeforeTheFirstReadingRuns() {
+    private static func testSamplersRunNoPsWhenClosedBeforeItsFirstReadingRuns() {
         let fast = CallCounter()
         let processes = CallCounter()
         let queues = makeHeldQueues()
-        let samplers = makeTestSamplers(fast: fast, processes: processes, fastQueue: queues.fast, processQueue: queues.processes)
+        // A minute between ticks: anything seen within the test is a first reading.
+        let samplers = makeTestSamplers(fast: fast, processes: processes, interval: 60, fastQueue: queues.fast, processQueue: queues.processes)
 
         samplers.update(isVisible: true, feeds: [.processes])
         samplers.update(isVisible: false, feeds: [])
@@ -506,8 +522,10 @@ struct SystemBarSchedulerTests {
         queues.processes.resume()
         spinRunLoop(for: 0.2)
 
-        expect(fast.count == 0 && processes.count == 0, "a window closed before the first reading runs takes that reading back, got fast \(fast.count) processes \(processes.count)")
-        expect(samplers.running.isEmpty, "and reports none running, got \(samplers.running)")
+        expect(processes.count == 0, "a window closed before ps's first reading runs takes that reading back, got \(processes.count)")
+        expect(fast.count == 1, "while the 1-second sampler keeps its one first reading, got \(fast.count)")
+        expect(samplers.running == [.fastStats], "and keeps running, got \(samplers.running)")
+        samplers.stopAll()
     }
 
     private static func testSamplersStillSampleAfterAQuickCloseAndReopen() {
@@ -527,7 +545,7 @@ struct SystemBarSchedulerTests {
 
         expect(fast.count == 1 && processes.count == 1, "closing takes back only that start's first reading, so the reopen still reads once, got fast \(fast.count) processes \(processes.count)")
         expect(samplers.running == [.fastStats, .processes], "and both samplers are running again, got \(samplers.running)")
-        samplers.update(isVisible: false, feeds: [])
+        samplers.stopAll()
     }
 
     // MARK: - Presenter
@@ -538,17 +556,19 @@ struct SystemBarSchedulerTests {
         return (TabPresenter(scheduler: makeTestScheduler(), samplers: samplers), samplers)
     }
 
-    private static func testPresenterRunsNothingWhileTheWindowIsClosed() {
+    private static func testPresenterRunsOnlyTheFastSamplerWhileTheWindowIsClosed() {
         let fast = CallCounter()
         let processes = CallCounter()
         let (presenter, samplers) = makeTestPresenter(fast: fast, processes: processes)
         let tab = DeclaringTab(feeds: [.processes, .fastStats])
         presenter.present(plugin: tab, isVisible: false)
-        spinRunLoop(for: 0.2)
-        expect(tab.count == 0 && fast.count == 0 && processes.count == 0,
-               "a closed window collects nothing and samples nothing, got collect \(tab.count) fast \(fast.count) processes \(processes.count)")
-        expect(samplers.running.isEmpty, "and no sampler is left running, got \(samplers.running)")
+        waitUntil { fast.count >= 2 }
+        expect(tab.count == 0 && processes.count == 0,
+               "a closed window collects no tab and runs no ps, got collect \(tab.count) processes \(processes.count)")
+        expect(fast.count >= 2, "but the 1-second sampler keeps the histories going, got \(fast.count)")
+        expect(samplers.running == [.fastStats], "so it is the one sampler running, got \(samplers.running)")
         expect(tab.visibility == [false], "the tab is told it is hidden, got \(tab.visibility)")
+        samplers.stopAll()
     }
 
     private static func testPresenterSwitchRunsOnlyTheShownTabsSamplers() {
@@ -574,6 +594,7 @@ struct SystemBarSchedulerTests {
         expect(processes.count == processesAfter, "and ps no longer runs, got \(processes.count - processesAfter) more")
         expect(second.count >= 2, "the shown tab is collected on its interval, got \(second.count)")
         presenter.present(plugin: second, isVisible: false)
+        samplers.stopAll()
     }
 
     private static func testPresenterPausesEverythingForAnErrorTab() {
@@ -585,15 +606,16 @@ struct SystemBarSchedulerTests {
         waitUntil { tab.count >= 1 }
 
         presenter.switching(from: tab, to: nil)
-        expect(samplers.running.isEmpty, "an error tab has nothing to feed, so no sampler runs, got \(samplers.running)")
+        expect(samplers.running == [.fastStats], "an error tab declares nothing, so ps stops and only the 1-second sampler runs, got \(samplers.running)")
         spinRunLoop(for: 0.1)
         let collected = tab.count
         spinRunLoop(for: 0.2)
         expect(tab.count == collected, "and the tab switched away from stops, got \(tab.count - collected) more")
         expect(tab.visibility == [true, false], "it is told it is hidden, got \(tab.visibility)")
+        samplers.stopAll()
     }
 
-    private static func testPresenterStopsEverythingWhenTheWindowCloses() {
+    private static func testPresenterStopsTheTabAndPsWhenTheWindowCloses() {
         let fast = CallCounter()
         let processes = CallCounter()
         let (presenter, samplers) = makeTestPresenter(fast: fast, processes: processes)
@@ -602,11 +624,14 @@ struct SystemBarSchedulerTests {
         waitUntil { tab.count >= 1 && fast.count >= 1 && processes.count >= 1 }
 
         presenter.present(plugin: tab, isVisible: false)
-        expect(samplers.running.isEmpty, "closing the window stops both samplers, got \(samplers.running)")
+        expect(samplers.running == [.fastStats], "closing the window stops ps and keeps the 1-second sampler, got \(samplers.running)")
         spinRunLoop(for: 0.1)
-        let counts = (tab.count, fast.count, processes.count)
-        spinRunLoop(for: 0.2)
-        expect((tab.count, fast.count, processes.count) == counts, "and nothing runs after it closes, got \((tab.count, fast.count, processes.count)) after \(counts)")
+        let counts = (tab: tab.count, fast: fast.count, processes: processes.count)
+        waitUntil { fast.count >= counts.fast + 2 }
+        expect(tab.count == counts.tab && processes.count == counts.processes,
+               "neither the tab nor ps runs after it closes, got collect \(tab.count - counts.tab) and ps \(processes.count - counts.processes) more")
+        expect(fast.count >= counts.fast + 2, "while the 1-second sampler carries on, went \(counts.fast) -> \(fast.count)")
+        samplers.stopAll()
     }
 
     // MARK: - Fast stats
@@ -639,6 +664,28 @@ struct SystemBarSchedulerTests {
         )
         expect(reset.currentDownloadRate == 0, "a counter that went backwards (an interface reset) reads as no traffic, not a huge wrapped number")
         expect(reset.cpuUsagePercent == 40, "with no CPU time elapsed the last percent stands, got \(reset.cpuUsagePercent)")
+    }
+
+    /// The Mac slept for an hour: the timer did not fire, so the next sample comes an hour after
+    /// the one before. Rates divide by the time that really passed, so the first one after waking
+    /// is the hour's average, not the hour's bytes as if they moved in one second.
+    private static func testFastStatsSamplerDoesNotSpikeAfterALongGap() {
+        let sampler = FastStatsSampler()
+        let start = Date(timeIntervalSince1970: 1_000)
+        _ = sampler.sample(
+            cpu: CPUCounters(user: 100, system: 50, idle: 850, nice: 0),
+            network: NetworkCounters(received: 1_000, sent: 500),
+            at: start
+        )
+        let afterWake = sampler.sample(
+            cpu: CPUCounters(user: 36_100, system: 18_050, idle: 306_850, nice: 0),
+            network: NetworkCounters(received: 3_601_000, sent: 360_500),
+            at: start.addingTimeInterval(3_600)
+        )
+        expect(afterWake.currentDownloadRate == 1_000, "3.6 MB over an hour asleep reads 1000 B/s, not 3.6 MB/s, got \(afterWake.currentDownloadRate)")
+        expect(afterWake.currentUploadRate == 100, "360 KB sent over the hour reads 100 B/s, got \(afterWake.currentUploadRate)")
+        expect(afterWake.cpuUsagePercent == 15, "CPU is a share of the ticks that passed, so it stays a percent, got \(afterWake.cpuUsagePercent)")
+        expect(afterWake.downloadHistory.count == 2, "the gap adds one point to the history, not an hour of them, got \(afterWake.downloadHistory.count)")
     }
 
     private static func traffic(_ interfaces: [String: (received: UInt64, sent: UInt64)]) -> NetworkCounters {
@@ -695,10 +742,12 @@ struct SystemBarSchedulerTests {
     /// The counters the sampler reads are netstat's own, all 64 bits: an app reading the route
     /// table or getifaddrs instead gets them cut to 32 bits and rounded to a KiB, which a check
     /// of the low bits alone would not catch. Traffic between the two reads may move them a little.
+    /// It is decisive only once en0 has moved more than 4 GiB since boot; before that the cut
+    /// counters and the whole ones agree but for the KiB rounding.
     private static func testInterfaceCountersAgreeWithNetstat() {
         let ours = FastStatsSampler.readInterfaceCounters()
         let netstat = ProcessRunner.run(path: "/usr/sbin/netstat", arguments: ["-ib"], environment: nil, timeout: ProcessRunner.defaultTimeout)
-        expect(!ours.isEmpty && ours.allSatisfy { NetworkCounters.isPhysical($0.name) }, "this Mac's physical interfaces are read, and only those, got \(ours.map(\.name))")
+        expect(ours.contains { NetworkCounters.isPhysical($0.name) }, "this Mac's physical interfaces are among those read, got \(ours.map(\.name))")
         expect(netstat.status == 0, "netstat -ib runs, got status \(netstat.status)")
         let theirs = netstatReceivedBytes(netstat.output)
         for interface in ours {
