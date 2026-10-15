@@ -13,6 +13,7 @@ struct SystemBarNotificationTests {
         testGateCountsEachRuleSeparately()
         testGateCapsEachPluginWithinTheCooldown()
         testGateForgetsDeliveriesOlderThanTheCooldown()
+        testSystemNotificationsSkipOutsideAnAppBundle()
         testForPluginNamesTheRuleAfterThePlugin()
         testForPluginWithNotificationsOffPostsNothing()
         testCatalogAppliesTheOffSwitchToEveryPlugin()
@@ -112,6 +113,17 @@ struct SystemBarNotificationTests {
         gate.post(stamped("disk", "fresh"))
         expect(gate.trackedCount == 1, "deliveries older than the cooldown are pruned on the next post, got \(gate.trackedCount)")
         expect(delivered().last?.qualifiedID == "disk/fresh", "the ceiling resets once its hour has passed")
+    }
+
+    private static func testSystemNotificationsSkipOutsideAnAppBundle() {
+        expect(Bundle.main.bundleIdentifier == nil, "this test needs the test binary to have no bundle, as build/SystemBar has none")
+        let log = LogRecorder()
+        let notifications = SystemNotifications(log: { log.record($0) })
+        // Without the guard each of these raises NSInternalInconsistencyException and ends the run.
+        notifications.becomeDelegate()
+        notifications.deliver(notification("low"))
+        notifications.deliver(notification("low"))
+        expect(log.count == 1, "outside an app bundle Notification Center is skipped, and that is logged once, got \(log.messages)")
     }
 
     private static func testForPluginNamesTheRuleAfterThePlugin() {

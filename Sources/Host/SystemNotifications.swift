@@ -5,10 +5,12 @@ import UserNotifications
 /// Shows a plugin's notification in Notification Center: the app's one real delivery, behind
 /// `NotificationGate`. Nothing here runs until a rule fires, so macOS asks for permission the
 /// first time one does, never at launch; after the person answers, macOS remembers and asks no
-/// more. Built only by the app, never by a test, because Notification Center refuses a process
-/// that is not an app bundle.
+/// more. A test may build one only because the test binary has no bundle, where this skips
+/// Notification Center entirely; nothing a test does reaches it.
 final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     private let log: @Sendable (String) -> Void
+    private let lock = NSLock()
+    private var hasLoggedNoBundle = false
 
     init(log: @escaping @Sendable (String) -> Void) {
         self.log = log
@@ -19,13 +21,30 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate, @un
     /// and SystemBar is the active app. The center holds its delegate weakly; the caller keeps
     /// this object alive.
     func becomeDelegate() {
+        guard isInAppBundle() else { return }
         UNUserNotificationCenter.current().delegate = self
+    }
+
+    /// Notification Center raises an exception in a process with no bundle identifier, such as
+    /// `build/SystemBar` run straight from the build folder. There, notifications are skipped,
+    /// and the log says so once.
+    private func isInAppBundle() -> Bool {
+        guard Bundle.main.bundleIdentifier == nil else { return true }
+        let isFirst = lock.withLock {
+            defer { hasLoggedNoBundle = true }
+            return !hasLoggedNoBundle
+        }
+        if isFirst {
+            log("Notifications are off: SystemBar is not running from its app bundle")
+        }
+        return false
     }
 
     /// Asks for permission (a no-op once the person has answered), then posts. The request is
     /// named `<plugin>/<rule>`, so a newer notification from the same rule replaces the older one
     /// in Notification Center rather than stacking.
     func deliver(_ notification: PluginNotification) {
+        guard isInAppBundle() else { return }
         let center = UNUserNotificationCenter.current()
         let log = self.log
         center.requestAuthorization(options: [.alert, .sound]) { isGranted, error in
