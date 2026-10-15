@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import SystemBarKit
 
@@ -10,12 +9,12 @@ enum ProcessSampler {
 
     static func summary(
         runner: CommandRunner,
-        footprint: (Int32) -> UInt64? = ProcessSampler.physicalFootprint(pid:)
+        footprint: (Int32) -> UInt64? = ProcessTable.physicalFootprint(pid:)
     ) -> ProcessSummary {
         ProcessSummary(rows: snapshots(samples: runPS(runner: runner), footprint: footprint))
     }
 
-    /// Groups ps rows by name. `footprint` is `physicalFootprint` in the app and a fake in tests.
+    /// Groups ps rows by name. `footprint` is `ProcessTable.physicalFootprint` in the app and a fake in tests.
     static func snapshots(
         samples allSamples: [RawProcessSample],
         memoryLimit: Int = ProcessSummary.memoryDisplayLimit,
@@ -108,18 +107,6 @@ enum ProcessSampler {
                 name: name.isEmpty ? command : name
             )
         }
-    }
-
-    static func physicalFootprint(pid: Int32) -> UInt64? {
-        var info = rusage_info_v4()
-        let result = withUnsafeMutablePointer(to: &info) { pointer -> Int32 in
-            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { reboundPointer in
-                proc_pid_rusage(pid, RUSAGE_INFO_V4, reboundPointer)
-            }
-        }
-
-        guard result == 0 else { return nil }
-        return info.ri_phys_footprint
     }
 }
 
