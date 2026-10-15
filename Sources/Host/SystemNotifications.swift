@@ -23,27 +23,27 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate, @un
     }
 
     /// Asks for permission (a no-op once the person has answered), then posts. The request is
-    /// named after the rule, so a newer notification from the same rule replaces the older one
+    /// named `<plugin>/<rule>`, so a newer notification from the same rule replaces the older one
     /// in Notification Center rather than stacking.
     func deliver(_ notification: PluginNotification) {
         let center = UNUserNotificationCenter.current()
         let log = self.log
         center.requestAuthorization(options: [.alert, .sound]) { isGranted, error in
             if let error {
-                log("Notification \(notification.id) not shown: \(error.localizedDescription)")
+                log("Notification \(notification.qualifiedID) not shown: \(error.localizedDescription)")
                 return
             }
             guard isGranted else {
-                log("Notification \(notification.id) not shown: notifications are turned off for SystemBar in System Settings")
+                log("Notification \(notification.qualifiedID) not shown: notifications are turned off for SystemBar in System Settings")
                 return
             }
             let content = UNMutableNotificationContent()
             content.title = notification.title
             content.body = notification.body
-            let request = UNNotificationRequest(identifier: notification.id, content: content, trigger: nil)
+            let request = UNNotificationRequest(identifier: notification.qualifiedID, content: content, trigger: nil)
             center.add(request) { error in
                 if let error {
-                    log("Notification \(notification.id) not shown: \(error.localizedDescription)")
+                    log("Notification \(notification.qualifiedID) not shown: \(error.localizedDescription)")
                 }
             }
         }

@@ -11,6 +11,8 @@ struct SystemBarNotificationTests {
         testTheOriginalInitializersIgnoreNotify()
         testGatePostsOncePerRuleWithinTheCooldown()
         testGateCountsEachRuleSeparately()
+        testGateCapsEachPluginWithinTheCooldown()
+        testGateForgetsDeliveriesOlderThanTheCooldown()
         testForPluginNamesTheRuleAfterThePlugin()
         testForPluginWithNotificationsOffPostsNothing()
         testCatalogAppliesTheOffSwitchToEveryPlugin()
@@ -18,6 +20,11 @@ struct SystemBarNotificationTests {
 
     private static func notification(_ id: String) -> PluginNotification {
         PluginNotification(id: id, title: "Title \(id)", body: "Body \(id)")
+    }
+
+    /// As `HostServices.forPlugin` hands one to the app's gate: stamped with its plugin.
+    private static func stamped(_ plugin: String, _ id: String) -> PluginNotification {
+        PluginNotification(id: id, title: "Title \(id)", body: "Body \(id)", plugin: plugin)
     }
 
     private static func host(notify: @escaping @Sendable (PluginNotification) -> Void) -> HostServices {
@@ -48,36 +55,72 @@ struct SystemBarNotificationTests {
         makeHost().notify(id: "low", title: "t", body: "b")
     }
 
+    private static func gate(
+        clock: FakeClock = FakeClock(), log: LogRecorder = LogRecorder()
+    ) -> (NotificationGate, @Sendable () -> [PluginNotification]) {
+        let (deliver, delivered) = HostServices.recordingNotifications()
+        let gate = NotificationGate(cooldown: 3600, now: clock.now, log: { log.record($0) }, deliver: deliver)
+        return (gate, delivered)
+    }
+
     private static func testGatePostsOncePerRuleWithinTheCooldown() {
         let clock = FakeClock()
-        let (deliver, delivered) = HostServices.recordingNotifications()
-        let gate = NotificationGate(cooldown: 3600, now: clock.now, deliver: deliver)
+        let (gate, delivered) = gate(clock: clock)
 
-        gate.post(notification("disk/low"))
+        gate.post(stamped("disk", "low"))
         clock.advance(by: 3599)
-        gate.post(notification("disk/low"))
-        expect(delivered() == [notification("disk/low")], "a repeat inside the cooldown is dropped, got \(delivered())")
+        gate.post(stamped("disk", "low"))
+        expect(delivered().map(\.qualifiedID) == ["disk/low"], "a repeat inside the cooldown is dropped, got \(delivered())")
 
         clock.advance(by: 1)
-        gate.post(notification("disk/low"))
+        gate.post(stamped("disk", "low"))
         expect(delivered().count == 2, "the same rule posts again once the cooldown has passed, got \(delivered())")
     }
 
     private static func testGateCountsEachRuleSeparately() {
-        let (deliver, delivered) = HostServices.recordingNotifications()
-        let gate = NotificationGate(cooldown: 3600, now: FakeClock().now, deliver: deliver)
-        gate.post(notification("disk/low"))
-        gate.post(notification("power/low"))
-        expect(delivered().map(\.id) == ["disk/low", "power/low"], "one rule's cooldown never holds back another's, got \(delivered())")
-        expect(NotificationGate.standardCooldown == 3600, "the shipped cooldown is an hour per rule, as the handoff says")
+        let (gate, delivered) = gate()
+        gate.post(stamped("disk", "low"))
+        gate.post(stamped("power", "low"))
+        expect(delivered().map(\.qualifiedID) == ["disk/low", "power/low"], "two plugins' rules of the same name never share a cooldown, got \(delivered())")
+        expect(NotificationGate.standardCooldown == 3600, "the shipped cooldown is an hour per rule, as the README says")
+    }
+
+    private static func testGateCapsEachPluginWithinTheCooldown() {
+        let log = LogRecorder()
+        let (gate, delivered) = gate(log: log)
+        for reading in 0..<100 {
+            gate.post(stamped("disk", "low/\(reading)"))
+        }
+        let ceiling = NotificationGate.ceilingPerPlugin
+        expect(ceiling == 5, "a plugin may show five notifications an hour, got \(ceiling)")
+        expect(delivered().count == ceiling, "a rule id that changes every sample cannot get past the per-plugin ceiling, got \(delivered().count)")
+        expect(log.count == 1 && log.messages.first?.contains("disk") == true, "hitting the ceiling is logged once, naming the plugin, got \(log.messages)")
+
+        gate.post(stamped("power", "low"))
+        expect(delivered().last?.qualifiedID == "power/low", "another plugin is unaffected by one plugin's ceiling")
+    }
+
+    private static func testGateForgetsDeliveriesOlderThanTheCooldown() {
+        let clock = FakeClock()
+        let (gate, delivered) = gate(clock: clock)
+        for reading in 0..<100 {
+            gate.post(stamped("disk", "low/\(reading)"))
+        }
+        expect(gate.trackedCount <= NotificationGate.ceilingPerPlugin, "the gate keeps at most the ceiling per plugin, got \(gate.trackedCount)")
+
+        clock.advance(by: 3600)
+        gate.post(stamped("disk", "fresh"))
+        expect(gate.trackedCount == 1, "deliveries older than the cooldown are pruned on the next post, got \(gate.trackedCount)")
+        expect(delivered().last?.qualifiedID == "disk/fresh", "the ceiling resets once its hour has passed")
     }
 
     private static func testForPluginNamesTheRuleAfterThePlugin() {
         let (notify, posted) = HostServices.recordingNotifications()
         let plugin = host(notify: notify).forPlugin(identifier: "disk", settings: .empty, dataRoot: testDataRoot, notificationsEnabled: true)
         plugin.notify(id: "low", title: "Title low", body: "Body low")
-        expect(posted() == [PluginNotification(id: "disk/low", title: "Title low", body: "Body low")],
-               "the host keys a rule by plugin, so two plugins' \"low\" never share a cooldown, got \(posted())")
+        expect(posted() == [PluginNotification(id: "low", title: "Title low", body: "Body low", plugin: "disk")],
+               "the host stamps each notification with its plugin, beside the rule id, got \(posted())")
+        expect(posted().first?.qualifiedID == "disk/low", "and names it <plugin>/<rule>")
     }
 
     private static func testForPluginWithNotificationsOffPostsNothing() {
@@ -93,7 +136,7 @@ struct SystemBarNotificationTests {
 
         let (onNotify, onPosted) = HostServices.recordingNotifications()
         _ = TabCatalog.build(config: PluginConfig(plugins: [entry]), source: source, host: host(notify: onNotify), dataRoot: testDataRoot)
-        expect(onPosted().map(\.id) == ["notifier/hello"], "a loaded plugin's notify reaches the host by default, got \(onPosted())")
+        expect(onPosted().map(\.qualifiedID) == ["notifier/hello"], "a loaded plugin's notify reaches the host by default, got \(onPosted())")
 
         let (offNotify, offPosted) = HostServices.recordingNotifications()
         let off = PluginConfig(plugins: [entry], notificationsEnabled: false)

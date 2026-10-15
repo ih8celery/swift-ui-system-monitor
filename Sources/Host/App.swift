@@ -21,7 +21,7 @@ struct SystemBarApp: App {
         let notifications = SystemNotifications(log: log)
         notifications.becomeDelegate()
         self.notifications = notifications
-        let gate = NotificationGate(deliver: { notifications.deliver($0) })
+        let gate = NotificationGate(log: log, deliver: { notifications.deliver($0) })
         // The template forPlugin copies for each plugin; its own settings and data folder are unused.
         let host = HostServices(
             homeDirectory: NSHomeDirectory(),

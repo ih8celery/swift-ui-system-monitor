@@ -110,8 +110,9 @@ public final class HostServices: Sendable {
 
     /// The host's side: this host's feeds, runner and log, with one plugin's settings and its
     /// own folder under `dataRoot`. Package-only: the catalog builds one per loaded plugin.
-    /// The plugin's notifications reach this host's with the id `<identifier>/<rule id>`, so two
-    /// plugins' rules never share a cooldown, or are dropped when `notificationsEnabled` is false.
+    /// The plugin's notifications reach this host's with `plugin` set to `identifier`, so the
+    /// app's cooldown counts per plugin whatever ids it makes up and two plugins' rules never
+    /// share one; they are dropped when `notificationsEnabled` is false.
     package func forPlugin(
         identifier: String, settings: PluginSettings, dataRoot: URL, notificationsEnabled: Bool
     ) -> HostServices {
@@ -127,7 +128,7 @@ public final class HostServices: Sendable {
             notify: { notification in
                 guard notificationsEnabled else { return }
                 notifier(PluginNotification(
-                    id: "\(identifier)/\(notification.id)", title: notification.title, body: notification.body
+                    id: notification.id, title: notification.title, body: notification.body, plugin: identifier
                 ))
             }
         )
