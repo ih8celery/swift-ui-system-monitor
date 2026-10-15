@@ -3,32 +3,95 @@ import Foundation
 /// A byte count as text in 1024-based units labelled B, KB, MB, GB or TB, e.g. `1.50 GB`: whole
 /// bytes below a kilobyte, two decimals below 10 of a unit, one decimal above.
 public func byteString(_ bytes: UInt64) -> String {
-    let units = ["B", "KB", "MB", "GB", "TB"]
-    var value = Double(bytes)
-    var index = 0
-    while value >= 1024, index < units.count - 1 {
-        value /= 1024
-        index += 1
-    }
-
+    let (value, index) = scaled(Double(bytes), base: 1024, unitCount: byteUnits.count)
     if index == 0 {
-        return "\(Int(value)) \(units[index])"
+        return "\(Int(value)) \(byteUnits[index])"
     }
 
-    return String(format: value >= 10 ? "%.1f %@" : "%.2f %@", value, units[index])
+    return String(format: value >= 10 ? "%.1f %@" : "%.2f %@", value, byteUnits[index])
+}
+
+/// A file, disk or download size as text in 1000-based units, as Finder and Disk Utility count
+/// them, labelled B, KB, MB, GB or TB: whole bytes below a kilobyte, one decimal above, e.g.
+/// 1 500 000 000 bytes reads `1.5 GB`. Use `memoryByteString(_:)` for RAM.
+public func fileByteString(_ bytes: UInt64) -> String {
+    oneDecimalByteString(bytes, base: 1000)
+}
+
+/// An amount of memory as text in 1024-based units, as Activity Monitor counts it, labelled B,
+/// KB, MB, GB or TB: whole bytes below a kilobyte, one decimal above, e.g. 1 500 000 000 bytes
+/// reads `1.4 GB` and 16 GiB of RAM reads `16.0 GB`. Use `fileByteString(_:)` for files.
+public func memoryByteString(_ bytes: UInt64) -> String {
+    oneDecimalByteString(bytes, base: 1024)
 }
 
 /// A rate in bytes per second as text in 1024-based units, B/s to GB/s, e.g. `2.5 MB/s`. A
 /// negative rate reads as `0 B/s`.
 public func rateString(_ bytesPerSecond: Double) -> String {
-    let units = ["B/s", "KB/s", "MB/s", "GB/s"]
-    var value = max(0, bytesPerSecond)
+    rateText(bytesPerSecond, base: 1024)
+}
+
+/// A disk or network speed in bytes per second as text in 1000-based units, as Finder and
+/// Disk Utility count them, B/s to GB/s: whole numbers from 10 of a unit, e.g. `12 KB/s`, one
+/// decimal below, e.g. 2 500 000 reads `2.5 MB/s`. A negative rate reads as `0 B/s`.
+public func fileRateString(_ bytesPerSecond: Double) -> String {
+    let (value, index) = scaledAsPrinted(
+        max(0, bytesPerSecond), base: 1000, unitCount: rateUnits.count
+    ) { value, index in printsWhole(value, index) ? 0 : 1 }
+    return String(format: printsWhole(value, index) ? "%.0f %@" : "%.1f %@", value, rateUnits[index])
+}
+
+private let byteUnits = ["B", "KB", "MB", "GB", "TB"]
+private let rateUnits = ["B/s", "KB/s", "MB/s", "GB/s"]
+
+/// Divides by `base` until the value is below it or the units run out; returns the value and
+/// the index of its unit.
+private func scaled(_ value: Double, base: Double, unitCount: Int) -> (Double, Int) {
+    var value = value
     var index = 0
-    while value >= 1024, index < units.count - 1 {
-        value /= 1024
+    while value >= base, index < unitCount - 1 {
+        value /= base
         index += 1
     }
-    return String(format: value >= 10 || index == 0 ? "%.0f %@" : "%.1f %@", value, units[index])
+    return (value, index)
+}
+
+/// Like `scaled`, but steps up one more unit when the value, rounded to the `decimals` it will
+/// print with, reaches `base`, so 999 999 bytes reads `1.0 MB` rather than `1000.0 KB`.
+private func scaledAsPrinted(
+    _ value: Double, base: Double, unitCount: Int, decimals: (Double, Int) -> Int
+) -> (Double, Int) {
+    let (value, index) = scaled(value, base: base, unitCount: unitCount)
+    guard index < unitCount - 1, rounded(value, places: decimals(value, index)) >= base else {
+        return (value, index)
+    }
+    return (value / base, index + 1)
+}
+
+private func rounded(_ value: Double, places: Int) -> Double {
+    let scale = pow(10, Double(places))
+    return (value * scale).rounded() / scale
+}
+
+/// Whether a speed prints as a whole number: bytes always, any unit from 10 once rounded.
+private func printsWhole(_ value: Double, _ index: Int) -> Bool {
+    index == 0 || rounded(value, places: 1) >= 10
+}
+
+private func oneDecimalByteString(_ bytes: UInt64, base: Double) -> String {
+    let (value, index) = scaledAsPrinted(
+        Double(bytes), base: base, unitCount: byteUnits.count
+    ) { _, index in index == 0 ? 0 : 1 }
+    if index == 0 {
+        return "\(Int(value)) \(byteUnits[index])"
+    }
+
+    return String(format: "%.1f %@", value, byteUnits[index])
+}
+
+private func rateText(_ bytesPerSecond: Double, base: Double) -> String {
+    let (value, index) = scaled(max(0, bytesPerSecond), base: base, unitCount: rateUnits.count)
+    return String(format: value >= 10 || index == 0 ? "%.0f %@" : "%.1f %@", value, rateUnits[index])
 }
 
 /// A percent with one decimal place, e.g. `42.5%`. Negative values read as `0.0%`; nothing

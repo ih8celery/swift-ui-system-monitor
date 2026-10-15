@@ -21,6 +21,7 @@ struct SystemBarPerformanceTests {
         testGroupsNeedingRefinement()
         testUpdatedAgoText()
         testSampleHealthFromIsOK()
+        SystemBarFormattingTests.runAll()
         MainActor.assumeIsolated { SystemBarConfigTests.runAll() }
         MainActor.assumeIsolated { SystemBarLoaderTests.runAll() }
         MainActor.assumeIsolated { SystemBarSchedulerTests.runAll() }
