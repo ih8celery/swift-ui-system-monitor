@@ -11,16 +11,27 @@ struct SystemBarApp: App {
     private let processes = Feed(initial: ProcessSummary())
     private let fastStats = Feed(initial: FastStatsSnapshot())
     private let presenter: TabPresenter
+    /// Kept for the app's lifetime: Notification Center holds its delegate weakly.
+    private let notifications: SystemNotifications
 
     init() {
         let store = PluginConfigStore.standard()
+        let dataRoot = PluginDataRoot.standard()
+        let log: @Sendable (String) -> Void = { NSLog("%@", $0) }
+        let notifications = SystemNotifications(log: log)
+        notifications.becomeDelegate()
+        self.notifications = notifications
+        let gate = NotificationGate(deliver: { notifications.deliver($0) })
         // The template forPlugin copies for each plugin; its own settings and data folder are unused.
         let host = HostServices(
             homeDirectory: NSHomeDirectory(),
             processes: processes,
             fastStats: fastStats,
             runner: ProcessRunner.run,
-            log: { NSLog("%@", $0) }
+            log: log,
+            settings: .empty,
+            dataDirectory: dataRoot,
+            notify: { gate.post($0) }
         )
         let scheduler = PluginScheduler()
         presenter = TabPresenter(
@@ -28,7 +39,7 @@ struct SystemBarApp: App {
             samplers: HostSamplers.standard(processes: processes, fastStats: fastStats)
         )
         let source = BundleTabSource.standard()
-        let loaded = TabLoader.load(store: store, source: source, host: host, dataRoot: PluginDataRoot.standard())
+        let loaded = TabLoader.load(store: store, source: source, host: host, dataRoot: dataRoot)
         tabs = loaded
         configPath = store.fileURL.path
 
