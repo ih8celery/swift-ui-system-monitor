@@ -3,32 +3,38 @@ import Foundation
 /// A byte count as text in 1024-based units labelled B, KB, MB, GB or TB, e.g. `1.50 GB`: whole
 /// bytes below a kilobyte, two decimals below 10 of a unit, one decimal above.
 public func byteString(_ bytes: UInt64) -> String {
-    let units = ["B", "KB", "MB", "GB", "TB"]
-    var value = Double(bytes)
-    var index = 0
-    while value >= 1024, index < units.count - 1 {
-        value /= 1024
-        index += 1
-    }
-
+    let (value, index) = scaled(Double(bytes), base: 1024, unitCount: byteUnits.count)
     if index == 0 {
-        return "\(Int(value)) \(units[index])"
+        return "\(Int(value)) \(byteUnits[index])"
     }
 
-    return String(format: value >= 10 ? "%.1f %@" : "%.2f %@", value, units[index])
+    return String(format: value >= 10 ? "%.1f %@" : "%.2f %@", value, byteUnits[index])
 }
 
 /// A rate in bytes per second as text in 1024-based units, B/s to GB/s, e.g. `2.5 MB/s`. A
 /// negative rate reads as `0 B/s`.
 public func rateString(_ bytesPerSecond: Double) -> String {
-    let units = ["B/s", "KB/s", "MB/s", "GB/s"]
-    var value = max(0, bytesPerSecond)
+    rateText(bytesPerSecond, base: 1024)
+}
+
+private let byteUnits = ["B", "KB", "MB", "GB", "TB"]
+private let rateUnits = ["B/s", "KB/s", "MB/s", "GB/s"]
+
+/// Divides by `base` until the value is below it or the units run out; returns the value and
+/// the index of its unit.
+private func scaled(_ value: Double, base: Double, unitCount: Int) -> (Double, Int) {
+    var value = value
     var index = 0
-    while value >= 1024, index < units.count - 1 {
-        value /= 1024
+    while value >= base, index < unitCount - 1 {
+        value /= base
         index += 1
     }
-    return String(format: value >= 10 || index == 0 ? "%.0f %@" : "%.1f %@", value, units[index])
+    return (value, index)
+}
+
+private func rateText(_ bytesPerSecond: Double, base: Double) -> String {
+    let (value, index) = scaled(max(0, bytesPerSecond), base: base, unitCount: rateUnits.count)
+    return String(format: value >= 10 || index == 0 ? "%.0f %@" : "%.1f %@", value, rateUnits[index])
 }
 
 /// A percent with one decimal place, e.g. `42.5%`. Negative values read as `0.0%`; nothing
