@@ -31,6 +31,7 @@ swiftc \
   SystemBarLoaderTests.swift \
   SystemBarSchedulerTests.swift \
   SystemBarPreviewTests.swift \
+  SystemBarFormattingTests.swift \
   SystemBarPerformanceTests.swift
 
 build/SystemBarTests
