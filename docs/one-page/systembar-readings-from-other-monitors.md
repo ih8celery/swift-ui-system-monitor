@@ -39,7 +39,7 @@ with 6 "Super" and 12 "Performance" cores), without `sudo`.
 | Whole-Mac power draw | same, `PowerTelemetryData.SystemLoad` (mW) | 31598 = 31.6 W, on AC |
 | Battery-only watts | `Voltage` × `Amperage` (jhi D2) | **0 W** on AC, because the battery is idle: wrong as "power draw" |
 | Whole-Mac draw, on battery (2026-10-14, P1 probe) | `SystemLoad`, `BatteryPower`, `Voltage` × `Amperage` | `SystemLoad` **−15.8 W** (negative), `BatteryPower` 15.8 W, `Voltage × |Amperage|` **50.4 W** (12.14 V × 4.15 A); `TimeRemaining` 67 min on ~58 Wh left implies ~52 W |
-| Telemetry freshness | `PowerTelemetryData` | lags: still showed 84.8 W charger input 50 s after unplugging; updates about once a minute, while `Voltage`/`Amperage` follow at once |
+| Telemetry freshness | `PowerTelemetryData` | lags: still showed 84.8 W charger input 50 s after unplugging; updates about once a minute, and `Voltage`/`Amperage` lag with it: `Amperage` still read −158 mA (1.97 W) 25 s after unplugging while the Mac drew about 50 W |
 | Disk activity | `ioreg -r -c IOBlockStorageDriver`, `Statistics` | `Bytes (Read)` 742 GB, `Bytes (Write)` 1.47 TB since boot |
 | GPU | `ioreg -r -c AGXAccelerator`, `PerformanceStatistics` | Device 34%, Renderer 32%, Tiler 21% |
 | Interface totals | `netstat -ib` (64-bit) | `en0` received 113 GB since boot — far past the 4 GiB at which our counters wrap |
@@ -204,13 +204,16 @@ noted; jhi.3–jhi.5 (sleep blockers, sleep cause, keep-awake) are unchanged.
 - **P1 — Real power draw (amends jhi.2).** Battery watts = `Voltage × Amperage`
   (signed, as jhi warns: negative is discharge). Mac watts: on battery,
   `Voltage × |Amperage|`; on AC, `SystemPowerIn` (equal to `SystemLoad` there)
-  less the battery's charging watts when it is charging. Charger watts = rated
+  less the battery's charging watts when it is charging (the 2026-10-14 charging probe
+  showed `SystemPowerIn` includes them, and that `SystemLoad` and `BatteryPower` are
+  unreliable on AC too). Charger watts = rated
   `AdapterDetails.Watts`. The probe ruled out `SystemLoad` on battery (negative,
   a third of the real draw); no desktop Mac was available, so a Mac with no
   battery shows `SystemPowerIn` when present and otherwise says it reports no
-  power figures. Telemetry lags about a minute behind a plug or unplug, so for
-  the minute after the source changes the tab prefers `Voltage × Amperage` and
-  never shows charger input while `ExternalConnected` is false.
+  power figures. Telemetry, `Amperage` included, lags about a minute behind a
+  plug or unplug, so for 90 s after the source changes (timed by the clock) the
+  tab shows no Mac or battery figure rather than a stale one, records none into
+  its history, and never shows charger input while `ExternalConnected` is false.
 - **P2 — Battery detail.** Health (`AppleRawMaxCapacity ÷ DesignCapacity`, which
   can read over 100% on a new battery and will not match System Settings exactly),
   cycle count, battery temperature (labelled as the battery's), charger wattage,
