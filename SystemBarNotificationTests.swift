@@ -14,6 +14,7 @@ struct SystemBarNotificationTests {
         testGateCapsEachPluginWithinTheCooldown()
         testGateForgetsDeliveriesOlderThanTheCooldown()
         testSystemNotificationsSkipOutsideAnAppBundle()
+        testPreviewPrintsWhatAPluginPosts()
         testForPluginNamesTheRuleAfterThePlugin()
         testForPluginWithNotificationsOffPostsNothing()
         testCatalogAppliesTheOffSwitchToEveryPlugin()
@@ -124,6 +125,24 @@ struct SystemBarNotificationTests {
         notifications.deliver(notification("low"))
         notifications.deliver(notification("low"))
         expect(log.count == 1, "outside an app bundle Notification Center is skipped, and that is logged once, got \(log.messages)")
+    }
+
+    private static func testPreviewPrintsWhatAPluginPosts() {
+        let (notify, posted) = HostServices.recordingNotifications()
+        let folder = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        _ = PreviewCommand.prepare(
+            arguments: [PreviewOptions.flag, "Notifier.bundle", "--window"],
+            currentDirectory: folder.path,
+            source: PreviewOneTabSource(type: NotifyingTab.self),
+            dataRoot: folder.appendingPathComponent("data", isDirectory: true),
+            processes: Feed(initial: ProcessSummary()),
+            fastStats: Feed(initial: FastStatsSnapshot()),
+            notify: notify
+        )
+        expect(posted().map(\.qualifiedID) == ["notifier/hello"], "a preview passes a plugin's notifications on, got \(posted())")
+        let line = PreviewCommand.notificationLine(PluginNotification(id: "hello", title: "Hello", body: "From a test", plugin: "notifier"))
+        expect(line == "notification notifier/hello: Hello - From a test", "the preview prints each notification as one line, got \(line)")
     }
 
     private static func testForPluginNamesTheRuleAfterThePlugin() {
