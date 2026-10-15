@@ -26,14 +26,15 @@ struct NetworkCounters {
         self.init(interfaces: [InterfaceCounters(name: "en0", received: received, sent: sent)])
     }
 
-    /// Whether traffic on `name` is traffic in or out of the Mac, counted once. Only `en*` is:
-    /// Wi-Fi, Ethernet, Thunderbolt and USB adapters, and iPhone tethering. Everything else
-    /// either repeats traffic an `en*` interface already counts or never leaves the Mac:
+    /// Whether `name` carries the Mac's traffic to and from networks, counted once. Only `en*`
+    /// does: Wi-Fi, Ethernet, Thunderbolt and USB adapters, and iPhone tethering. The rates mean
+    /// network traffic, so the rest are left out, each for its own reason:
     /// - `lo` (loopback): the Mac talking to itself.
     /// - `utun` (VPNs, iCloud Private Relay, Tailscale and the like): a tunnel's traffic also
     ///   crosses `en*` encrypted, so counting both doubles a VPN download.
     /// - `awdl` (AirDrop, Sidecar, Continuity) and `llw` (its low-latency companion): Wi-Fi
-    ///   peer links between nearby Apple devices.
+    ///   peer links straight to nearby Apple devices. Their bytes are their own, not a copy of
+    ///   `en*` traffic, but they are device-to-device transfers, not traffic to a network.
     /// - `bridge` (Thunderbolt Bridge, Internet Sharing): repeats its member `en*` interfaces.
     /// - `ap` (the access point Internet Sharing makes): repeats what it forwards.
     /// - `gif` and `stf` (IPv6-over-IPv4 tunnels): repeat what they carry over `en*`.
@@ -45,13 +46,13 @@ struct NetworkCounters {
 }
 
 extension FastStatsSampler {
-    /// The physical interfaces' counters, each read with the `IFMIB_IFDATA` sysctl, which
+    /// Every interface's counters, each read with the `IFMIB_IFDATA` sysctl, which
     /// gives an app the exact 64-bit counts. The other two ways in give an app without Apple's
     /// private entitlement the counts cut to 32 bits and rounded down to a whole KiB, so they
     /// wrap every 4 GiB: `getifaddrs`, and the route table's `NET_RT_IFLIST2` (what Stats and
     /// the spec suggested). Measured on macOS 26 with en0 at 125 GB since boot: IFMIB_IFDATA and
     /// `netstat -ib` agreed to the byte, the other two read 0.46 GB. An interface that cannot be
-    /// read is left out, which `rates` treats as absent.
+    /// read is left out, which `rates` treats as absent. `NetworkCounters` keeps the physical ones.
     static func readInterfaceCounters() -> [InterfaceCounters] {
         guard let names = if_nameindex() else { return [] }
         defer { if_freenameindex(names) }
@@ -59,7 +60,7 @@ extension FastStatsSampler {
         var entry = names
         while entry.pointee.if_index != 0, let cName = entry.pointee.if_name {
             let name = String(cString: cName)
-            if NetworkCounters.isPhysical(name), let counters = interfaceCounters(name: name, index: entry.pointee.if_index) {
+            if let counters = interfaceCounters(name: name, index: entry.pointee.if_index) {
                 result.append(counters)
             }
             entry += 1

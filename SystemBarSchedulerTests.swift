@@ -695,10 +695,12 @@ struct SystemBarSchedulerTests {
     /// The counters the sampler reads are netstat's own, all 64 bits: an app reading the route
     /// table or getifaddrs instead gets them cut to 32 bits and rounded to a KiB, which a check
     /// of the low bits alone would not catch. Traffic between the two reads may move them a little.
+    /// It is decisive only once en0 has moved more than 4 GiB since boot; before that the cut
+    /// counters and the whole ones agree but for the KiB rounding.
     private static func testInterfaceCountersAgreeWithNetstat() {
         let ours = FastStatsSampler.readInterfaceCounters()
         let netstat = ProcessRunner.run(path: "/usr/sbin/netstat", arguments: ["-ib"], environment: nil, timeout: ProcessRunner.defaultTimeout)
-        expect(!ours.isEmpty && ours.allSatisfy { NetworkCounters.isPhysical($0.name) }, "this Mac's physical interfaces are read, and only those, got \(ours.map(\.name))")
+        expect(ours.contains { NetworkCounters.isPhysical($0.name) }, "this Mac's physical interfaces are among those read, got \(ours.map(\.name))")
         expect(netstat.status == 0, "netstat -ib runs, got status \(netstat.status)")
         let theirs = netstatReceivedBytes(netstat.output)
         for interface in ours {
