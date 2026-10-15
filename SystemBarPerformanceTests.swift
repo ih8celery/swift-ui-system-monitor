@@ -9,6 +9,9 @@ struct SystemBarPerformanceTests {
         testProcessCPUScale()
         testProcessTableParsing()
         testProcessTableCarriesTheColumnsItParses()
+        testProcessTableUsesFootprintWhenReadable()
+        testProcessTableWithoutAFootprintReaderUsesResidentSize()
+        testPhysicalFootprintReadsALiveProcess()
         testProcessTableResolvesPathsWithSpaces()
         testProcessTableStatsOnceForASpaceFreePath()
         testProcessTableFallsBackWhenTheExecutableIsGone()
@@ -106,6 +109,41 @@ struct SystemBarPerformanceTests {
         expect(table[412]?.memory == 81_920 * 1024, "rss is in kilobytes and becomes bytes, got \(String(describing: table[412]?.memory))")
         expect(table[412]?.etime == "01:02:03", "etime is the fifth column, got \(String(describing: table[412]?.etime))")
         expect(table[412]?.args == "/Applications/Some App.app/Contents/MacOS/Some App --flag value", "args is the whole remainder, spaces included")
+    }
+
+    private static let footprintSample = """
+      PID  PPID  %CPU    RSS     ELAPSED ARGS
+        1     0   0.0  20000 10-00:00:00 /sbin/launchd
+      412     1  12.5  81920    01:02:03 /usr/bin/some-tool
+    """
+
+    private static func testProcessTableUsesFootprintWhenReadable() {
+        let table = ProcessTable.parse(
+            footprintSample,
+            fileExists: { _ in true },
+            footprint: { pid in pid == 412 ? 50_000_000 : nil }
+        )
+        expect(table[412]?.physical == 50_000_000, "a readable footprint is the row's memory figure, got \(String(describing: table[412]?.physical))")
+        expect(table[412]?.memory == 81_920 * 1024, "the resident size stays in memory beside it")
+        expect(table[1]?.physical == 20_000 * 1024, "an unreadable footprint falls back to resident size, got \(String(describing: table[1]?.physical))")
+    }
+
+    private static func testProcessTableWithoutAFootprintReaderUsesResidentSize() {
+        let plain = ProcessTable.parse(footprintSample)
+        let checked = ProcessTable.parse(footprintSample, fileExists: { _ in true })
+        expect(plain[412]?.physical == 81_920 * 1024, "parse(_:) reads no footprints, so physical is resident size")
+        expect(checked[412]?.physical == 81_920 * 1024, "parse(_:fileExists:) reads no footprints, so physical is resident size")
+
+        let byHand = PidRecord(pid: 9, ppid: 1, cpu: 0, memory: 4096, etime: "00:01", path: "/x", args: "/x")
+        expect(byHand.physical == 4096, "a record built without a footprint uses its resident size")
+        let withFootprint = PidRecord(pid: 9, ppid: 1, cpu: 0, memory: 4096, physical: 2048, etime: "00:01", path: "/x", args: "/x")
+        expect(withFootprint.physical == 2048 && withFootprint.memory == 4096, "a record built with a footprint keeps both")
+    }
+
+    private static func testPhysicalFootprintReadsALiveProcess() {
+        let own = ProcessTable.physicalFootprint(pid: getpid())
+        expect((own ?? 0) > 0, "this test process's own footprint is readable, got \(String(describing: own))")
+        expect(ProcessTable.physicalFootprint(pid: -1) == nil, "a pid that cannot exist has no footprint")
     }
 
     /// A fake existence check: answers from `existing` and writes every path it is asked about

@@ -12,6 +12,10 @@ public struct PidRecord: Sendable {
     public let cpu: Double
     /// Resident memory in bytes (ps reports KB; the parser multiplies by 1024).
     public let memory: UInt64
+    /// Memory in bytes as the shared process list counts it: macOS's physical footprint (what
+    /// Activity Monitor calls Memory) when the table was parsed with a footprint reader that
+    /// could read this process, resident size (`memory`) otherwise.
+    public let physical: UInt64
     /// ps ELAPSED, e.g. "00:10:00" or "3-04:05:06".
     public let etime: String
     /// The executable's path. `ProcessTable.parse` finds it in args by taking the shortest run of
@@ -27,11 +31,20 @@ public struct PidRecord: Sendable {
     public var name: String { URL(fileURLWithPath: path).lastPathComponent }
 
     /// Builds a record by hand, e.g. for a test; `ProcessTable.parse` makes the real ones.
+    /// `physical` is `memory`, as for a process whose footprint was not read.
     public init(pid: Int32, ppid: Int32, cpu: Double, memory: UInt64, etime: String, path: String, args: String) {
+        self.init(pid: pid, ppid: ppid, cpu: cpu, memory: memory, physical: memory, etime: etime, path: path, args: args)
+    }
+
+    /// Builds a record by hand with its footprint, e.g. for a test.
+    public init(
+        pid: Int32, ppid: Int32, cpu: Double, memory: UInt64, physical: UInt64, etime: String, path: String, args: String
+    ) {
         self.pid = pid
         self.ppid = ppid
         self.cpu = cpu
         self.memory = memory
+        self.physical = physical
         self.etime = etime
         self.path = path
         self.args = args
@@ -68,9 +81,37 @@ public enum ProcessTable {
     /// word without a check. The ordinary row, whose path has no spaces, costs one check; a row
     /// whose executable is gone costs up to `maximumPathPrefixes` checks and keeps its first word.
     /// A caller, such as a test, can pass a fake `fileExists` to keep the disk out of it.
+    /// Reads no footprints, so each record's `physical` is its resident size.
     public static func parse(_ output: String, fileExists: (String) -> Bool) -> [Int32: PidRecord] {
-        let records = output.split(whereSeparator: \.isNewline).compactMap { record(from: $0, fileExists: fileExists) }
+        parse(output, fileExists: fileExists, footprint: { _ in nil })
+    }
+
+    /// As `parse(_:fileExists:)`, and each record's `physical` is `footprint(pid)`, or its
+    /// resident size when that is nil. Pass `physicalFootprint(pid:)` for the figure the shared
+    /// process list shows; it costs one system call per row, so a caller that needs only a few
+    /// rows can pass a reader that answers nil for the rest. A test passes a fake.
+    public static func parse(
+        _ output: String, fileExists: (String) -> Bool, footprint: (Int32) -> UInt64?
+    ) -> [Int32: PidRecord] {
+        let records = output.split(whereSeparator: \.isNewline).compactMap {
+            record(from: $0, fileExists: fileExists, footprint: footprint)
+        }
         return Dictionary(records.map { ($0.pid, $0) }, uniquingKeysWith: { _, latest in latest })
+    }
+
+    /// The process's physical footprint in bytes, what Activity Monitor calls Memory, from
+    /// `proc_pid_rusage`; nil when it cannot be read, e.g. the process has exited or belongs to
+    /// another user.
+    public static func physicalFootprint(pid: Int32) -> UInt64? {
+        var info = rusage_info_v4()
+        let result = withUnsafeMutablePointer(to: &info) { pointer -> Int32 in
+            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { reboundPointer in
+                proc_pid_rusage(pid, RUSAGE_INFO_V4, reboundPointer)
+            }
+        }
+
+        guard result == 0 else { return nil }
+        return info.ri_phys_footprint
     }
 
     /// The check `parse(_:)` uses: true only when `path` is a regular file, after following a
@@ -84,18 +125,22 @@ public enum ProcessTable {
     }
 
     /// One row, or nil for the header and anything unreadable.
-    private static func record(from line: Substring, fileExists: (String) -> Bool) -> PidRecord? {
+    private static func record(
+        from line: Substring, fileExists: (String) -> Bool, footprint: (Int32) -> UInt64?
+    ) -> PidRecord? {
         let parts = line.split(maxSplits: 5, whereSeparator: \.isWhitespace)
         guard parts.count == 6,
               let pid = Int32(parts[0]),
               let ppid = Int32(parts[1]) else { return nil }
 
         let args = String(parts[5])
+        let resident = (UInt64(parts[3]) ?? 0) * 1024
         return PidRecord(
             pid: pid,
             ppid: ppid,
             cpu: Double(parts[2]) ?? 0,
-            memory: (UInt64(parts[3]) ?? 0) * 1024,
+            memory: resident,
+            physical: footprint(pid) ?? resident,
             etime: String(parts[4]),
             path: executablePath(in: args, fileExists: fileExists),
             args: args
